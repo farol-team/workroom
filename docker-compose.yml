@@ -1,0 +1,18 @@
+# Postgres for local development. Everything else runs on the host.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: workroom
+      POSTGRES_PASSWORD: workroom
+      POSTGRES_DB: workroom_development
+    ports: ["5433:5432"]
+    volumes: ["workroom-pg:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workroom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  workroom-pg:

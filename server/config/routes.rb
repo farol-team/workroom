@@ -1,14 +1,21 @@
 Rails.application.routes.draw do
-  # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
-
-  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
-  # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
-  # Render dynamic PWA files from app/views/pwa/* (remember to link manifest in application.html.erb)
-  # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
-  # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
+  namespace :api do
+    post "auth", to: "auth#create"
 
-  # Defines the root path route ("/")
-  # root "posts#index"
+    resources :channels, only: %i[index create], param: :slug
+    get "channels/:slug",         to: "channels#show",    as: :channel
+    get "channels/:slug/context", to: "channels#context",  as: :channel_context
+
+    post "channels/:channel_slug/messages", to: "messages#create", as: :channel_messages
+
+    get  "channels/:channel_slug/memory", to: "memory#index",  as: :channel_memory
+    post "channels/:channel_slug/memory", to: "memory#create"
+
+    post  "channels/:channel_slug/runs", to: "runs#create", as: :channel_runs
+    patch "runs/:id",          to: "runs#update",  as: :run
+    post  "runs/:id/steps",    to: "runs#step",    as: :run_steps
+    post  "runs/:id/messages", to: "runs#message", as: :run_messages
+  end
 end

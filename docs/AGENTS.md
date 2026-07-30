@@ -12,6 +12,33 @@ not need rebuilding when a better one appears.
 
 The client speaks **ACP** over stdio to whatever agent the person has configured.
 
+## Why local is not a deployment detail
+
+**Inference is paid for by the person, not the room.** Each agent uses its owner's
+credentials and their own model subscription, so the organization never carries a central
+inference bill and never queues behind a shared quota. Rate limits are per person, which
+means the workspace cannot become the bottleneck no matter how many people are working.
+
+The server sees token counts because runs report them — that is reporting, not billing. It
+never sees a model credential, and there is nothing to leak if it is compromised.
+
+The trade is real and worth stating: the organization gains visibility into spend but not a
+single lever over it. An organization that wants central control of model spend wants a
+different design.
+
+## Which agents
+
+Any agent that speaks ACP. Two are known to work:
+
+| Agent | How | Notes |
+|---|---|---|
+| **opencode** | `opencode acp` | First-party ACP server, MIT, released continuously. The default. |
+| **Claude Code** | `@zed-industries/claude-code-acp` | Community-maintained adapter |
+
+The handshake reports `mcpCapabilities`, which is how the capability rail reaches the agent —
+the client passes the rail's MCP configuration when it opens a session. It also reports
+`loadSession`, which is the hook rehydration builds on.
+
 ## Sessions
 
 **One session per (user, channel) pair.** Everything else follows from this.

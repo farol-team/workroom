@@ -7,6 +7,7 @@ class Channel < ApplicationRecord
   has_many :agent_sessions, dependent: :destroy
   has_many :artifacts, dependent: :destroy
   has_many :promotions, dependent: :destroy
+  has_many :memory_entries, dependent: :destroy
 
   validates :slug, :name, :memory_uri, presence: true
   validates :slug, uniqueness: true

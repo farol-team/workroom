@@ -45,7 +45,7 @@ the room, not by anyone's agent.
 | Identity | OmniAuth | OIDC / SAML |
 | Database | PostgreSQL | |
 | Desktop | Tauri 2 | |
-| Local agent | any ACP-speaking agent | |
+| Local agent | any ACP-speaking agent | opencode by default |
 | Context database | OpenViking | separate service |
 
 ## Repository layout
