@@ -7,8 +7,9 @@ alongside your own agent, running on your own machine. A colleague joins the sam
 with *their* agent and continues where you stopped, because what the room knows is held by
 the room, not by anyone's agent.
 
-> **Status: early design.** The data model and documentation are in place. There is no
-> running application yet.
+> **Status: early.** A working vertical slice — channels, live messages, a local agent
+> in the room, and channel memory pushed into every session. See
+> [Running it](docs/RUNNING.md).
 
 ```
   Alice — local agent ──┐
@@ -33,6 +34,7 @@ the room, not by anyone's agent.
 | [Capability rail](docs/RAIL.md) | Two tools, dynamic discovery, execution modes |
 | [Data model](docs/DATA-MODEL.md) | Tables, and the reasoning behind each |
 | [Roadmap](docs/ROADMAP.md) | What gets built, in what order, and why |
+| [Running it](docs/RUNNING.md) | How to start it, and how to see the idea work |
 
 ## Stack
 
@@ -63,22 +65,15 @@ Release tags are prefixed: `server-v*` and `desktop-v*`.
 
 ## Getting started
 
-Nothing runs end to end yet.
+See [Running it](docs/RUNNING.md). Short version:
 
 ```bash
-# server
-cd server
-bundle install
-bin/rails db:prepare
-bin/rails server
-
-# desktop
-cd desktop
-pnpm install
-pnpm tauri dev
+docker compose up -d postgres
+cd server  && bundle install && bin/rails db:prepare db:seed && bin/rails server
+cd desktop && pnpm install && pnpm tauri dev
 ```
 
-Requires Ruby 3.4.10 and Node 24.
+Requires Ruby 3.4.10 and Node 24. The agent is yours: `npm i -g opencode-ai && opencode auth login`.
 
 ---
 
