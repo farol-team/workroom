@@ -3,61 +3,36 @@
 **A shared workspace where every person brings their own local agent, and the room remembers.**
 
 Channels are domains of work — `meetings`, `marketing`, `support`. You work in a channel
-with your own agent running on your machine. Your colleague joins the same channel with
-*their* agent and picks up where you left off, because the memory lives in the room, not
-in the agent.
+alongside your own agent, running on your own machine. A colleague joins the same channel
+with *their* agent and continues where you stopped, because what the room knows is held by
+the room, not by anyone's agent.
 
-> Status: **early design**. The schema and models are laid out; there is no running app yet.
-
----
-
-## The idea in one picture
+> **Status: early design.** The data model and documentation are in place. There is no
+> running application yet.
 
 ```
-  Alice — Claude Code (local) ──┐
-  Bob   — Claude Code (local) ──┤  ACP
-  Dana  — Cowork      (local) ──┼──────► WorkRoom (Rails)
-                                │        channels · messages · artifacts
-                                │        SSO · permissions · capability rail
-                                │                    │
-                                │                    ▼  MCP
-                                └──────────────► OpenViking
-                                                 viking:// memory + skills
+  Alice — local agent ──┐
+  Bob   — local agent ──┤  ACP
+  Dana  — local agent ──┼──────► WorkRoom
+                        │        channels · messages · artifacts
+                        │        identity · permissions · capability rail
+                        │                    │
+                        │                    ▼  MCP
+                        └──────────────► context database
+                                         memory + skills
 ```
 
-Three protocols hold the seams, and nothing crosses them:
+## Documentation
 
-| Protocol | Carries |
+| | |
 |---|---|
-| **ACP** | control — who does the work (desktop ↔ local agent) |
-| **MCP** | capability — what can be done (agent ↔ rail) |
-| **HTTP/WS** | record — what happened (client ↔ server) |
-
-## Design decisions worth knowing
-
-**Channel = memory scope = permission boundary = retrieval scope.** One concept doing four
-jobs. `channels.memory_uri` maps a channel onto a `viking://` prefix as *data*, so renaming
-a channel never breaks its memory.
-
-**Promotion into shared memory is an explicit act, not a side effect.** Distillation only
-ever creates a `proposed` promotion; a human approves; a job applies it. Without this
-discipline, one agent's wrong conclusion becomes everyone's fact, confirms itself on the
-next pass, and is unarguable within a month.
-
-**A message's author is an `AgentRun`, not a `User`.** From any agent message you can reach
-its steps, its cost, and the message that triggered it. Attributing to the user loses that.
-
-**`run_steps` exist for perceived quality.** Without them the user watches silence for
-minutes. With them the UI shows what is happening right now.
-
-**Threads are one level deep.** Unbounded nesting is a UX trap.
-
-**No skills table.** Access derives from the path — channel members see
-`viking://channels/<slug>/skills/`, everyone sees `viking://org/skills/`. A grants table
-arrives only when skills must be assigned outside of channels.
-
-**Not event-sourced.** A plain relational schema plus one append-only `activities` table
-gives auditability without making every read a projection.
+| [Concept](docs/CONCEPT.md) | The problem, the idea, and what this deliberately is not |
+| [Architecture](docs/ARCHITECTURE.md) | Components, seams, and how work flows through them |
+| [Memory](docs/MEMORY.md) | Channel scopes, tiers, promotion, and the feedback loop |
+| [Agents](docs/AGENTS.md) | Local agents, sessions, rehydration, artifacts |
+| [Capability rail](docs/RAIL.md) | Two tools, dynamic discovery, execution modes |
+| [Data model](docs/DATA-MODEL.md) | Tables, and the reasoning behind each |
+| [Roadmap](docs/ROADMAP.md) | What gets built, in what order, and why |
 
 ## Stack
 
@@ -67,21 +42,11 @@ gives auditability without making every read a projection.
 | Realtime | Action Cable | Solid Cable — no Redis |
 | Jobs | Active Job | Solid Queue |
 | Artifacts | Active Storage | S3-compatible |
-| Auth | OmniAuth | OIDC / SAML |
+| Identity | OmniAuth | OIDC / SAML |
 | Database | PostgreSQL | |
-| Desktop | Tauri 2 | not Electron |
-| Local agent | Claude Code | via `@zed-industries/claude-code-acp` |
-| Memory | OpenViking | separate service, AGPL-3.0 |
-
-## Schema
-
-```
-users          channels        memberships
-messages       agent_sessions  agent_runs    run_steps
-artifacts      promotions      activities
-```
-
-See `db/migrate/` — every table carries a comment explaining why it exists.
+| Desktop | Tauri 2 | |
+| Local agent | any ACP-speaking agent | |
+| Context database | OpenViking | separate service |
 
 ## Getting started
 
@@ -93,14 +58,8 @@ bin/rails db:prepare
 bin/rails server
 ```
 
-Requires Ruby 3.4.10 (3.2 reached end of life on 2026-03-31).
+Requires Ruby 3.4.10.
 
-## Roadmap
-
-1. Channels, messages, threads, SSO, Action Cable — a working chat, no agents
-2. ACP: Tauri spawns the adapter, one session per (user, channel)
-3. OpenViking + the capability rail as a Rails endpoint
-4. Artifacts into the channel
-5. Rehydration — a colleague continues the work
+---
 
 Built by [Farol Labs](https://github.com/farol-team).

@@ -1,81 +1,104 @@
 # Architecture
 
-## What is shared when a colleague joins
+## Components
 
-Four things get conflated; only three are shareable.
+```
+┌──────────────────────────────────────────────────────────┐
+│  Desktop client (Tauri)                                  │
+│  channels · messages · artifacts · session control       │
+└──────┬────────────────────────────────┬──────────────────┘
+       │ HTTPS + WebSocket              │ ACP over stdio
+       ▼                                ▼
+┌──────────────────────────────┐   ┌─────────────────────┐
+│  WorkRoom server (Rails)     │   │  Local agent        │
+│  identity · channels         │   │  runs on the user's │
+│  messages · artifacts        │   │  own machine        │
+│  permissions                 │   └──────────┬──────────┘
+│  capability rail ◄───────────┼──── MCP ─────┘
+│  distillation jobs           │
+└──────────────┬───────────────┘
+               │ HTTP
+               ▼
+┌──────────────────────────────┐
+│  Context database            │
+│  memory · skills · artifacts │
+│  addressed by URI            │
+└──────────────────────────────┘
+```
 
-| | Shared | Lives in |
+## Seams
+
+Three protocols hold the system together. Nothing crosses a seam except through them.
+
+| Protocol | Between | Carries |
 |---|---|---|
-| Channel history — what was said | yes | Postgres |
-| Long-term memory — conclusions, decisions | yes | OpenViking |
-| Artifacts — files produced | yes, by design | Active Storage → S3 |
-| **Agent session context window** | **no** | local, per person |
+| **ACP** | desktop ↔ local agent | control — who does the work |
+| **MCP** | agent ↔ capability rail | capability — what can be done |
+| **HTTP / WebSocket** | client ↔ server | record — what happened |
 
-So "a colleague continues the work" means their agent enters the channel and **rehydrates**
-from the shared trail. It is not a handoff of a live session. Design for rehydration: on
-entering a channel the agent receives a compact summary, not raw history.
+This is the one architectural rule worth defending strictly. As long as the boundaries speak
+only these three, any layer can be replaced without touching the others. The first direct
+call that bypasses a seam — the agent reaching the context database over its own HTTP client,
+say — is the moment the system stops being replaceable.
 
-## How channel context reaches the agent
+## Flow of a turn
 
-Two mechanisms at two tiers — you need both.
+1. A person posts a message in a channel.
+2. The server records it and broadcasts over Action Cable.
+3. The desktop client resolves the session for this (user, channel) pair, starting one if
+   needed, and injects the channel's context summary.
+4. The message goes to the local agent over ACP.
+5. The agent works. Every tool call and result arrives back as a run step, which the client
+   forwards to the server, which broadcasts it. The channel shows what is happening now.
+6. The agent may query the capability rail over MCP for skills or deeper context.
+7. The agent's answer becomes a message in the channel, attributed to the run.
+8. Files the agent produced are uploaded to the channel as artifacts.
+9. A background job proposes what is worth remembering. A person approves. Only then does
+   anything reach shared memory.
 
-**Push at session start.** The app pulls a compact summary (OpenViking `L1`) and injects it
-into the ACP session's system context. Cheap, always relevant, gives the agent "I know what
-this channel is about" from the first second.
+## Where state lives
 
-**Pull on demand.** The rail is mounted as an MCP server; the agent fetches `L2` detail when
-a task actually needs it.
+| State | Home | Shared |
+|---|---|---|
+| Identity, membership, permissions | Rails | yes |
+| Channel history | Rails / PostgreSQL | yes |
+| Run steps, cost, timings | Rails / PostgreSQL | yes |
+| Artifacts | Active Storage → S3 | yes |
+| Distilled knowledge, skills | context database | yes |
+| Agent session context window | the person's machine | **no** |
+| Credentials for the agent's own model | the person's machine | **no** |
 
-Push only means paying for context nobody used. Pull only means the agent enters blind and
-burns turns on reconnaissance.
+The last two rows are the reason execution stays local, and the reason a colleague joining a
+channel is rehydrating rather than resuming.
 
-## The capability rail
+## Why not event sourcing
 
-One MCP endpoint inside the Rails app exposing exactly two tools:
+Every message, tool call, and approval could be modelled as an immutable event in one log.
+It buys uniform querying and an audit trail by construction.
 
-- `search_capabilities(query)` → retrieval scoped to `viking://`, filtered by the caller's
-  channel membership, returning `L0`/`L1` summaries plus URIs
-- `execute_capability(uri, args)` → instruction skills return their `L2` body for the agent
-  to follow locally; bound capabilities proxy to an internal MCP server so credentials stay
-  server-side
+It is not worth it here. The audit requirement is satisfied by one append-only `activities`
+table alongside an otherwise ordinary relational schema. Everyone on the team can read that
+schema on the first day, and no read becomes a projection. The cost of event sourcing is
+paid on every query and every new developer; the benefit is one table's worth.
 
-It lives in Rails rather than as a separate service because it needs the permission model
-that Rails already owns — user, membership, role. A separate service would duplicate it.
+## Why the rail lives inside Rails
 
-**Two tools instead of fifty is a context-economy decision.** Exposing fifty skills as fifty
-MCP tools charges every session for fifty schemas before anything happens. The rail collapses
-that to two and charges only for what a query actually surfaces. The rail compresses the tool
-surface; `L0/L1/L2` compresses the content. Same idea at two levels.
+The capability rail needs to know who is calling and what they may see — user, channel
+membership, role. Rails already owns that. A separate service would either duplicate the
+permission model or call back into Rails on every request. Keeping the rail as an endpoint
+gives it the session and the permission model for free, and reduces the system by one
+deployable.
 
-## The feedback loop
+See [RAIL.md](RAIL.md).
 
-```
-   OpenViking ──read──► agent ──acts──► channel
-        ▲                                  │
-        └────────── distillation ──────────┘
-```
+## Deliberate omissions
 
-An agent reads knowledge, acts, the action becomes a record, the record becomes knowledge,
-the agent reads it again. Undisciplined promotion makes the system amplify its own errors.
+**No policy engine.** Access is channel membership, and capabilities are restricted by simply
+not granting the MCP server that provides them. A finer model can be added when a real case
+demands it; adding one preemptively means maintaining a second permission system that nothing
+uses.
 
-Four requirements, all load-bearing:
+**No federation.** One organization, one deployment.
 
-- **Provenance is mandatory.** Every memory entry references the record it came from and the
-  person whose agent produced it.
-- **Trust is asymmetric.** A human's assertion and an agent's inference are not equal, even
-  inside one channel.
-- **Promotion is an explicit step.** The temptation to auto-distil everything is strong.
-  Resist it.
-- **Forgetting is designed alongside remembering.** Stale knowledge is more dangerous than
-  missing knowledge, because it looks identical.
-
-## Open questions
-
-- **Rust in Tauri.** The native side spawns the Node ACP adapter and pipes stdio — a few
-  hundred lines. Tauri's sidecar mechanism can bundle the adapter.
-- **ACP adapter freshness.** `@zed-industries/claude-code-acp` 0.16.2 has not shipped since
-  2026-02-17. It is load-bearing here; worth tracking, and worth knowing the alternatives.
-- **OpenViking is AGPL-3.0.** Run as a shared internal service, §13 obliges you to offer
-  source — including your modifications — to the employees using it.
-- **Policy.** Channel membership is coarse. Restricting capabilities beyond "member of the
-  channel" is easiest to do by simply not granting the MCP server, not by a policy engine.
+**No agent hosting.** The server never runs an agent. If it did, it would need credentials,
+sandboxing, and queueing — three problems that do not exist when execution stays local.
