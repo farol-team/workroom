@@ -48,17 +48,37 @@ the room, not by anyone's agent.
 | Local agent | any ACP-speaking agent | |
 | Context database | OpenViking | separate service |
 
+## Repository layout
+
+```
+server/     Rails — API, WebSocket, capability rail, admin
+desktop/    Tauri — desktop client, manages the local agent over ACP
+docs/       documentation
+```
+
+One repository, because for now nearly every change crosses the seam between the two.
+Splitting becomes worthwhile when the client grows its own team, not before.
+
+Release tags are prefixed: `server-v*` and `desktop-v*`.
+
 ## Getting started
 
-Nothing runs yet. When it does:
+Nothing runs end to end yet.
 
 ```bash
+# server
+cd server
 bundle install
 bin/rails db:prepare
 bin/rails server
+
+# desktop
+cd desktop
+pnpm install
+pnpm tauri dev
 ```
 
-Requires Ruby 3.4.10.
+Requires Ruby 3.4.10 and Node 24.
 
 ---
 
