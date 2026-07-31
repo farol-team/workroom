@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, formatHistory, parseAddress, presenceState, transcriptName, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, formatHistory, occupancyLabel, parseAddress, presenceState, transcriptName, type PlanEntry, type RunSignal } from "./rules";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -151,7 +151,7 @@ const escape = (s: string) =>
 
 /// A colleague at work must be distinguishable from a colleague who is absent —
 /// otherwise `private` turns translucent into invisible.
-function showPresence(run: RunSignal) {
+function showPresence(run: RunSignal & { context_used?: number; context_size?: number }) {
   runSignals.push(run);
   const working = presenceState(runSignals);
   const box = $("messages");
@@ -214,6 +214,7 @@ async function send(text: string) {
   const stop = await agent.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
+    else if (u.kind === "usage") api.reportUsage(run.id, u.used, u.size, u.cost).catch(() => {});
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 

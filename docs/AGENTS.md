@@ -67,6 +67,24 @@ share of how good the system feels is decided here.
 Runs also carry cost and timing, which is where per-channel and per-person spend reporting
 comes from.
 
+## What a run records
+
+A run carries what the agent reported about itself, not what the client guessed:
+
+| | |
+|---|---|
+| `context_used` / `context_size` | how full the agent says its context is |
+| `cost` | what the session has cost so far |
+
+Occupancy is the useful one. It is what tells somebody a session is filling and
+the next question would be better asked in a fresh one — and it explains why
+rehydration matters, since a fresh session starts from the room rather than from
+nothing.
+
+The input/output split is deliberately absent. Nothing filled it reliably, and
+where it is wanted it lives in the attached transcript, broken down further than
+the protocol offers.
+
 ## Rehydration
 
 When a colleague opens a channel, their agent does not resume your session — it cannot. The

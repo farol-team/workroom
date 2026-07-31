@@ -135,6 +135,16 @@ describe("acp translation", () => {
     expect(translateAcp(update({ sessionUpdate: "plan", entries: [] }))).toBeNull();
   });
 
+  test("usage becomes usage", () => {
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000, cost: 0.42 })))
+      .toEqual({ kind: "usage", used: 84000, size: 200000, cost: 0.42 });
+  });
+
+  test("cost is optional", () => {
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100 })))
+      .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
+  });
+
   test("an unknown update surfaces rather than vanishing", () => {
     expect(translateAcp(update({ sessionUpdate: "plan_changed" })))
       .toEqual({ kind: "other", label: "plan_changed" });
