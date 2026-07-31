@@ -52,14 +52,26 @@ Control crosses as **ACP**, capability as **MCP**, record as **HTTP/WebSocket**.
 No component reaches past a boundary by another route — no direct HTTP client
 from the agent to the context store, no SQL from the desktop.
 
-### Article P2 — The server never holds a model credential
-*(Rationale: inference is paid for by the person; a central credential would
-recreate the shared bill and the shared rate limit the design exists to avoid.)*
+### Article P2 — Agent inference is paid for by the person
+*(Rationale: a central credential for agent work would recreate the shared bill
+and the shared rate limit the design exists to avoid. Amended 2026-07-31: the
+context store computes tiers and embeddings and cannot do so per user, because
+what one person's agent writes another person's agent later reads.)*
 
-Model API keys, provider tokens, and agent auth live on the user's machine. The
-server records token **counts** as reporting. Any change that would place a
-model credential in server config, the database, or a server-side proxy
-violates this article.
+Two categories, and only the first is forbidden to the server.
+
+**Agent inference** — the model that answers a turn. Its API keys, provider
+tokens and agent auth live on the user's machine and never reach the server, its
+configuration, its database, or a server-side proxy. The server records token
+**counts** as reporting, never as billing.
+
+**Infrastructure inference** — embedding and tiering performed by the context
+store on the organization's shared knowledge. This is workspace-level, not
+per-user, and the credential is held by whoever operates the workspace: the
+customer's own key when self-hosted, the provider's when the workspace is
+supplied on-premise. Permitted server-side, and permitted **only** for embedding
+and tiering — an infrastructure credential used to answer a turn is a violation
+of the first paragraph, not an exception to it.
 
 ### Article P3 — Promotion into shared memory is an explicit act
 *(Rationale: docs/MEMORY.md — undisciplined promotion makes the system amplify
