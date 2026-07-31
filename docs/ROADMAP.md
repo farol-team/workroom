@@ -44,8 +44,8 @@ completion, linkage to the run that produced them.
 
 ## 5 — Continuity
 
-Distillation jobs propose promotions. Review and approval. Rehydration tuned so that a second
-person's agent starts where the first stopped.
+Every turn ends by asking the agent what the room should keep. Rehydration tuned so that a
+second person's agent starts where the first stopped.
 
 This is the reason the whole thing exists, and it comes last — because you cannot distil a
 record you have not yet accumulated, and you cannot tune rehydration without real channels to

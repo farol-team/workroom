@@ -96,6 +96,32 @@ export function worthOffering(files: Array<{ path: string; bytes: number }>): bo
   return files.some((f) => f.bytes > 0);
 }
 
+/// The distiller is the agent, not a job on the server. It already runs on this
+/// person's machine under their credentials, and it already reaches the room's
+/// memory through the rail — so it needs no mechanism, only to be asked.
+///
+/// Asked, never told. An entry the agent did not choose to keep is an entry
+/// nobody will come back and correct.
+export function closingInstruction(): string {
+  return [
+    "---",
+    "",
+    "Before you finish: if this turn produced something the room should still",
+    "know next week — a decision, a constraint, something that turned out to be",
+    "true — record it with workroom://memory/remember, in your own words, as one",
+    "entry. If it did not, keep nothing. Do not record the conversation itself;",
+    "the room already has it.",
+  ].join("\n");
+}
+
+/// Appended to the turn rather than sent after it: a second prompt is a second
+/// model call the person pays for, on every turn, whether or not there was
+/// anything worth keeping.
+export function withClosing(text: string): string {
+  if (!text.trim()) return text;
+  return `${text}\n\n${closingInstruction()}`;
+}
+
 /// What the room just said, as the agent would read it. Channel history is
 /// context even when it came from a colleague — an agent reads the room.
 export function formatHistory(rows: Array<{ who: string; what: string }>, limit = 20): string | null {

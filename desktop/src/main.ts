@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, contentTypeFor, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, contentTypeFor, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
 
@@ -314,7 +314,7 @@ async function send(text: string) {
   });
 
   try {
-    await agents.prompt(name, sessionId, body, context, history);
+    await agents.prompt(name, sessionId, withClosing(body), context, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
     offerTranscript(run.id, name, sessionId);
