@@ -37,6 +37,29 @@ module Memory
       read(uri)
     end
 
+    # `ls` does not recurse, so a channel's skills sit in plain sight of the
+    # store and out of the way of what the room learned.
+    def skills(channel, limit: 50)
+      list(channel.skills_uri).first(limit).filter_map { |uri| read(uri) }
+    end
+
+    def write_skill(channel, title:, body:, key: nil, author: nil)
+      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
+      uri = "#{channel.skills_uri}#{key}.md"
+      uri = "#{channel.skills_uri}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
+
+      entry = Entry.new(
+        uri: uri, title: title, detail: body, trust: "human",
+        overview: body.to_s.truncate(400), abstract: title,
+        author_name: author.respond_to?(:name) ? author.name : author,
+        created_at: Time.current
+      )
+
+      mkdir(channel.skills_uri)
+      post("/api/v1/content/write", uri: uri, content: serialize(entry), mode: "create", wait: false)
+      entry
+    end
+
     def context_for(channel, limit: 20)
       entries = all(channel, limit: limit)
       return nil if entries.empty?

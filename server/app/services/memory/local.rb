@@ -6,7 +6,7 @@ module Memory
     # What gets pushed into an agent session when someone enters a channel.
     # Overviews only — the detail tier is fetched through the rail if needed.
     def context_for(channel, limit: 20)
-      entries = channel.memory_entries.current.by_trust.limit(limit)
+      entries = all(channel, limit: limit)
       return nil if entries.empty?
 
       lines = entries.map do |e|
@@ -35,7 +35,24 @@ module Memory
     end
 
     def all(channel, limit: 200)
-      channel.memory_entries.current.by_trust.limit(limit)
+      knowledge(channel).by_trust.limit(limit)
+    end
+
+    def skills(channel, limit: 50)
+      channel.memory_entries.current
+             .where("uri LIKE ?", "#{channel.skills_uri}%")
+             .order(:created_at).limit(limit)
+    end
+
+    def write_skill(channel, title:, body:, key: nil, author: nil)
+      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
+      uri = "#{channel.skills_uri}#{key}"
+      MemoryEntry.current.find_by(uri: uri)&.supersede!
+
+      MemoryEntry.create!(
+        channel:, author:, trust: "human", uri:, title:, detail: body,
+        overview: body.to_s.truncate(400), abstract: title
+      )
     end
 
     def search(channel, query, limit: 10)
@@ -50,6 +67,12 @@ module Memory
       scope.where(matches, *likes)
            .order(Arel.sql(MemoryEntry.sanitize_sql_array([ "#{rank} DESC", *likes ])))
            .by_trust.limit(limit)
+    end
+
+    # Everything under the channel's skills path is a procedure, not something
+    # the room learned. The uri is the distinction, exactly as it is for access.
+    def knowledge(channel)
+      channel.memory_entries.current.where.not("uri LIKE ?", "#{channel.skills_uri}%")
     end
 
     def supersede(uri, reason: nil)

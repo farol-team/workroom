@@ -18,6 +18,15 @@ module Memory
     # "everything", and listing must not rest on one backend's accident.
     def all(_channel, limit: 200)         = raise NotImplementedError
 
+    # How work is done here, as opposed to what the room learned. A fact goes
+    # stale; a procedure does not, and keeping them in one place is how a
+    # hand-written rules file rots in the half that changes.
+    #
+    # Skills are not pushed into a session. They are found when they are wanted,
+    # through the same rail as everything else.
+    def skills(_channel, limit: 50)       = raise NotImplementedError
+    def write_skill(_channel, title:, body:, key: nil, author: nil) = raise NotImplementedError
+
     # One entry, by the uri that identifies it. Search hands back uris and the
     # rail executes against them, so a store that cannot be asked for one is a
     # store the rail can find things in and never read.

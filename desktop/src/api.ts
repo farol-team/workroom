@@ -57,6 +57,18 @@ export class Api {
     return this.call<{ context: string | null; memory_uri: string }>(`/channels/${slug}/context`);
   }
 
+  /// How work is done in this channel — procedure, not what the room learned.
+  skills(slug: string) {
+    return this.call<Array<{ uri: string; title: string; overview: string }>>(
+      `/channels/${slug}/skills`);
+  }
+
+  writeSkill(slug: string, title: string, body: string) {
+    return this.call(`/channels/${slug}/skills`, {
+      method: "POST", body: JSON.stringify({ title, body }),
+    });
+  }
+
   memory(slug: string) {
     return this.call<Array<{ uri: string; title: string; overview: string; trust: string }>>(
       `/channels/${slug}/memory`);

@@ -42,6 +42,21 @@ Until then it would be a second permission model that nothing uses.
 
 ## Execution modes
 
+A search returns both, and says which is which. An agent that cannot tell a procedure from
+a fact will cite a convention as evidence, or follow a stale fact as if it were the way things
+are done here.
+
+| `kind` | What it is | How it ages |
+|---|---|---|
+| `knowledge` | what the room learned | goes stale, and is corrected by superseding |
+| `skill` | how work is done here | stays true until the way changes |
+| `action` | what the agent may do | fixed |
+
+Skills are **found, not injected**. They do not enter a session's context at start: a
+convention that is always in the prompt is paid for on every turn whether it is relevant or
+not, which is what a hand-written rules file costs and why those files grow until nobody
+reads them.
+
 **Instruction capabilities** are text: how to do something, in what order, what to watch for.
 They do not need to run anywhere. The rail returns the detail tier and the agent follows it
 locally. No files are distributed, nothing is installed, and a change takes effect on the

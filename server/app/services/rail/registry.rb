@@ -27,11 +27,13 @@ module Rail
     # Discovery reads abstracts. The whole entry is loaded only for what was
     # chosen — the rail compresses the tool surface, tiers compress the content.
     def search(query, limit: 10)
-      knowledge = store.search(@channel, query.to_s, limit: limit).map do |e|
+      found = store.search(@channel, query.to_s, limit: limit).map do |e|
+        # A procedure and a fact answer different questions, and an agent that
+        # cannot tell them apart will cite one as the other.
         { uri: e.uri, title: e.title, summary: e.abstract.presence || e.overview,
-          kind: "knowledge", trust: e.trust }
+          kind: skill?(e.uri) ? "skill" : "knowledge", trust: e.trust }
       end
-      knowledge + matching_actions(query)
+      found + matching_actions(query)
     end
 
     def execute(uri, args = {})
@@ -89,6 +91,8 @@ module Rail
     # The turn this call belongs to. The rail is reached by an agent holding its
     # owner's token, not by the client, so the run is inferred from what that
     # person currently has open in this channel — which is exactly one thing.
+    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
+
     def working_run
       AgentRun.joins(:agent_session)
               .where(agent_sessions: { user_id: @user.id, channel_id: @channel.id })
