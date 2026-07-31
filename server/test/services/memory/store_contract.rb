@@ -111,6 +111,43 @@ module Memory
       assert_nil @store.supersede(entry.uri), "already gone from current"
     end
 
+    # --- enumeration ----------------------------------------------------------
+
+    def test_all_returns_everything_the_room_knows
+      # Not search with an empty query. A backend with real retrieval has no
+      # reason to treat "" as "everything", and listing must not depend on it.
+      @store.write(@channel, title: "One", detail: "first", key: "one")
+      @store.write(@channel, title: "Two", detail: "second", key: "two")
+
+      assert_equal %w[One Two], @store.all(@channel).map(&:title).sort
+    end
+
+    def test_all_never_crosses_into_another_channel
+      @store.write(@other, title: "Elsewhere", detail: "not ours")
+      @store.write(@channel, title: "Here", detail: "ours")
+
+      assert_equal [ "Here" ], @store.all(@channel).map(&:title)
+    end
+
+    def test_all_omits_what_has_been_superseded
+      @store.write(@channel, title: "Cadence", detail: "weekly", key: "cadence")
+      @store.write(@channel, title: "Cadence", detail: "monthly", key: "cadence")
+
+      assert_equal [ "monthly" ], @store.all(@channel).map(&:detail),
+                   "a superseded entry is history, not what the room knows"
+    end
+
+    def test_all_puts_what_a_person_stated_before_what_an_agent_inferred
+      @store.write(@channel, title: "Inferred", detail: "d", trust: "agent", key: "i")
+      @store.write(@channel, title: "Stated", detail: "d", trust: "human", key: "s")
+
+      assert_equal %w[Stated Inferred], @store.all(@channel).map(&:title)
+    end
+
+    def test_all_is_empty_for_a_room_that_knows_nothing
+      assert_empty @store.all(@other)
+    end
+
     # --- search --------------------------------------------------------------
 
     def test_search_finds_an_entry_by_its_content
