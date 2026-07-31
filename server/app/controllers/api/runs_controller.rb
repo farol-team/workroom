@@ -22,7 +22,7 @@ module Api
 
     def update
       run = find_run
-      run.update!(params.permit(:status, :input_tokens, :output_tokens).to_h.compact)
+      run.update!(params.permit(:status, :context_used, :context_size, :cost).to_h.compact)
       run.update!(ended_at: Time.current) if %w[succeeded failed interrupted].include?(run.status)
       run.agent_session.update!(status: "idle") if run.ended_at
       Broadcast.run(run)

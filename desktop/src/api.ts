@@ -109,6 +109,14 @@ export class Api {
     return this.call(`/runs/${runId}`, { method: "PATCH", body: JSON.stringify({ status }) });
   }
 
+  /// Usage as the agent reports it. It is the only thing that knows.
+  reportUsage(runId: number, used: number, size: number, cost?: number) {
+    return this.call(`/runs/${runId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ context_used: used, context_size: size, cost }),
+    });
+  }
+
   /// Two streams. The room carries what the room shares; the user stream
   /// carries what only its owner needs — their own steps, whatever level they chose.
   live(slug: string, onEvent: (e: any) => void) {

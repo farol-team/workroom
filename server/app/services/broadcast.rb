@@ -18,8 +18,10 @@ module Broadcast
   def run(r)
     payload = { type: "run", run: { id: r.id, status: r.status,
                                     user: r.agent_session.user.name,
-                                    input_tokens: r.input_tokens,
-                                    output_tokens: r.output_tokens } }
+                                    context_used: r.context_used,
+                                    context_size: r.context_size,
+                                    context_fraction: r.context_fraction,
+                                    cost: r.cost } }
     to_room(r.agent_session.channel, payload)
     to_owner(r.agent_session.user, payload)
   end

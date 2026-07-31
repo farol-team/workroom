@@ -56,6 +56,7 @@ export type Update =
   | { kind: "text"; text: string }
   | { kind: "tool"; label: string }
   | { kind: "plan"; entries: PlanEntry[] }
+  | { kind: "usage"; used: number; size: number; cost?: number }
   | { kind: "other"; label: string };
 
 export function translateAcp(msg: unknown): Update | null {
@@ -67,6 +68,10 @@ export function translateAcp(msg: unknown): Update | null {
   if (t === "agent_message_chunk") {
     const text = (u.content as { text?: string } | undefined)?.text ?? "";
     return text ? { kind: "text", text } : null;
+  }
+  if (t === "usage_update") {
+    return { kind: "usage", used: Number(u.used), size: Number(u.size),
+             cost: u.cost === undefined ? undefined : Number(u.cost) };
   }
   if (t === "plan") {
     const entries = (u.entries as PlanEntry[] | undefined) ?? [];
@@ -83,4 +88,15 @@ export function translateAcp(msg: unknown): Update | null {
 export function transcriptName(runId: number, at: Date): string {
   const stamp = at.toISOString().slice(0, 16).replace("T", " ").replace(":", "");
   return `run-${runId} transcript ${stamp}.json`;
+}
+
+/// Occupancy is worth showing once it stops being noise. A run at nine percent
+/// tells nobody anything; a run at eighty is why this exists.
+export const OCCUPANCY_THRESHOLD = 0.6;
+
+export function occupancyLabel(used: number, size: number): string | null {
+  if (!size) return null;
+  const fraction = used / size;
+  if (fraction < OCCUPANCY_THRESHOLD) return null;
+  return `context ${Math.round(fraction * 100)}% full`;
 }

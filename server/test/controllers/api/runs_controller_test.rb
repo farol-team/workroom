@@ -27,7 +27,7 @@ class Api::RunsControllerTest < ActionDispatch::IntegrationTest
     assert_response :created
 
     patch api_run_path(run_id),
-          params: { status: "succeeded", input_tokens: 100, output_tokens: 20 }.to_json,
+          params: { status: "succeeded", context_used: 100, context_size: 200 }.to_json,
           headers: auth(@alice).merge(@json)
     assert_response :success
 
@@ -35,7 +35,7 @@ class Api::RunsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, run.run_steps.count
     assert_equal "succeeded", run.status
     assert run.ended_at, "a finished run must record when it ended"
-    assert_equal 120, run.total_tokens
+    assert_in_delta 0.5, run.context_fraction, 0.001
     assert_equal "idle", run.agent_session.reload.status
 
     answer = @channel.messages.last

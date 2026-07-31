@@ -15,7 +15,13 @@ class AgentRun < ApplicationRecord
   # A finished run is a candidate for the room's memory — a candidate only.
   after_update_commit :distil, if: -> { saved_change_to_status? && status == "succeeded" }
 
-  def total_tokens = (input_tokens.to_i + output_tokens.to_i)
+  # How full the agent says its context is. Derived rather than stored: a ratio
+  # kept beside its two operands is a third thing to keep consistent.
+  def context_fraction
+    return nil if context_used.nil? || context_size.to_i.zero?
+
+    context_used.to_f / context_size
+  end
 
   def distil = DistillRunJob.perform_later(id)
   def duration     = (ended_at && started_at) ? ended_at - started_at : nil
