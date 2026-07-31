@@ -78,6 +78,36 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// Where a channel's work happens.
+///
+/// The default is a directory derived for it — safe, and a channel cannot
+/// scribble in another channel's work. But `cwd` in ACP is the project root:
+/// an agent reads its conventions from there, and the code somebody is asking
+/// about lives there. So a channel may be bound to a folder they already have.
+///
+/// A binding is per person and stays on their machine. One keeps the repository
+/// in `~/src/billing` and a colleague in `~/work/billing`; a filesystem layout
+/// is not something the workspace should learn.
+export type Bindings = Record<string, string>;
+
+export function boundFolder(slug: string, bindings: Bindings): string | null {
+  return bindings[slug]?.trim() || null;
+}
+
+/// What is worth putting in front of somebody at the end of a turn.
+///
+/// In a folder that is already theirs, one `npm install` turns the offer into
+/// thousands of files. An offer nobody can read is worse than no offer, so it
+/// is capped and says what it left out.
+export function offerable<T extends { path: string; bytes: number }>(
+  files: T[], limit: number,
+): { files: T[]; omitted: number } {
+  const real = files.filter((f) => f.bytes > 0);
+  return real.length <= limit
+    ? { files: real, omitted: 0 }
+    : { files: real.slice(0, limit), omitted: real.length - limit };
+}
+
 /// What a produced file is, so it downloads as itself. Everything unrecognised
 /// is bytes rather than a guess — a wrong type is worse than none.
 const TYPES: Record<string, string> = {

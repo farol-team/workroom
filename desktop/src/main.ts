@@ -1,7 +1,8 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, identity, inTimeline, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
+import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
 const agents = new Agents(settings.load());
@@ -20,7 +21,9 @@ let me = "";   // who is signed in, so a workspace belongs to a person
 const seenCount = new Map<string, number>();
 let held: Message[] = [];      // every message of the open channel
 let openThread: number | null = null;
-const ON_SCREEN = 200;   // a room with ten thousand messages is not ten thousand elements
+const ON_SCREEN = 200;
+const AT_MOST_OFFERED = 12;   // an offer nobody can read is worse than no offer
+let bindings = settings.loadBindings();   // a room with ten thousand messages is not ten thousand elements
 
 function renderChannels() {
   $("channels").innerHTML = "";
@@ -255,11 +258,12 @@ function showPlan(runId: number, entries: PlanEntry[]) {
 /// Offered, not uploaded: work product belongs to the channel (Article D3), but
 /// what leaves this machine stays the person's decision.
 async function offerProduced(runId: number, workspace: string) {
-  const files = await agents.produced(workspace);
-  if (!worthOffering(files)) return;
+  const produced = await agents.produced(workspace);
+  if (!worthOffering(produced)) return;
+  const { files, omitted } = offerable(produced, AT_MOST_OFFERED);
 
   const box = $("messages");
-  for (const file of files.filter((f) => f.bytes > 0)) {
+  for (const file of files) {
     const el = document.createElement("div");
     el.className = "offer";
     el.append(document.createTextNode(`${file.path} · ${Math.ceil(file.bytes / 1024)} kB `));
@@ -283,6 +287,12 @@ async function offerProduced(runId: number, workspace: string) {
 
     el.append(button);
     box.append(el);
+  }
+  if (omitted) {
+    const note = document.createElement("div");
+    note.className = "offer muted";
+    note.textContent = `${omitted} more files changed and are not offered.`;
+    box.append(note);
   }
   box.scrollTop = box.scrollHeight;
 }
@@ -393,6 +403,7 @@ async function open(slug: string) {
   renderChannels();
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
+  renderBinding();
   $("messages").innerHTML = "";
   held = [ ...full.messages ];
   closeThread();
@@ -448,7 +459,8 @@ async function send(text: string) {
   // may give the instruction.
   const { context } = await api.context(current.slug);
   const history = recentHistory();
-  const workspace = await agents.workspace(me, name, current.slug);
+  const workspace = boundFolder(current.slug, bindings)
+    ?? await agents.workspace(me, name, current.slug);
   const sessionId = await agents.sessionFor(name, current.slug, workspace, api.rail(current.slug));
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
@@ -556,7 +568,8 @@ $("agent-toggle").addEventListener("click", async () => {
       await agents.start(name);
       renderAgentPicker();
       if (current) {
-        const dir = await agents.workspace(me, name, current.slug);
+        const dir = boundFolder(current.slug, bindings)
+          ?? await agents.workspace(me, name, current.slug);
         await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
         renderOptions();
       }
@@ -582,6 +595,31 @@ $("memory-toggle").addEventListener("click", () => {
   const panel = $("memory");
   panel.hidden = !panel.hidden;
   if (!panel.hidden) { renderMemory(); renderSkills(); renderMembers(); }
+});
+
+function renderBinding() {
+  const folder = current ? boundFolder(current.slug, bindings) : null;
+  const el = $("folder");
+  el.textContent = folder ? folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/") : "Use a folder…";
+  el.title = folder
+    ? `${folder} — this channel's agent works here. Click to change, shift-click to unbind.`
+    : "Bind this channel to a folder you already have";
+  el.classList.toggle("bound", Boolean(folder));
+}
+
+/// Binding is deliberate. An agent in somebody's real repository can change
+/// anything in it — which is normal for a coding agent, and normal precisely
+/// because the person opened it there.
+$("folder").addEventListener("click", async (e) => {
+  if (!current) return;
+  if ((e as MouseEvent).shiftKey) {
+    bindings = settings.bind(current.slug, null);
+    renderBinding();
+    return;
+  }
+  const chosen = await chooseFolder({ directory: true, title: `Where # ${current.slug} works` });
+  if (typeof chosen === "string") bindings = settings.bind(current.slug, chosen);
+  renderBinding();
 });
 
 $("thread-close").addEventListener("click", closeThread);

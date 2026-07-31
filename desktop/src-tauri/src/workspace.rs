@@ -90,6 +90,50 @@ pub fn produced(before: &Snapshot, after: &Snapshot) -> Vec<PathBuf> {
     changed
 }
 
+/// What git reports as changed, when the folder is a repository.
+///
+/// A bound folder is somebody's real work, and `node_modules` and `target` are
+/// not hidden — one install would turn a diff into thousands of files. git
+/// already answers exactly this question, and answers it by the team's own
+/// ignore rules rather than by a list we invented.
+///
+/// `None` means this is not a repository, and the snapshot diff is the answer.
+pub fn git_changes(dir: &Path) -> Option<Vec<String>> {
+    let inside = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !inside.status.success() {
+        return None;
+    }
+
+    let out = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+
+    Some(parse_porcelain(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// `XY path`, and for a rename `XY old -> new`. What was produced is the new
+/// name; the old one is gone and gone is not work product.
+pub fn parse_porcelain(out: &str) -> Vec<String> {
+    out.lines()
+        .filter(|l| l.len() > 3)
+        .map(|l| {
+            let path = l[3..].trim();
+            path.rsplit(" -> ")
+                .next()
+                .unwrap_or(path)
+                .trim_matches('"')
+                .to_string()
+        })
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
 /// The snapshots taken when each session's directory was opened, so what a run
 /// produced can be told from what was already there.
 #[derive(Default)]
@@ -124,6 +168,43 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut f = fs::File::create(path).unwrap();
         f.write_all(body.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn git_says_what_changed_and_stays_quiet_about_what_it_ignores() {
+        let out = " M src/main.rs\n?? report.md\n";
+
+        assert_eq!(parse_porcelain(out), vec!["src/main.rs", "report.md"]);
+    }
+
+    #[test]
+    fn a_renamed_file_is_produced_under_its_new_name() {
+        // The old name is gone, and gone is not work product.
+        assert_eq!(parse_porcelain("R  old.md -> new.md\n"), vec!["new.md"]);
+    }
+
+    #[test]
+    fn a_path_with_a_space_survives() {
+        assert_eq!(
+            parse_porcelain("?? \"my report.md\"\n"),
+            vec!["my report.md"]
+        );
+    }
+
+    #[test]
+    fn nothing_changed_is_nothing_produced() {
+        assert!(parse_porcelain("").is_empty());
+        assert!(parse_porcelain("\n").is_empty());
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_repository_has_no_git_answer() {
+        let dir = temp("notarepo");
+
+        assert!(
+            git_changes(&dir).is_none(),
+            "the snapshot diff is the answer there"
+        );
     }
 
     #[test]
@@ -232,5 +313,54 @@ mod tests {
             produced(&before, &snapshot(&dir)),
             vec![PathBuf::from("out/charts/q3.svg")]
         );
+    }
+}
+
+#[cfg(test)]
+mod bound_folder_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// The claim this card rests on, against a real repository rather than a
+    /// parsed string: a build's output is invisible and the work is not.
+    #[test]
+    fn a_build_in_a_bound_repository_is_not_offered_as_work() {
+        let dir = std::env::temp_dir().join(format!("wr-bound-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("node_modules/left-pad")).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "a@b"]);
+        run(&["config", "user.name", "a"]);
+        fs::write(dir.join(".gitignore"), "node_modules/\n").unwrap();
+        fs::write(dir.join("src/main.rs"), "fn main() {}").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        // A turn: the agent writes a report, edits a file, and something
+        // installs three thousand things nobody asked to publish.
+        fs::write(dir.join("report.md"), "findings").unwrap();
+        let mut f = fs::File::options()
+            .append(true)
+            .open(dir.join("src/main.rs"))
+            .unwrap();
+        f.write_all(b"\n// and this\n").unwrap();
+        for i in 0..50 {
+            fs::write(dir.join(format!("node_modules/left-pad/{i}.js")), "junk").unwrap();
+        }
+
+        let mut produced = git_changes(&dir).expect("a repository answers");
+        produced.sort();
+
+        assert_eq!(produced, vec!["report.md", "src/main.rs"]);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

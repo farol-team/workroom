@@ -71,6 +71,19 @@ async fn agent_produced(
     workspace: String,
 ) -> Result<Vec<Produced>, String> {
     let dir = std::path::PathBuf::from(&workspace);
+
+    // A folder somebody bound is their real work, and git already knows what
+    // changed in it — by their ignore rules, not ours.
+    if let Some(changed) = workspace::git_changes(&dir) {
+        return Ok(changed
+            .into_iter()
+            .filter_map(|path| {
+                let bytes = std::fs::metadata(dir.join(&path)).ok()?.len();
+                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
+            })
+            .collect());
+    }
+
     let after = workspace::snapshot(&dir);
 
     let mut state = shots
@@ -253,6 +266,7 @@ async fn running(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(AgentState::default());
             app.manage(Workspaces::default());

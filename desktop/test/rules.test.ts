@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, closingInstruction, identity, inTimeline, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -499,5 +499,50 @@ describe("a long history", () => {
     const messages = [ { id: 1 }, { id: 2 } ];
 
     expect(onScreen(messages, 200)).toEqual({ messages, hidden: 0 });
+  });
+});
+
+describe("where a channel works", () => {
+  test("a channel with no binding uses the directory derived for it", () => {
+    expect(boundFolder("meetings", {})).toBeNull();
+  });
+
+  test("a channel bound to a folder works there", () => {
+    expect(boundFolder("billing", { billing: "/home/alice/src/billing" }))
+      .toBe("/home/alice/src/billing");
+  });
+
+  test("a binding belongs to one channel, not to all of them", () => {
+    const bindings = { billing: "/home/alice/src/billing" };
+
+    expect(boundFolder("meetings", bindings)).toBeNull();
+  });
+
+  test("a binding that is only whitespace is not a binding", () => {
+    expect(boundFolder("billing", { billing: "   " })).toBeNull();
+  });
+});
+
+describe("what a run produced in somebody's own folder", () => {
+  test("more than a handful is the sign of a build, not of work", () => {
+    // One `npm install` in a bound folder turns the offer into thousands of
+    // files. An offer nobody can read is worse than no offer.
+    const many = Array.from({ length: 40 }, (_, i) => ({ path: `out/${i}.js`, bytes: 10 }));
+
+    const offer = offerable(many, 12);
+    expect(offer.files).toHaveLength(12);
+    expect(offer.omitted).toBe(28);
+  });
+
+  test("a handful is offered whole, with nothing omitted", () => {
+    const few = [ { path: "report.md", bytes: 10 }, { path: "chart.png", bytes: 20 } ];
+
+    expect(offerable(few, 12)).toEqual({ files: few, omitted: 0 });
+  });
+
+  test("an empty file is not work product, whatever the count", () => {
+    const files = [ { path: "report.md", bytes: 12 }, { path: "empty.log", bytes: 0 } ];
+
+    expect(offerable(files, 12).files).toEqual([ { path: "report.md", bytes: 12 } ]);
   });
 });
