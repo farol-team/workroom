@@ -114,6 +114,8 @@ class SignInMethodsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal true, response.parsed_body["development"]
     assert_equal false, response.parsed_body["provider"], "no issuer is configured in test"
+    assert_equal Workroom::VERSION, response.parsed_body["version"],
+                 "a client cannot notice it has drifted from a workspace that will not say what it is"
   end
 end
 

@@ -78,6 +78,48 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// Versions, as numbers. `0.10.0` is newer than `0.9.0`, and comparing the two
+/// as text says the opposite.
+function parts(version?: string): number[] | null {
+  if (!version) return null;
+  const numbers = version.trim().split(".").map((p) => Number(p));
+  return numbers.length === 3 && numbers.every((n) => Number.isInteger(n) && n >= 0) ? numbers : null;
+}
+
+function compare(a: number[], b: number[]): number {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/// What to say about a release that exists. Nothing is installed by saying it:
+/// an agent workspace that replaces its own binary without being asked is a
+/// thing people are right to distrust.
+export function updateNotice(v: { current: string; available: string }): string | null {
+  const here = parts(v.current);
+  const there = parts(v.available);
+  if (!here || !there || compare(there, here) <= 0) return null;
+
+  return `WorkRoom ${v.available} is available. You have ${v.current}.`;
+}
+
+/// A client and a workspace that have drifted apart. The failure is not an
+/// error — it is a feature that quietly does nothing, which is the most
+/// expensive kind — so it is said plainly rather than discovered.
+///
+/// A patch apart is not drift: these ship together and will always be a few
+/// commits apart, and saying so every launch teaches people to ignore the one
+/// that matters.
+export function driftNotice(client: string, server?: string): string | null {
+  const here = parts(client);
+  const there = parts(server);
+  if (!here || !there) return null;
+  if (here[0] === there[0] && here[1] === there[1]) return null;
+
+  return compare(there, here) > 0
+    ? `This workspace is running ${server} and this app is ${client}. Some things here may not work.`
+    : `This app is ${client} and the workspace is running ${server}. Some things here may not work.`;
+}
+
 /// The channel's rail, as the protocol says an MCP server is described.
 ///
 /// Headers are a list of `{ name, value }`. Sent as an object the agent reaches

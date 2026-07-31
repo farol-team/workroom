@@ -7,6 +7,10 @@ require "rails/all"
 Bundler.require(*Rails.groups)
 
 module Workroom
+  # The client and the server ship together and can drift apart. Neither can say
+  # so without knowing what it is itself.
+  VERSION = "0.1.0".freeze
+
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1

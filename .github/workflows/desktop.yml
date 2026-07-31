@@ -98,4 +98,20 @@ jobs:
           cache-dependency-path: desktop/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm tauri build
+
+      # The private key lives here and nowhere else. Whoever holds it can ship
+      # code to every install, so it is not in the repository, not in
+      # tauri.conf.json, and not in anybody's shell history.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: WorkRoom ${{ github.ref_name }}
+          releaseDraft: false
+          # The manifest the client checks. Without it the bundles exist and
+          # nobody is told they do.
+          includeUpdaterJson: true

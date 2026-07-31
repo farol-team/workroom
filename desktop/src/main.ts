@@ -1,9 +1,12 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { invoke } from "@tauri-apps/api/core";
+import { check } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 import * as settings from "./settings";
 import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
 const agents = new Agents(settings.load());
@@ -705,9 +708,51 @@ $("skill-form").addEventListener("submit", async (e) => {
   } catch (err) { alert(String(err)); }
 });
 
+/// Told, never done for them. An agent workspace that replaces its own binary
+/// without being asked is a thing people are right to distrust — so it checks,
+/// it says, and the person decides.
+async function offerUpdate() {
+  const update = await orAfter(check().catch(() => null), 8000, null);
+  if (!update?.available) return;
+
+  const current = await getVersion().catch(() => "");
+  const notice = updateNotice({ current, available: update.version });
+  if (!notice) return;
+
+  say(notice, "Install and restart", async () => {
+    await update.downloadAndInstall();
+    await relaunch();
+  });
+}
+
+/// A client and a workspace that have drifted apart do not fail loudly. They
+/// fail by quietly doing nothing, so this is said out loud.
+function noticeDrift(client: string, server?: string) {
+  const notice = driftNotice(client, server);
+  if (notice) say(notice);
+}
+
+/// A line at the top of the room, and a way to act on it if there is one.
+function say(text: string, action?: string, run?: () => Promise<void>) {
+  const el = document.createElement("div");
+  el.className = "notice";
+  el.append(document.createTextNode(`${text} `));
+  if (action && run) {
+    const button = document.createElement("button");
+    button.className = "ghost";
+    button.textContent = action;
+    button.onclick = async () => {
+      button.disabled = true;
+      try { await run(); } catch (err) { button.disabled = false; alert(String(err)); }
+    };
+    el.append(button);
+  }
+  $("notices").append(el);
+}
+
 async function boot() {
   const dialog = $<HTMLDialogElement>("signin");
-  const how = await api.methods().catch(() => ({ development: true, provider: false }));
+  const how = await api.methods().catch(() => ({ development: true, provider: false, version: undefined }));
   $("signin-provider-block").hidden = !how.provider;
   $("signin-dev").hidden = !how.development;
   $("signin-none").hidden = how.provider || how.development;
@@ -734,6 +779,10 @@ async function boot() {
   agents.use(settings.load());
   for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
   renderAgentPicker();
+
+  const version = await getVersion().catch(() => "");
+  noticeDrift(version, how.version);
+  offerUpdate().catch(() => {});
 }
 
 boot().catch((e) => alert(`Cannot reach the server.\n\n${String(e)}`));
