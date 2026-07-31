@@ -10,7 +10,7 @@ version = 2
 # blocks unrelated work on somebody else's decision.
 yanked = "warn"
 
-[licences]
+[licenses]   # cargo-deny spells it the American way, and the section name is its own
 version = 2
 # Permissive, plus the two weak-copyleft licences that appear in the graph of
 # anything using webkit. Anything outside this list is a decision somebody makes
