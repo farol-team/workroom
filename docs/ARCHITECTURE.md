@@ -45,7 +45,7 @@ say — is the moment the system stops being replaceable.
 
 1. A person posts a message in a channel.
 2. The server records it and broadcasts over Action Cable.
-3. The desktop client resolves the session for this (user, channel) pair, starting one if
+3. The desktop client resolves the session for this (user, agent, channel) triple, starting one if
    needed, and injects the channel's context summary.
 4. The message goes to the local agent over ACP.
 5. The agent works. Every tool call and result arrives back as a run step, which the client

@@ -64,8 +64,44 @@ pub struct Agent {
     child: Mutex<Child>,
 }
 
-#[derive(Default)]
-pub struct AgentState(pub Mutex<Option<Arc<Agent>>>);
+/// The agents a person is running, by the name they address them with. Generic
+/// over what is stored so the bookkeeping can be tested without a process.
+pub struct Registry<T>(Mutex<HashMap<String, T>>);
+
+impl<T> Default for Registry<T> {
+    fn default() -> Self {
+        Registry(Mutex::new(HashMap::new()))
+    }
+}
+
+impl<T: Clone> Registry<T> {
+    /// Replaces any agent already under this name — starting an agent twice is
+    /// a restart, not a second process nobody can address.
+    pub async fn insert(&self, name: &str, value: T) -> Option<T> {
+        self.0.lock().await.insert(name.to_string(), value)
+    }
+
+    pub async fn get(&self, name: &str) -> Option<T> {
+        self.0.lock().await.get(name).cloned()
+    }
+
+    pub async fn take(&self, name: &str) -> Option<T> {
+        self.0.lock().await.remove(name)
+    }
+
+    /// Everything, emptied — quitting stops every agent, not the last one named.
+    pub async fn drain(&self) -> Vec<T> {
+        self.0.lock().await.drain().map(|(_, v)| v).collect()
+    }
+
+    pub async fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.0.lock().await.keys().cloned().collect();
+        names.sort();
+        names
+    }
+}
+
+pub type AgentState = Registry<Arc<Agent>>;
 
 impl Agent {
     /// Launch the agent and complete the ACP handshake.
@@ -158,6 +194,66 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_agent_is_reached_by_the_name_it_was_started_under() {
+        let reg: Registry<u32> = Registry::default();
+        reg.insert("opencode", 1).await;
+        reg.insert("claude", 2).await;
+
+        assert_eq!(reg.get("opencode").await, Some(1));
+        assert_eq!(reg.get("claude").await, Some(2));
+        assert_eq!(
+            reg.get("kimi").await,
+            None,
+            "an agent nobody started is not running"
+        );
+        assert_eq!(reg.names().await, vec!["claude", "opencode"]);
+    }
+
+    #[tokio::test]
+    async fn starting_an_agent_twice_replaces_it() {
+        // Otherwise the first process is orphaned: still running, no longer
+        // addressable, and holding the user's credentials open.
+        let reg: Registry<u32> = Registry::default();
+        reg.insert("opencode", 1).await;
+        let displaced = reg.insert("opencode", 2).await;
+
+        assert_eq!(
+            displaced,
+            Some(1),
+            "the old process is handed back to be shut down"
+        );
+        assert_eq!(reg.get("opencode").await, Some(2));
+        assert_eq!(reg.names().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stopping_one_agent_leaves_the_others_running() {
+        let reg: Registry<u32> = Registry::default();
+        reg.insert("opencode", 1).await;
+        reg.insert("claude", 2).await;
+
+        assert_eq!(reg.take("claude").await, Some(2));
+        assert_eq!(reg.names().await, vec!["opencode"]);
+        assert_eq!(reg.take("claude").await, None, "taking twice is harmless");
+    }
+
+    #[tokio::test]
+    async fn quitting_stops_every_agent() {
+        let reg: Registry<u32> = Registry::default();
+        reg.insert("opencode", 1).await;
+        reg.insert("claude", 2).await;
+
+        let mut all = reg.drain().await;
+        all.sort();
+        assert_eq!(
+            all,
+            vec![1, 2],
+            "every process is handed back, not just the last"
+        );
+        assert!(reg.names().await.is_empty());
+    }
 
     #[test]
     fn a_reply_goes_to_whoever_asked() {

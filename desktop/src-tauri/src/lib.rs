@@ -6,30 +6,44 @@ use acp::{Agent, AgentState};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
-/// Start the local agent. Defaults to opencode, which ships a first-party ACP
-/// server; any other ACP agent works by passing a different command.
+/// Start one of this person's agents, under the name they address it with.
+/// Defaults to opencode, which ships a first-party ACP server; any other ACP
+/// agent works by passing a different command.
 #[tauri::command]
 async fn agent_start(
     app: AppHandle,
     state: State<'_, AgentState>,
+    name: Option<String>,
     command: Option<String>,
     args: Option<Vec<String>>,
 ) -> Result<Value, String> {
+    let name = name.unwrap_or_else(|| "opencode".into());
     let command = command.unwrap_or_else(|| "opencode".into());
     let args = args.unwrap_or_else(|| vec!["acp".into()]);
 
     let agent = Agent::launch(app, &command, &args).await?;
-    *state.0.lock().await = Some(agent);
-    Ok(json!({ "ok": true, "command": command }))
+    // Starting again under the same name is a restart. The process it replaces
+    // is shut down here, or it lingers unaddressable with the user's session open.
+    if let Some(previous) = state.insert(&name, agent).await {
+        previous.shutdown().await;
+    }
+    Ok(json!({ "ok": true, "name": name, "command": command }))
+}
+
+/// Which of this person's agents are running.
+#[tauri::command]
+async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String> {
+    Ok(state.names().await)
 }
 
 #[tauri::command]
 async fn agent_new_session(
     state: State<'_, AgentState>,
+    name: Option<String>,
     cwd: String,
     mcp_servers: Option<Value>,
 ) -> Result<Value, String> {
-    let agent = current(&state).await?;
+    let agent = running(&state, name).await?;
     agent
         .request(
             "session/new",
@@ -47,11 +61,12 @@ async fn agent_new_session(
 #[tauri::command]
 async fn agent_set_config(
     state: State<'_, AgentState>,
+    name: Option<String>,
     session_id: String,
     config_id: String,
     value: String,
 ) -> Result<Value, String> {
-    let agent = current(&state).await?;
+    let agent = running(&state, name).await?;
     agent
         .request(
             "session/set_config_option",
@@ -63,12 +78,13 @@ async fn agent_set_config(
 #[tauri::command]
 async fn agent_prompt(
     state: State<'_, AgentState>,
+    name: Option<String>,
     session_id: String,
     text: String,
     context: Option<String>,
     history: Option<String>,
 ) -> Result<Value, String> {
-    let agent = current(&state).await?;
+    let agent = running(&state, name).await?;
     let mut body = String::new();
     for block in [context, history].into_iter().flatten() {
         if !block.trim().is_empty() {
@@ -111,21 +127,42 @@ async fn agent_export_session(
     Ok(if body.is_empty() { None } else { Some(body) })
 }
 
+/// Stop one agent, or every agent when no name is given.
 #[tauri::command]
-async fn agent_stop(state: State<'_, AgentState>) -> Result<(), String> {
-    if let Some(agent) = state.0.lock().await.take() {
-        agent.shutdown().await;
+async fn agent_stop(state: State<'_, AgentState>, name: Option<String>) -> Result<(), String> {
+    match name {
+        Some(name) => {
+            if let Some(agent) = state.take(&name).await {
+                agent.shutdown().await;
+            }
+        }
+        None => {
+            for agent in state.drain().await {
+                agent.shutdown().await;
+            }
+        }
     }
     Ok(())
 }
 
-async fn current(state: &State<'_, AgentState>) -> Result<Arc<Agent>, String> {
+/// The named agent, or the only one running when the caller did not say. A
+/// person with one agent should not have to name it.
+async fn running(
+    state: &State<'_, AgentState>,
+    name: Option<String>,
+) -> Result<Arc<Agent>, String> {
+    let name = match name {
+        Some(name) => name,
+        None => match state.names().await.as_slice() {
+            [only] => only.clone(),
+            [] => return Err("no agent is running".into()),
+            many => return Err(format!("say which agent: {}", many.join(", "))),
+        },
+    };
     state
-        .0
-        .lock()
+        .get(&name)
         .await
-        .clone()
-        .ok_or_else(|| "agent is not running".to_string())
+        .ok_or_else(|| format!("`{name}` is not running"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -138,6 +175,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             agent_start,
+            agent_list,
             agent_new_session,
             agent_prompt,
             agent_set_config,

@@ -152,12 +152,18 @@ is published through `Broadcast` in the same request that persists it.
 
 ## Project articles (desktop)
 
-### Article D1 — One ACP session per (user, channel)
+### Article D1 — One ACP session per (user, agent, channel)
 *(Rationale: it is what makes the memory scope and the session scope the same
 thing without enforcement.)*
 
-Sessions are keyed by channel. A second session for the same channel in one
-client is a bug, not an optimization.
+Sessions are keyed by channel and by the agent that opened it. A second session
+for the same pair in one client is a bug, not an optimization.
+
+*Amended:* the agent was added to the key when a person could hold more than one.
+Keyed by channel alone, two agents in one room share a session id — the second
+one to speak inherits the first one's session, or is handed an id its process has
+never heard of. Memory still belongs to the channel, so switching agents loses
+nothing: what the room knows is pushed into whichever one is summoned.
 
 ### Article D2 — The agent is a child process, never a service
 *(Rationale: local execution is the mechanism behind Article P2; a hosted agent

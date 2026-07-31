@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { StepLedger, formatHistory, parseAddress, presenceState, selectable, transcriptName, translateAcp } from "../src/rules";
+import { StepLedger, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -196,5 +196,105 @@ describe("selectable options", () => {
   test("a select with no choices is not offered", () => {
     expect(selectable([ { id: "x", name: "X", type: "select", currentValue: "", options: [] } ] as never))
       .toEqual([]);
+  });
+});
+
+describe("several agents", () => {
+  const agents = [
+    { name: "opencode", command: "opencode", args: ["acp"], default: true },
+    { name: "claude", command: "claude-code-acp", args: [] },
+  ];
+
+  test("@agent means whichever one is default", () => {
+    expect(parseAddress("@agent go", agents).agent).toBe("opencode");
+  });
+
+  test("a name addresses that agent and loses the marker", () => {
+    const { addressed, agent, body } = parseAddress("@claude review this", agents);
+    expect(addressed).toBe(true);
+    expect(agent).toBe("claude");
+    expect(body).toBe("review this");
+  });
+
+  test.each(["@Claude go", "@CLAUDE: go", "@claude, go"])("%s reaches claude", (input) => {
+    expect(parseAddress(input, agents).agent).toBe("claude");
+  });
+
+  test("a colleague is not an agent", () => {
+    // The room is full of people. Only configured names are summons.
+    expect(parseAddress("@bob can you look?", agents)).toEqual({
+      addressed: false, body: "@bob can you look?",
+    });
+  });
+
+  test("with nothing configured, @agent still means the one that is running", () => {
+    const { addressed, agent } = parseAddress("@agent go", []);
+    expect(addressed).toBe(true);
+    expect(agent).toBeUndefined();
+  });
+
+  test("the default is the marked one, or the first, or nothing", () => {
+    expect(defaultAgent(agents)).toBe("opencode");
+    expect(defaultAgent([{ name: "kimi", command: "k", args: [] }, ...agents])).toBe("opencode");
+    expect(defaultAgent([{ name: "kimi", command: "k", args: [] }])).toBe("kimi");
+    expect(defaultAgent([])).toBeUndefined();
+  });
+});
+
+describe("agent definitions", () => {
+  test("an entry with no name or no command is not an agent", () => {
+    expect(normalizeAgents([
+      { name: "", command: "x", args: [] },
+      { name: "y", command: "  ", args: [] },
+      { name: "opencode", command: "opencode", args: ["acp"] },
+    ])).toEqual([{ name: "opencode", command: "opencode", args: ["acp"], default: true }]);
+  });
+
+  test("a name that cannot be typed as an address is not an agent", () => {
+    // The name is the summons. One that @ cannot reach configures an agent
+    // nobody can call, and makes the session key ambiguous besides.
+    expect(normalizeAgents([
+      { name: "my agent", command: "x", args: [] },
+      { name: "-lead", command: "x", args: [] },
+      { name: "gpt-5.1_local", command: "x", args: [] },
+    ])).toEqual([{ name: "gpt-5.1_local", command: "x", args: [], default: true }]);
+  });
+
+  test("one name, one agent — the first definition wins", () => {
+    const out = normalizeAgents([
+      { name: "claude", command: "first", args: [] },
+      { name: "Claude", command: "second", args: [] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].command).toBe("first");
+  });
+
+  test("there is always exactly one default", () => {
+    // Two defaults is a coin toss over which agent answers; none is a dead @agent.
+    const two = normalizeAgents([
+      { name: "a", command: "a", args: [], default: true },
+      { name: "b", command: "b", args: [], default: true },
+    ]);
+    expect(two.filter((d) => d.default)).toHaveLength(1);
+    expect(two[0].default).toBe(true);
+
+    const none = normalizeAgents([{ name: "a", command: "a", args: [] }]);
+    expect(none[0].default).toBe(true);
+  });
+
+  test("nothing configured is not an error — it is opencode", () => {
+    expect(normalizeAgents([])).toEqual([
+      { name: "opencode", command: "opencode", args: ["acp"], default: true },
+    ]);
+  });
+});
+
+describe("sessions are per agent and per channel", () => {
+  test("two agents in one room do not share a session", () => {
+    // Memory belongs to the channel, but a session belongs to the agent that
+    // opened it. Sharing one would hand claude's session id to opencode.
+    expect(sessionKey("opencode", "meetings")).not.toBe(sessionKey("claude", "meetings"));
+    expect(sessionKey("opencode", "meetings")).not.toBe(sessionKey("opencode", "marketing"));
+    expect(sessionKey("opencode", "meetings")).toBe(sessionKey("opencode", "meetings"));
   });
 });

@@ -1,9 +1,10 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, type PlanEntry, type RunSignal } from "./rules";
-import { Agent, type Update } from "./agent";
+import { StepLedger, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, type PlanEntry, type RunSignal } from "./rules";
+import { Agents, type Update } from "./agent";
+import * as settings from "./settings";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
-const agent = new Agent();
+const agents = new Agents(settings.load());
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let channels: Channel[] = [];
@@ -116,7 +117,7 @@ function showPlan(runId: number, entries: PlanEntry[]) {
 
 /// Attaching is a decision made with the work in front of you, so it is an
 /// action on the finished run rather than a setting chosen once in the abstract.
-function offerTranscript(runId: number, sessionId: string) {
+function offerTranscript(runId: number, name: string, sessionId: string) {
   const box = $("messages");
   const el = document.createElement("div");
   el.className = "offer";
@@ -128,7 +129,7 @@ function offerTranscript(runId: number, sessionId: string) {
     button.disabled = true;
     button.textContent = "Attaching…";
     try {
-      const body = await agent.exportSession(sessionId);
+      const body = await agents.exportSession(name, sessionId);
       if (!body) { el.textContent = "This agent keeps no transcript."; return; }
       await api.attachArtifact(runId, transcriptName(runId, new Date()), body);
       el.remove();
@@ -149,9 +150,10 @@ function offerTranscript(runId: number, sessionId: string) {
 function renderOptions() {
   const box = $("session-options");
   box.innerHTML = "";
-  if (!current || !agent.running) return;
+  const name = activeAgent();
+  if (!current || !name || !agents.isRunning(name)) return;
 
-  for (const option of selectable(agent.configFor(current.slug))) {
+  for (const option of selectable(agents.configFor(name, current.slug))) {
     const label = document.createElement("label");
     label.className = "session-option";
     label.title = option.name;
@@ -167,7 +169,8 @@ function renderOptions() {
     select.onchange = async () => {
       select.disabled = true;
       try {
-        agent.rememberConfig(current!.slug, await agent.setConfig(current!.slug, option.id, select.value));
+        agents.rememberConfig(name, current!.slug,
+          await agents.setConfig(name, current!.slug, option.id, select.value));
       } catch (err) { alert(String(err)); }
       select.disabled = false;
       renderOptions();
@@ -240,13 +243,16 @@ async function open(slug: string) {
 async function send(text: string) {
   if (!current) return;
 
-  // Default is the room. The agent joins only when its owner calls it.
-  const { addressed, body } = parseAddress(text);
+  // Default is the room. An agent joins only when its owner calls it, and
+  // `@agent` calls whichever one is default.
+  const { addressed, agent: named, body } = parseAddress(text, agents.definitions());
   const posted = await api.post(current.slug, body);
   if (!addressed) return;
 
-  if (!agent.running) {
-    alert("Your agent is not running. Press Start agent first.");
+  const name = named ?? defaultAgent(agents.definitions());
+  if (!name) return;
+  if (!agents.isRunning(name)) {
+    alert(`${name} is not running. Press Start agent first.`);
     return;
   }
 
@@ -255,24 +261,25 @@ async function send(text: string) {
   // may give the instruction.
   const { context } = await api.context(current.slug);
   const history = recentHistory();
-  const sessionId = await agent.sessionFor(current.slug, "/tmp", api.rail(current.slug));
-  const run = await api.startRun(current.slug, posted.id, sessionId, agent.modelFor(current.slug));
+  const sessionId = await agents.sessionFor(name, current.slug, "/tmp", api.rail(current.slug));
+  const run = await api.startRun(current.slug, posted.id, name, sessionId,
+                                 agents.modelFor(name, current.slug));
   renderOptions();
 
   let reply = "";
-  const stop = await agent.onUpdate((u: Update) => {
+  const stop = await agents.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
     else if (u.kind === "usage") api.reportUsage(run.id, u.used, u.size, u.cost).catch(() => {});
-    else if (u.kind === "config") { agent.rememberConfig(current!.slug, u.options); renderOptions(); }
+    else if (u.kind === "config") { agents.rememberConfig(name, current!.slug, u.options); renderOptions(); }
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 
   try {
-    await agent.prompt(sessionId, body, context, history);
+    await agents.prompt(name, sessionId, body, context, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
-    offerTranscript(run.id, sessionId);
+    offerTranscript(run.id, name, sessionId);
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
@@ -294,8 +301,8 @@ function recentHistory(limit = 20): string | null {
 
 function refreshDestination() {
   const input = $<HTMLInputElement>("input");
-  const { addressed } = parseAddress(input.value);
-  $("destination").textContent = addressed ? "→ your agent" : "→ the room";
+  const { addressed, agent: named } = parseAddress(input.value, agents.definitions());
+  $("destination").textContent = addressed ? `→ ${named ?? "your agent"}` : "→ the room";
   $("destination").className = addressed ? "to-agent" : "muted";
 }
 
@@ -303,7 +310,9 @@ $("input").addEventListener("input", refreshDestination);
 
 $("summon").addEventListener("click", () => {
   const input = $<HTMLInputElement>("input");
-  if (!parseAddress(input.value).addressed) input.value = `@agent ${input.value}`;
+  if (!parseAddress(input.value, agents.definitions()).addressed) {
+    input.value = `@${activeAgent() ?? "agent"} ${input.value}`;
+  }
   input.focus();
   refreshDestination();
 });
@@ -318,22 +327,53 @@ $("composer").addEventListener("submit", async (e) => {
   await send(text).catch((err) => alert(String(err)));
 });
 
+/// Which agent the controls act on: the one picked, or the default.
+function activeAgent(): string | undefined {
+  const picked = $<HTMLSelectElement>("agent-pick")?.value;
+  return picked || defaultAgent(agents.definitions());
+}
+
+function renderAgentPicker() {
+  const pick = $<HTMLSelectElement>("agent-pick");
+  const chosen = pick.value;
+  pick.innerHTML = "";
+  for (const def of agents.definitions()) {
+    const el = document.createElement("option");
+    el.value = def.name;
+    el.textContent = agents.isRunning(def.name) ? `${def.name} ●` : def.name;
+    pick.append(el);
+  }
+  pick.value = chosen && agents.definitions().some((d) => d.name === chosen)
+    ? chosen : (defaultAgent(agents.definitions()) ?? "");
+  pick.hidden = agents.definitions().length < 2;
+
+  const name = activeAgent();
+  const on = !!name && agents.isRunning(name);
+  $("agent-status").textContent = on ? "ready" : "off";
+  $("agent-toggle").textContent = on ? `Stop ${name}` : `Start ${name ?? "agent"}`;
+}
+
+$("agent-pick").addEventListener("change", () => { renderAgentPicker(); renderOptions(); });
+
 $("agent-toggle").addEventListener("click", async () => {
+  const name = activeAgent();
+  if (!name) return;
   try {
-    if (agent.running) {
-      await agent.stop();
-      $("agent-status").textContent = "off";
-      $("agent-toggle").textContent = "Start agent";
+    if (agents.isRunning(name)) {
+      await agents.stop(name);
+      renderAgentPicker();
     } else {
       $("agent-status").textContent = "starting…";
-      await agent.start();
-      $("agent-status").textContent = "ready";
-      $("agent-toggle").textContent = "Stop agent";
-      if (current) { await agent.sessionFor(current.slug, "/tmp", api.rail(current.slug)); renderOptions(); }
+      await agents.start(name);
+      renderAgentPicker();
+      if (current) {
+        await agents.sessionFor(name, current.slug, "/tmp", api.rail(current.slug));
+        renderOptions();
+      }
     }
   } catch (err) {
     $("agent-status").textContent = "failed";
-    alert(`Could not start the agent.\n\n${String(err)}\n\nInstall it with: npm i -g opencode-ai`);
+    alert(`Could not start ${name}.\n\n${String(err)}\n\nInstall it with: npm i -g opencode-ai`);
   }
 });
 
@@ -361,6 +401,12 @@ async function boot() {
 
   const { user } = await api.signIn($<HTMLInputElement>("email").value.trim());
   $("who").textContent = user.name;
+
+  // Agents already running from an earlier window of this session stay
+  // addressable — the registry is the process's, not this view's.
+  agents.use(settings.load());
+  for (const name of await agents.listRunning()) agents.markRunning(name);
+  renderAgentPicker();
 
   channels = await api.channels();
   renderChannels();

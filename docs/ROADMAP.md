@@ -16,7 +16,7 @@ messages arriving live.
 
 ## 2 — The agent in the room
 
-The desktop client manages a local agent over ACP. One session per (user, channel). Messages
+The desktop client manages a local agent over ACP. One session per (user, agent, channel). Messages
 route to the agent; answers and run steps come back into the channel.
 
 No memory yet — the agent starts each session knowing only what is in the conversation.
