@@ -3,46 +3,28 @@ require "test_helper"
 class AgentRunTest < ActiveSupport::TestCase
   setup do
     @channel = channel
-    @user = user
+    @alice = user(name: "Alice")
+    @run = agent_run(user: @alice, channel: @channel,
+                     trigger: @channel.messages.create!(author: @alice, body: "@agent what did we agree?"))
   end
 
-  test "context occupancy is a fraction of the window the agent reported" do
-    run = agent_run(user: @user, channel: @channel)
-    run.update!(context_used: 40_000, context_size: 200_000)
+  test "a finished run writes nothing to memory on its own" do
+    # The distiller is the agent (#55). A job that copies every answer into
+    # memory fills the room with the transcript it already has, titled with the
+    # question that produced it — and it does so whether or not the agent
+    # decided anything was worth keeping.
+    @run.messages.create!(channel: @channel, body: "Monthly rollups, first Tuesday.")
 
-    assert_in_delta 0.2, run.context_fraction, 0.001
+    assert_no_difference -> { MemoryEntry.count } do
+      perform_enqueued_jobs { @run.update!(status: "succeeded") }
+    end
   end
 
-  test "occupancy is unknown until the agent says otherwise" do
-    assert_nil agent_run(user: @user, channel: @channel).context_fraction
-  end
+  test "what an agent chose to keep is still kept" do
+    # Through the rail, deliberately, which is the only path there is now.
+    entry = Memory::Store.current.write(@channel, title: "Reporting cadence",
+                                        detail: "Monthly.", trust: "agent")
 
-  test "a window of zero is unknown, not a division" do
-    run = agent_run(user: @user, channel: @channel)
-    run.update!(context_used: 10, context_size: 0)
-
-    assert_nil run.context_fraction
-  end
-
-  test "a full window reads as full" do
-    run = agent_run(user: @user, channel: @channel)
-    run.update!(context_used: 200_000, context_size: 200_000)
-
-    assert_in_delta 1.0, run.context_fraction, 0.001
-  end
-
-  test "a run knows how long it took, once it has ended" do
-    run = agent_run(user: @user, channel: @channel)
-    assert_nil run.duration
-
-    run.update!(started_at: 2.minutes.ago, ended_at: Time.current)
-    assert_in_delta 120, run.duration, 2
-  end
-
-  test "the person stays reachable from the run" do
-    run = agent_run(user: @user, channel: @channel)
-
-    assert_equal @user, run.user
-    assert_equal @channel, run.channel
+    assert_includes Memory::Store.current.all(@channel).map(&:uri), entry.uri
   end
 end

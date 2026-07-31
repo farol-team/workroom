@@ -13,7 +13,6 @@ class AgentRun < ApplicationRecord
   delegate :channel, :user, to: :agent_session
 
   # A finished run is a candidate for the room's memory — a candidate only.
-  after_update_commit :distil, if: -> { saved_change_to_status? && status == "succeeded" }
 
   # How full the agent says its context is. Derived rather than stored: a ratio
   # kept beside its two operands is a third thing to keep consistent.
@@ -23,6 +22,5 @@ class AgentRun < ApplicationRecord
     context_used.to_f / context_size
   end
 
-  def distil = DistillRunJob.perform_later(id)
   def duration     = (ended_at && started_at) ? ended_at - started_at : nil
 end

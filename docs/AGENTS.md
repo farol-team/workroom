@@ -64,6 +64,16 @@ Against opencode 1.18.10, with a real model, through a real rail:
 | `workroom://memory/remember` | the agent wrote an entry to the channel itself |
 | `opencode export <session>` | 21 kB of transcript, which is what the client attaches |
 
+A real turn also leaves the record a colleague reads: a run with its model and
+its steps, an answer attributed to that run, context usage, and the session
+transcript attached. Verified by reading it back over the API afterwards rather
+than by asserting it while writing it.
+
+A step is named by what it is, or it is not recorded. `tool_call_update` refines
+a call already recorded, and falling back to its identifier puts
+`call_00_hWMqa5NQZWoHwgQfxDg70485` in front of somebody — which says nothing and
+crowds out the steps that do.
+
 What has **not** been verified: any of it from inside the desktop window. The
 protocol, the rail and the memory loop are proven; the client that drives them is
 proven only by its own tests.

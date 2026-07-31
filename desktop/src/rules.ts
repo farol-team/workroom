@@ -411,7 +411,12 @@ export function translateAcp(msg: unknown): Update | null {
     return entries.length ? { kind: "plan", entries } : null;
   }
   if (t === "tool_call" || t === "tool_call_update") {
-    return { kind: "tool", label: (u.title ?? u.kind ?? u.toolCallId ?? "tool") as string };
+    // Named by what it is, or not recorded. An id is not a name: a step reading
+    // `call_00_hWMqa5NQZWoHwgQfxDg70485` tells a colleague nothing and crowds
+    // out the ones that do. A `tool_call_update` without a title is refining a
+    // call that was already recorded.
+    const label = (u.title ?? u.kind) as string | undefined;
+    return label ? { kind: "tool", label } : null;
   }
   return t ? { kind: "other", label: t } : null;
 }

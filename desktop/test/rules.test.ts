@@ -630,3 +630,26 @@ describe("the agent asking to do something", () => {
     expect(permissionAsked({ id: 1, request: {} })).toBeNull();
   });
 });
+
+describe("a step somebody will read", () => {
+  test("a tool call is named by what it is", () => {
+    expect(translateAcp({ method: "session/update", params: { update: {
+      sessionUpdate: "tool_call", toolCallId: "call_00_hWMqa5NQ", title: "Search the room" } } }))
+      .toEqual({ kind: "tool", label: "Search the room" });
+  });
+
+  test("an update with nothing to say is not a step", () => {
+    // `tool_call_update` refines a call already recorded. Falling back to its id
+    // puts `call_00_hWMqa5NQZWoHwgQfxDg70485` in front of a colleague, which
+    // tells them nothing and crowds out what does.
+    expect(translateAcp({ method: "session/update", params: { update: {
+      sessionUpdate: "tool_call_update", toolCallId: "call_00_hWMqa5NQ", status: "completed" } } }))
+      .toBeNull();
+  });
+
+  test("an update that does have something to say is kept", () => {
+    expect(translateAcp({ method: "session/update", params: { update: {
+      sessionUpdate: "tool_call_update", toolCallId: "call_1", title: "Read the entry" } } }))
+      .toEqual({ kind: "tool", label: "Read the entry" });
+  });
+});
