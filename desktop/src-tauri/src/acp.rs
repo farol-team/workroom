@@ -490,6 +490,9 @@ mod against_a_real_agent {
             "the answer must reach the agent, or the turn never ends: {said}"
         );
 
+        // Reaped, not merely killed: a test that leaves a zombie behind is a
+        // test that leaves something behind on somebody's machine.
         let _ = child.kill();
+        let _ = child.wait();
     }
 }
