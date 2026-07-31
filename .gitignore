@@ -3,3 +3,6 @@
 
 # The context database's config carries an infrastructure model credential.
 ov.conf
+
+# Pictures from bin/preview. Looking is repeatable; the pictures are not history.
+tmp/preview/

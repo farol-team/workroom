@@ -34,6 +34,24 @@ gated behind it.
 Then press **Start agent**. Any agent that speaks ACP works; pass a different
 command to `agent_start`.
 
+## Looking at it, without opening it
+
+```bash
+bin/preview
+```
+
+Renders the built client against the running server with the native bridge
+stubbed, and writes a picture of each state worth seeing — signed out, a room, a
+thread, what the room knows — to `tmp/preview/`.
+
+The stub deliberately never answers. A stub that returns plausible values hides
+exactly the class of defect a silent bridge causes, which is how the room came to
+depend on the native side answering before it would open at all.
+
+This is not the Tauri window: fonts, native chrome and the folder dialog are
+still unseen. It is a large step from nothing and it is not the same as somebody
+opening the app.
+
 ## One turn, without opening the app
 
 ```bash

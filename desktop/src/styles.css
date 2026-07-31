@@ -147,3 +147,8 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
 /* A question the agent is blocked on reads differently from an offer nobody has
    to answer. */
 .offer.ask { border-left: 2px solid var(--accent); padding-left: 10px; }
+
+/* A uri is long and a panel header is not. Seen in a picture, not in a test:
+   it was being cut off mid-word with no sign that there was more. */
+#memory-uri { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 60%; direction: rtl; }
