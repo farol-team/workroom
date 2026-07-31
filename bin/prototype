@@ -70,5 +70,16 @@ cat <<'NEXT'
 
 NEXT
 
+# A server stopped by a kill, a crash or a closed container leaves its pid file
+# behind, and every later run then refuses with a message saying the opposite of
+# what is true. The pid in that file is no help — inside a container it is 1, and
+# pid 1 always exists. The question that matters is whether anything answers on
+# the port.
+PID_FILE=tmp/pids/server.pid
+if [ -f "$PID_FILE" ] && ! (exec 3<>/dev/tcp/127.0.0.1/3000) 2>/dev/null; then
+  say "clearing a pid file left by a server that is gone"
+  rm -f "$PID_FILE"
+fi
+
 say "server on http://127.0.0.1:3000  (ctrl-c to stop)"
 exec bin/rails server
