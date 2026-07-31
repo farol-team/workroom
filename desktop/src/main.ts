@@ -151,17 +151,30 @@ const escape = (s: string) =>
 
 /// A colleague at work must be distinguishable from a colleague who is absent —
 /// otherwise `private` turns translucent into invisible.
-function showPresence(run: RunSignal & { context_used?: number; context_size?: number }) {
+type Presence = RunSignal & { context_used?: number; context_size?: number };
+
+const occupancyByRun = new Map<number, string>();
+
+function showPresence(run: Presence) {
   runSignals.push(run);
   const working = presenceState(runSignals);
   const box = $("messages");
+
+  // Occupancy is why somebody starts a fresh session; it belongs beside the
+  // line that says work is happening.
+  if (run.context_used != null && run.context_size != null) {
+    const label = occupancyLabel(run.context_used, run.context_size);
+    if (label) occupancyByRun.set(run.id, label);
+    else occupancyByRun.delete(run.id);
+  }
 
   box.querySelectorAll(".presence").forEach((el) => el.remove());
   for (const [ id, who ] of working) {
     const el = document.createElement("div");
     el.id = `presence-${id}`;
     el.className = "presence";
-    el.textContent = `${who} is working with their agent…`;
+    const occupancy = occupancyByRun.get(id);
+    el.textContent = `${who} is working with their agent…${occupancy ? `  (${occupancy})` : ""}`;
     box.append(el);
   }
   box.scrollTop = box.scrollHeight;
