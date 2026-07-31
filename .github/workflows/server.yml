@@ -39,6 +39,14 @@ jobs:
 
       - run: bundle install --jobs 4
 
+      # A style checker is not a security scanner, and both of these shipped
+      # with Rails and had never been run.
+      - name: Security
+        run: bin/brakeman --no-pager --quiet
+
+      - name: Gem advisories
+        run: bundle exec bundler-audit check --update
+
       - name: Lint
         run: bin/rubocop --parallel
 
