@@ -5,6 +5,8 @@ module Api
     skip_before_action :authenticate!
 
     def create
+      return head :not_found unless Rails.configuration.x.dev_signin
+
       email = params.require(:email).to_s.downcase
       user = User.find_or_create_by!(email:, provider: "dev", uid: email) do |u|
         u.name = params[:name].presence || email.split("@").first.titleize

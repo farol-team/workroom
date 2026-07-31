@@ -67,4 +67,19 @@ approval queue. A wrong entry is corrected by superseding it.
   behind the same seam needs an embedding credential.
 - **Files stay put.** The session transcript is attached to the run; files an
   agent writes on disk are not collected yet.
-- **Sign-in is development-only.** OIDC is wired in the model, not in a provider.
+- **Sign-in is development-only unless you configure a provider.** OIDC is wired;
+  point it at your own and development sign-in closes itself:
+
+  ```bash
+  export OIDC_ISSUER=https://your-org.okta.com
+  export OIDC_CLIENT_ID=…
+  export OIDC_CLIENT_SECRET=…
+  export OIDC_REDIRECT_URI=http://127.0.0.1:3000/auth/openid_connect/callback
+  ```
+
+  With no issuer set, `/auth/openid_connect` is simply not there. Development
+  sign-in — any address, no proof — is on in development and test and off
+  everywhere else; `WORKROOM_DEV_SIGNIN=1` forces it on if you really mean it.
+
+  The desktop client still signs in the development way. Carrying the browser
+  round trip into the client is its own card.
