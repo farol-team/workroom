@@ -68,8 +68,9 @@ class FullTurnTest < ActionDispatch::IntegrationTest
     assert_response :success
 
     # --- the agent reaches memory through the rail ---
+    # With the question it was asked, which is what an agent actually sends.
     found = JSON.parse(rpc("tools/call",
-      { name: "search_capabilities", arguments: { query: "Acme" } })
+      { name: "search_capabilities", arguments: { query: "what did we agree with Acme about reporting?" } })
       .dig("result", "content", 0, "text"))
     assert_equal [ "Acme reporting cadence" ], found.select { |c| c["kind"] == "knowledge" }.map { |c| c["title"] }
 

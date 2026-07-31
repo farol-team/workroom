@@ -132,6 +132,25 @@ module Memory
       assert_equal [ "Here" ], @store.search(@channel, "shared word").map(&:title)
     end
 
+    # An agent does not search for keywords. It passes the question it was asked.
+    def test_search_answers_a_question_not_only_a_keyword
+      @store.write(@channel, title: "Acme wants monthly reporting",
+                             detail: "Weekly created noise and nobody read it.")
+
+      assert_equal [ "Acme wants monthly reporting" ],
+                   @store.search(@channel, "what did we agree with Acme about reporting?").map(&:title),
+                   "a query that reads like a sentence must still find what the room knows"
+    end
+
+    def test_search_puts_the_entry_matching_more_of_the_question_first
+      @store.write(@channel, title: "Acme reporting cadence", detail: "Acme asked for monthly reporting")
+      @store.write(@channel, title: "Reporting", detail: "generic note about reporting")
+
+      assert_equal "Acme reporting cadence",
+                   @store.search(@channel, "Acme reporting cadence").first.title,
+                   "the entry answering more of the question comes first"
+    end
+
     def test_search_ignores_superseded_entries
       @store.write(@channel, title: "Cadence", detail: "weekly rhythm", key: "cadence")
       @store.write(@channel, title: "Cadence", detail: "monthly rhythm", key: "cadence")

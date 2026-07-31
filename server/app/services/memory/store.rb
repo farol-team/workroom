@@ -18,5 +18,26 @@ module Memory
     # second conflicting entry. That obligation replaces the human gate, so it
     # has to be one call or it will not happen.
     def supersede(_uri, reason: nil)      = raise NotImplementedError
+
+    # An agent searches with the question it was asked, not with a keyword.
+    # Reading a query into terms belongs to the seam rather than to any one
+    # backend: the rail discovers its actions the same way memory is searched,
+    # and a store that has its own retrieval simply ignores this.
+    #
+    # Function words are dropped. Terms in a language this list does not cover
+    # are kept, which costs a little precision and loses nothing.
+    STOPWORDS = %w[
+      the and for with about this that what when where which who whom how why
+      did does was were are our ours their your yours from into than then have
+      has had any all can could should would will just not but you use using
+      make made get let its over under between per via yet still also here
+      there some such they them his her him she
+    ].to_set.freeze
+
+    def self.terms_in(query)
+      query.to_s.downcase.scan(/[[:alnum:]]+/)
+           .reject { |w| w.length < 3 || STOPWORDS.include?(w) }
+           .uniq.first(8)
+    end
   end
 end
