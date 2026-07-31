@@ -9,7 +9,7 @@
 //! What comes back is the bearer token this client already carries. No token of
 //! the provider's reaches it, so the client's idea of identity does not change.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::time::Duration;
 
@@ -138,6 +138,7 @@ impl Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
 
     #[test]
     fn a_callback_carries_the_token_the_server_issued() {
