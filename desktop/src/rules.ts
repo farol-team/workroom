@@ -196,6 +196,32 @@ export class WorkingSignal {
   }
 }
 
+/// How a voice is recognised before the name is read. Derived from the name, so
+/// it needs nothing from the server and never disagrees between two surfaces.
+///
+/// An agent carries its owner's colour and is marked as an agent: it is Alice's
+/// agent, not a second Alice and not a stranger.
+export interface Identity { initials: string; hue: number; isAgent: boolean }
+
+export function identity(author: { kind: string; name: string }): Identity {
+  const words = author.name.trim().split(/\s+/).filter(Boolean);
+  const initials = words.length
+    ? (words.length === 1 ? words[0][0] : words[0][0] + words[words.length - 1][0]).toUpperCase()
+    : "?";
+
+  let hash = 0;
+  for (const ch of author.name.trim().toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+
+  return { initials, hue: hash, isAgent: author.kind === "agent" };
+}
+
+/// A room with ten thousand messages in it should not put ten thousand elements
+/// on screen. What is kept is the recent end, because that is what people read.
+export function onScreen<T>(messages: T[], limit: number): { messages: T[]; hidden: number } {
+  if (messages.length <= limit) return { messages, hidden: 0 };
+  return { messages: messages.slice(-limit), hidden: messages.length - limit };
+}
+
 /// A message as the room deals with it: who wrote it, and what it answers.
 export interface Threaded {
   id: number;

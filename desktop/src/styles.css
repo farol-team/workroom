@@ -126,3 +126,14 @@ aside#thread[hidden] { display: none; }
 .reply-action { opacity: 0; background: none; border: none; color: var(--muted);
   font: inherit; font-size: 12px; cursor: pointer; }
 .msg:hover .reply-action { opacity: 1; }
+
+/* A voice is recognised before the name is read. An agent carries its owner's
+   colour and is marked as one — Alice's agent, not a second Alice. */
+.avatar { display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; margin-right: 6px; border-radius: 4px; flex: none;
+  font-size: 10px; font-weight: 600; color: #14161a; vertical-align: -4px;
+  background: hsl(var(--hue) 55% 62%); }
+.avatar.is-agent { border-radius: 50%; box-shadow: 0 0 0 1px var(--agent) inset;
+  background: hsl(var(--hue) 40% 42%); color: var(--text); }
+.member { display: flex; align-items: center; padding: 4px 16px; font-size: 13px; }
+.earlier { color: var(--muted); font-size: 12px; text-align: center; padding: 10px 0; }

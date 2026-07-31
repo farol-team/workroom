@@ -69,6 +69,13 @@ export class Api {
     });
   }
 
+  /// Who is in the room. A name and a role, nothing that identifies anyone
+  /// elsewhere.
+  members(slug: string) {
+    return this.call<Array<{ id: number; name: string; role: string }>>(
+      `/channels/${slug}/members`);
+  }
+
   memory(slug: string) {
     return this.call<Array<{ uri: string; title: string; overview: string; trust: string }>>(
       `/channels/${slug}/memory`);
