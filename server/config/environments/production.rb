@@ -22,13 +22,19 @@ Rails.application.configure do
   # config.asset_host = "http://assets.example.com"
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
+  # Falls back to the container's own disk only when no object store is
+  # configured, so a first boot works and a real deployment does not silently
+  # keep artifacts somewhere a deploy will delete.
+  config.active_storage.service = ENV["STORAGE_BUCKET"].present? ? :object_store : :local
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  # config.assume_ssl = true
+  # TLS terminates at the proxy in front of this, so Rails is told rather than
+  # left to guess — otherwise it builds http:// urls and treats the connection as
+  # insecure.
+  config.assume_ssl = true
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  # config.force_ssl = true
+  config.force_ssl = true
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }

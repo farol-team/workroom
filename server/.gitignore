@@ -33,3 +33,6 @@
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 
+
+# Kamal keeps deploy state and any locally-resolved secrets here.
+.kamal/*.lock

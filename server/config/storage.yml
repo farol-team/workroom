@@ -6,6 +6,19 @@ local:
   service: Disk
   root: <%= Rails.root.join("storage") %>
 
+# Work product belongs to the channel (Article D3). On a container's own disk it
+# belongs to the container, and every deploy is a channel losing its artifacts.
+# S3-compatible, so any of the usual object stores fits — the endpoint is the
+# only thing that differs.
+object_store:
+  service: S3
+  endpoint: <%= ENV["STORAGE_ENDPOINT"] %>
+  region: <%= ENV.fetch("STORAGE_REGION", "ru-central1") %>
+  bucket: <%= ENV["STORAGE_BUCKET"] %>
+  access_key_id: <%= ENV["STORAGE_ACCESS_KEY_ID"] %>
+  secret_access_key: <%= ENV["STORAGE_SECRET_ACCESS_KEY"] %>
+  force_path_style: true
+
 # Use bin/rails credentials:edit to set the AWS secrets (as aws:access_key_id|secret_access_key)
 # amazon:
 #   service: S3

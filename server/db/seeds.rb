@@ -1,5 +1,13 @@
 # A room with work already in it, so a fresh install has something worth looking
 # at rather than an empty channel and a blinking cursor.
+#
+# Never in production. The container entrypoint runs `db:prepare`, which seeds a
+# database it just created — so a first deploy would have created these people
+# with these tokens, and `dev-alice` would be a working key to a working server.
+if Rails.env.production? && ENV["WORKROOM_SEED_ANYWAY"].blank?
+  puts "Refusing to seed in production: these accounts carry fixed tokens."
+  exit
+end
 
 alice = User.find_or_create_by!(email: "alice@farol.run") { |u|
   u.name = "Alice"; u.provider = "dev"; u.uid = "alice@farol.run"; u.api_token = "dev-alice"

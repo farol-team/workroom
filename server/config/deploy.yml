@@ -1,0 +1,78 @@
+# Deploying WorkRoom.
+#
+#   bin/kamal setup     # first time: installs docker on the host, boots the proxy
+#   bin/kamal deploy    # every time after
+#
+# Everything below that is not filled in is a decision somebody has to make, not
+# a default worth guessing. See docs/DEPLOYING.md.
+
+service: workroom
+
+# Yandex Container Registry addresses images as cr.yandex/<registry-id>/<name>.
+image: <%= ENV.fetch("WORKROOM_REGISTRY_ID", "REGISTRY_ID") %>/workroom
+
+servers:
+  web:
+    - <%= ENV.fetch("WORKROOM_HOST", "HOST_IP") %>
+
+proxy:
+  ssl: true
+  host: <%= ENV.fetch("WORKROOM_DOMAIN", "workroom.example") %>
+  # The client holds a long-lived websocket per open channel. Without this the
+  # proxy closes it after a minute and the room stops being live for anybody
+  # who is reading rather than typing.
+  healthcheck:
+    path: /up
+    interval: 5
+  app_port: 80
+
+registry:
+  server: cr.yandex
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+env:
+  clear:
+    # Solid Queue runs inside Puma. One process, one machine, and a room that
+    # does not need a second box to distil a memory.
+    SOLID_QUEUE_IN_PUMA: true
+    RAILS_ENV: production
+    STORAGE_REGION: ru-central1
+  secret:
+    - SECRET_KEY_BASE
+    - DATABASE_URL
+    # `*` is right for a desktop client on a laptop and wrong the moment this is
+    # reachable from a browser. The application refuses to boot without it.
+    - WORKROOM_ALLOWED_ORIGINS
+    # Identity. Without an issuer the workspace says plainly that it has no way
+    # to sign in, rather than falling back to something that takes any address.
+    - OIDC_ISSUER
+    - OIDC_CLIENT_ID
+    - OIDC_CLIENT_SECRET
+    - OIDC_REDIRECT_URI
+    # Work product belongs to the channel, so it must not live on a disk that a
+    # deploy replaces.
+    - STORAGE_ENDPOINT
+    - STORAGE_BUCKET
+    - STORAGE_ACCESS_KEY_ID
+    - STORAGE_SECRET_ACCESS_KEY
+    # The context database, when one is configured. Without it memory is
+    # PostgreSQL, which works and retrieves by substring rather than by meaning.
+    - OPENVIKING_URL
+    - OPENVIKING_API_KEY
+
+# The database is a managed cluster that already exists and is shared with other
+# applications. It is not an accessory here: nothing in this file may create,
+# migrate or destroy it, and `kamal setup` must not be able to take it down.
+
+aliases:
+  console: app exec --interactive --reuse "bin/rails console"
+  logs: app logs -f
+  shell: app exec --interactive --reuse "bash"
+
+# One machine, one container. When that stops being enough, the thing to add is
+# a second server here — not a queue process, and not a second database.
+builder:
+  arch: amd64
