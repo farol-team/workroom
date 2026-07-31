@@ -86,28 +86,23 @@ channel should receive a distilled page rather than a thousand messages.
 
 ## What the room sees
 
-The room shares outcomes, not process — and the person doing the work decides
-how much of the process to share. Visibility is a property of a session, because
-it is a stance towards a channel rather than a property of one turn.
+Everything a run produced stays available to the channel. There are no levels
+and nothing is hidden.
 
-| Level | The room sees | The owner sees |
-|---|---|---|
-| `full` | steps, messages, outcomes | everything |
-| `outcomes` *(default)* | run presence, the answer, artifacts, memory proposals | everything |
-| `private` | presence only, until the owner shares something | everything |
+A colleague could work with their agent in their own terminal. Choosing a channel
+instead is already the decision to share — it is what they trade for the room's
+memory and for their colleagues seeing the result. Offering a private mode would
+give people exactly what they would have got by not opening the room.
 
-Two things hold this together.
+What the design does decide is **prominence, not access**:
 
-**Presence survives every level.** A run announces that it started and that it
-finished, with no content, at all three. Without it a private session is
-indistinguishable from an absent colleague, and translucent becomes invisible —
-which is the failure the whole design turns on.
+| | |
+|---|---|
+| The question and the answer | in the feed |
+| The steps behind them | recorded, reachable, not pushed at the room |
 
-**A person's own messages are never governed by it.** Visibility applies to an
-agent session. What a human says in a channel is what they said in a channel.
-
-Changing the level is not retroactive. What was broadcast stays broadcast;
-pretending the room can unsee something would make the audit dishonest.
+A colleague came for the outcome, not for forty tool calls. Whether the steps are
+shown is a local view preference, not a property of the session.
 
 ## Artifacts
 

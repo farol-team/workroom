@@ -7,7 +7,6 @@ class AgentRun < ApplicationRecord
   has_many :run_steps, -> { order(:created_at) }, dependent: :destroy
   has_many :messages, as: :author, dependent: :nullify
   has_many :artifacts, dependent: :nullify
-  has_many :promotions, as: :source, dependent: :destroy
 
   validates :status, inclusion: { in: STATUSES }
 

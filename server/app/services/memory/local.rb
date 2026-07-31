@@ -31,6 +31,16 @@ module Memory
              .by_trust.limit(limit)
     end
 
+    def supersede(uri, reason: nil)
+      entry = MemoryEntry.current.find_by(uri: uri)
+      return nil unless entry
+
+      entry.supersede!
+      Activity.log(actor: entry.author || entry.channel, action: "memory.superseded",
+                   subject: entry, reason: reason)
+      entry
+    end
+
     def write(channel, title:, detail:, overview: nil, abstract: nil,
               trust: "agent", author: nil, source: nil, key: nil)
       key ||= title.parameterize.presence || SecureRandom.hex(4)

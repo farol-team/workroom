@@ -9,7 +9,6 @@ class BroadcastTest < ActiveSupport::TestCase
     @run = @session.agent_runs.create!(status: "running")
   end
 
-  # Capture both audiences at once so routing is asserted, not assumed.
   def route(&block)
     room = []
     owner = []
@@ -27,72 +26,43 @@ class BroadcastTest < ActiveSupport::TestCase
     ActionCable.server.singleton_class.send(:remove_method, :broadcast)
   end
 
-  def step! = Broadcast.step(@run.run_steps.create!(kind: "tool_use", label: "search"))
+  # Working in a channel is already the decision to share. There is nothing to
+  # configure — the record is complete, and the feed carries outcomes.
+  test "a step reaches its owner and stays out of the feed" do
+    room, owner = route { Broadcast.step(@run.run_steps.create!(kind: "tool_use", label: "search")) }
 
-  test "a step never reaches the room under the default level" do
-    assert_equal "outcomes", @session.visibility
-
-    room, owner = route { step! }
-
-    assert_empty room, "another person's tool calls are not what the room shares"
-    assert_equal 1, owner.count { |p| p[:type] == "step" }, "the owner always sees their own steps"
-  end
-
-  test "a step reaches the room only when its owner chose full" do
-    @session.update!(visibility: "full")
-
-    room, owner = route { step! }
-
-    assert_equal 1, room.count { |p| p[:type] == "step" }
+    assert_empty room, "forty tool calls are not what a colleague came for"
     assert_equal 1, owner.count { |p| p[:type] == "step" }
   end
 
-  test "a private session sends the room nothing at all" do
-    @session.update!(visibility: "private")
+  test "an answer reaches the room" do
+    room, = route { Broadcast.message(@channel.messages.create!(author: @run, body: "answer")) }
 
-    room, owner = route do
-      step!
-      Broadcast.message(@channel.messages.create!(author: @run, body: "answer"))
-    end
-
-    assert_empty room, "a private session is the owner's; the room learns of it only by presence"
-    assert_equal 2, owner.length, "the owner still sees everything they produced"
-  end
-
-  test "an agent message reaches the room under outcomes but not under private" do
-    shared = @channel.messages.create!(author: @run, body: "answer")
-
-    room, = route { Broadcast.message(shared) }
     assert_equal 1, room.count { |p| p[:type] == "message" }
-
-    @session.update!(visibility: "private")
-    room, = route { Broadcast.message(shared) }
-    assert_empty room
   end
 
-  test "a person's own message always reaches the room regardless of any level" do
-    @session.update!(visibility: "private")
-
+  test "a person's message reaches the room" do
     room, = route { Broadcast.message(@channel.messages.create!(author: @alice, body: "hi")) }
 
-    assert_equal 1, room.count { |p| p[:type] == "message" },
-                 "visibility governs an agent session, never what a person says"
+    assert_equal 1, room.count { |p| p[:type] == "message" }
   end
 
-  test "run status reaches the room at every level so a colleague knows work is happening" do
-    %w[full outcomes private].each do |level|
-      @session.update!(visibility: level)
-      room, = route { Broadcast.run(@run) }
-      assert_equal 1, room.count { |p| p[:type] == "run" },
-                   "presence must survive #{level} — otherwise private is indistinguishable from absent"
-    end
+  test "run status reaches the room so a colleague can tell work is happening" do
+    room, owner = route { Broadcast.run(@run) }
+
+    assert_equal 1, room.count { |p| p[:type] == "run" }
+    assert_equal 1, owner.count { |p| p[:type] == "run" }
   end
 
-  test "the presence payload carries no content" do
-    @session.update!(visibility: "private")
+  test "the run payload carries no message body" do
     room, = route { Broadcast.run(@run) }
 
-    assert_equal %i[type run].sort, room.first.keys.map(&:to_sym).sort
     refute room.first[:run].key?(:body)
+  end
+
+  test "there is no visibility to configure" do
+    refute AgentSession.column_names.include?("visibility"),
+           "a level is a decision the user already made by opening the channel"
+    refute AgentSession.new.respond_to?(:shares_process?)
   end
 end

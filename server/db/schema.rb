@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_31_090001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_31_110002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -52,7 +52,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_090001) do
     t.string "status", default: "idle", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
-    t.string "visibility", default: "outcomes", null: false
     t.index ["channel_id"], name: "index_agent_sessions_on_channel_id"
     t.index ["user_id", "channel_id"], name: "index_agent_sessions_on_user_id_and_channel_id"
     t.index ["user_id"], name: "index_agent_sessions_on_user_id"
@@ -127,24 +126,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_090001) do
     t.index ["parent_id"], name: "index_messages_on_parent_id"
   end
 
-  create_table "promotions", force: :cascade do |t|
-    t.bigint "approved_by_id"
-    t.bigint "channel_id", null: false
-    t.datetime "created_at", null: false
-    t.bigint "proposed_by_id"
-    t.text "rationale"
-    t.bigint "source_id", null: false
-    t.string "source_type", null: false
-    t.string "state", default: "proposed", null: false
-    t.datetime "updated_at", null: false
-    t.string "viking_uri"
-    t.index ["approved_by_id"], name: "index_promotions_on_approved_by_id"
-    t.index ["channel_id", "state"], name: "index_promotions_on_channel_id_and_state"
-    t.index ["channel_id"], name: "index_promotions_on_channel_id"
-    t.index ["proposed_by_id"], name: "index_promotions_on_proposed_by_id"
-    t.index ["source_type", "source_id"], name: "index_promotions_on_source"
-  end
-
   create_table "run_steps", force: :cascade do |t|
     t.bigint "agent_run_id", null: false
     t.datetime "created_at", null: false
@@ -180,8 +161,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_090001) do
   add_foreign_key "memory_entries", "channels"
   add_foreign_key "messages", "channels"
   add_foreign_key "messages", "messages", column: "parent_id"
-  add_foreign_key "promotions", "channels"
-  add_foreign_key "promotions", "users", column: "approved_by_id"
-  add_foreign_key "promotions", "users", column: "proposed_by_id"
   add_foreign_key "run_steps", "agent_runs"
 end

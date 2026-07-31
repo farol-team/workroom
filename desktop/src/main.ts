@@ -59,6 +59,7 @@ function addStepLine(runId: number, label: string) {
     holder = document.createElement("div");
     holder.className = "steps";
     holder.dataset.run = String(runId);
+    holder.hidden = !showSteps;
     box.append(holder);
   }
   const line = document.createElement("div");
@@ -147,7 +148,6 @@ async function send(text: string) {
   const history = recentHistory();
   const sessionId = await agent.sessionFor(current.slug, "/tmp");
   const run = await api.startRun(current.slug, posted.id, sessionId);
-  if (visibility !== "outcomes") await api.setVisibility(run.agent_session_id, visibility).catch(() => {});
 
   let reply = "";
   const stop = await agent.onUpdate((u: Update) => {
@@ -222,10 +222,15 @@ $("agent-toggle").addEventListener("click", async () => {
   }
 });
 
-let visibility: "full" | "outcomes" | "private" = "outcomes";
+// A local view preference, not a property of the session. The record is
+// complete either way; this only decides how much of it is on screen.
+let showSteps = true;
 
-$("visibility").addEventListener("change", (e) => {
-  visibility = (e.target as HTMLSelectElement).value as typeof visibility;
+$("show-steps").addEventListener("change", (e) => {
+  showSteps = (e.target as HTMLInputElement).checked;
+  document.querySelectorAll<HTMLElement>(".steps").forEach((el) => {
+    el.hidden = !showSteps;
+  });
 });
 
 $("memory-toggle").addEventListener("click", () => {
