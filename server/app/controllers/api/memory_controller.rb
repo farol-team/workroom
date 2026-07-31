@@ -3,9 +3,8 @@ module Api
     before_action :require_channel_access!
 
     def index
-      entries = params[:q].present? ?
-        Memory::Store.current.search(channel!, params[:q]) :
-        channel!.memory_entries.current.by_trust.limit(50)
+      store = Memory::Store.current
+      entries = params[:q].present? ? store.search(channel!, params[:q]) : store.all(channel!, limit: 50)
       render json: entries.map { |e| serialize(e) }
     end
 
@@ -22,8 +21,11 @@ module Api
 
     private
 
+    # A row id is the local table's, not the memory model's. An entry is
+    # identified by its uri — which is what superseding and the rail both take,
+    # and what an external store would hand back.
     def serialize(e)
-      e.slice(:id, :uri, :title, :abstract, :overview, :detail, :trust, :created_at)
+      e.slice(:uri, :title, :abstract, :overview, :detail, :trust, :created_at)
     end
   end
 end

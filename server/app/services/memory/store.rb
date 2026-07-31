@@ -12,6 +12,11 @@ module Memory
 
     def context_for(_channel, limit: 20)  = raise NotImplementedError
     def search(_channel, _query, limit: 10) = raise NotImplementedError
+
+    # Everything the room currently knows, most trusted first. Not search with
+    # an empty query: a store with real retrieval has no reason to read "" as
+    # "everything", and listing must not rest on one backend's accident.
+    def all(_channel, limit: 200)         = raise NotImplementedError
     def write(_channel, **_attrs)         = raise NotImplementedError
 
     # An agent that finds a contradiction resolves it rather than adding a

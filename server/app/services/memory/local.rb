@@ -30,6 +30,10 @@ module Memory
     # Agents search with the question they were asked, not with a keyword. So the
     # query is read as terms: an entry matching any of them is a candidate, and
     # the one matching most of them comes first.
+    def all(channel, limit: 200)
+      channel.memory_entries.current.by_trust.limit(limit)
+    end
+
     def search(channel, query, limit: 10)
       terms = Store.terms_in(query)
       scope = channel.memory_entries.current

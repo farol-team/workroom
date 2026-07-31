@@ -58,7 +58,7 @@ export class Api {
   }
 
   memory(slug: string) {
-    return this.call<Array<{ id: number; title: string; overview: string; trust: string }>>(
+    return this.call<Array<{ uri: string; title: string; overview: string; trust: string }>>(
       `/channels/${slug}/memory`);
   }
 

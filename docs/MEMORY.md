@@ -103,3 +103,10 @@ person's agent reaching a wrong conclusion would otherwise become everyone's sta
 Channel scoping contains this: writes land in a channel with a known membership, so an error
 poisons one domain rather than the organization. Moving knowledge between channels, or up to
 `viking://org/`, is a separate explicit act with its own review.
+
+## Identity
+
+An entry is identified by its **uri**, not by a row id. Superseding takes a uri,
+the capability rail executes against a uri, and an external context store hands
+back uris rather than primary keys. The API returns uris for the same reason: a
+row id is the local table's, and the local table is meant to be replaceable.
