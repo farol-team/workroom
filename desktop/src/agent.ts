@@ -7,6 +7,8 @@ import { listen } from "@tauri-apps/api/event";
 import { translateAcp, type Update } from "./rules";
 export type { Update };
 
+export interface RailConfig { url: string; token: string }
+
 export class Agent {
   private sessions = new Map<string, string>();   // channel slug -> ACP session id
   running = false;
@@ -22,11 +24,19 @@ export class Agent {
     this.sessions.clear();
   }
 
-  /// One session per channel — the memory scope and the session scope are the same thing.
-  async sessionFor(slug: string, cwd: string): Promise<string> {
+  /// One session per channel — the memory scope and the session scope are the
+  /// same thing. The rail is mounted per channel too, so the agent cannot reach
+  /// another room even if it tries.
+  async sessionFor(slug: string, cwd: string, rail?: RailConfig): Promise<string> {
     const existing = this.sessions.get(slug);
     if (existing) return existing;
-    const res = await invoke<{ sessionId: string }>("agent_new_session", { cwd, mcpServers: [] });
+
+    const mcpServers = rail
+      ? [ { name: "workroom", type: "http", url: rail.url,
+            headers: { Authorization: `Bearer ${rail.token}` } } ]
+      : [];
+
+    const res = await invoke<{ sessionId: string }>("agent_new_session", { cwd, mcpServers });
     this.sessions.set(slug, res.sessionId);
     return res.sessionId;
   }

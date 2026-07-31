@@ -146,7 +146,7 @@ async function send(text: string) {
   // may give the instruction.
   const { context } = await api.context(current.slug);
   const history = recentHistory();
-  const sessionId = await agent.sessionFor(current.slug, "/tmp");
+  const sessionId = await agent.sessionFor(current.slug, "/tmp", api.rail(current.slug));
   const run = await api.startRun(current.slug, posted.id, sessionId);
 
   let reply = "";
