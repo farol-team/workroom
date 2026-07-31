@@ -60,3 +60,7 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 
 .offer, .artifact { margin-left: 104px; font-size: 13px; color: var(--muted); }
 .artifact { padding: 4px 0; }
+
+#session-options { display: flex; gap: 8px; padding: 8px 16px 0; }
+.session-option select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; max-width: 220px; }
