@@ -1,8 +1,21 @@
+# Rails and performance cops arrive with omakase. The ones that know what a test
+# is do not, and their absence is silent: rubocop reports "no offenses detected"
+# either way, which is how 138 Rails cops ran here and zero Minitest ones did.
+#
+# `plugins:`, not `require:` — an extension listed under `require` is loaded by
+# older rubocop and quietly ignored by this one.
+plugins:
+  - rubocop-minitest
+
 # Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
-# Overwrite or add rules to create your own house style
+# Two cops turned off with a reason, rather than suppressed line by line.
 #
-# # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
-# Layout/SpaceInsideArrayLiteralBrackets:
-#   Enabled: false
+# `assert_equal true, x` asserts the value *is* true. `assert(x)` accepts
+# anything truthy — so a JSON field documented as a boolean that starts
+# returning "yes" would pass. For an API response the exact value is the point.
+Minitest/AssertTruthy:
+  Enabled: false
+Minitest/RefuteFalse:
+  Enabled: false

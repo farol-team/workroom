@@ -10,7 +10,7 @@ class ChannelTemplateTest < ActiveSupport::TestCase
     # Seeding a room with facts would be seeding it with somebody else's facts,
     # and the first thing memory has to be is true for this room.
     ChannelTemplate.all.each do |template|
-      refute template.respond_to?(:memory), "#{template.key} must not carry memory"
+      refute_respond_to template, :memory, "#{template.key} must not carry memory"
       template.skills.each do |skill|
         assert skill[:title].present?, "#{template.key} has a skill with no title"
         assert skill[:body].present?, "#{template.key} has a skill with no body"

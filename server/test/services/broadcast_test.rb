@@ -73,9 +73,9 @@ class BroadcastTest < ActiveSupport::TestCase
   end
 
   test "there is no visibility to configure" do
-    refute AgentSession.column_names.include?("visibility"),
+    refute_includes AgentSession.column_names, "visibility",
            "a level is a decision the user already made by opening the channel"
-    refute AgentSession.new.respond_to?(:shares_process?)
+    refute_respond_to AgentSession.new, :shares_process?
   end
 
   test "a message tells the rooms you are not looking at that something happened" do

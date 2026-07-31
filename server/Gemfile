@@ -54,6 +54,11 @@ group :development, :test do
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
+
+  # Cops that know what a test is. Rails and performance cops arrive with
+  # omakase; these do not, and their absence is silent — rubocop reports no
+  # offences either way.
+  gem "rubocop-minitest", require: false
 end
 
 group :development do
