@@ -23,6 +23,13 @@
       <main>
         <header>
           <div><strong id="channel-name">—</strong> <span id="channel-purpose" class="muted"></span></div>
+          <label class="vis" title="How much of your agent's work the room sees">
+            <select id="visibility">
+              <option value="outcomes" selected>Room sees outcomes</option>
+              <option value="full">Room sees everything</option>
+              <option value="private">Private</option>
+            </select>
+          </label>
           <button id="memory-toggle" class="ghost">What the room knows</button>
         </header>
         <section id="messages"></section>

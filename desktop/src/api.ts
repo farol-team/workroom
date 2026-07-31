@@ -77,8 +77,15 @@ export class Api {
     });
   }
 
+  /// How much of a session's process the room sees. The owner's call.
+  setVisibility(sessionId: number, visibility: "full" | "outcomes" | "private") {
+    return this.call(`/agent_sessions/${sessionId}`, {
+      method: "PATCH", body: JSON.stringify({ visibility }),
+    });
+  }
+
   startRun(slug: string, triggerMessageId: number, externalId: string) {
-    return this.call<{ id: number }>(`/channels/${slug}/runs`, {
+    return this.call<{ id: number; agent_session_id: number }>(`/channels/${slug}/runs`, {
       method: "POST",
       body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: "opencode", external_id: externalId }),
     });
@@ -100,13 +107,19 @@ export class Api {
     return this.call(`/runs/${runId}`, { method: "PATCH", body: JSON.stringify({ status }) });
   }
 
-  /// Action Cable. Everything the room sees arrives here.
+  /// Two streams. The room carries what the room shares; the user stream
+  /// carries what only its owner needs — their own steps, whatever level they chose.
   live(slug: string, onEvent: (e: any) => void) {
     const url = this.base.replace(/^http/, "ws") + `/cable?token=${encodeURIComponent(this.token)}`;
     const ws = new WebSocket(url);
-    const identifier = JSON.stringify({ channel: "RoomChannel", slug });
+    const subscriptions = [
+      JSON.stringify({ channel: "RoomChannel", slug }),
+      JSON.stringify({ channel: "UserChannel" }),
+    ];
 
-    ws.onopen = () => ws.send(JSON.stringify({ command: "subscribe", identifier }));
+    ws.onopen = () =>
+      subscriptions.forEach((identifier) =>
+        ws.send(JSON.stringify({ command: "subscribe", identifier })));
     ws.onmessage = (ev) => {
       const data = JSON.parse(ev.data);
       if (data.type) return;              // welcome / ping / confirm_subscription

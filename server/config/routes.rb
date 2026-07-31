@@ -14,6 +14,8 @@ Rails.application.routes.draw do
     post "channels/:channel_slug/memory", to: "memory#create"
 
     post  "channels/:channel_slug/runs", to: "runs#create", as: :channel_runs
+    patch "agent_sessions/:id", to: "agent_sessions#update", as: :agent_session
+
     patch "runs/:id",          to: "runs#update",  as: :run
     post  "runs/:id/steps",    to: "runs#step",    as: :run_steps
     post  "runs/:id/messages", to: "runs#message", as: :run_messages
