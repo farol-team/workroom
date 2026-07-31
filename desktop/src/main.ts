@@ -1,6 +1,7 @@
 import { Api, type Channel, type Message } from "./api";
 import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
+import { invoke } from "@tauri-apps/api/core";
 import * as settings from "./settings";
 import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
 
@@ -635,6 +636,28 @@ $("thread-composer").addEventListener("submit", async (e) => {
   } catch (err) { alert(String(err)); }
 });
 
+let signedInThroughBrowser = false;
+
+/// The browser round trip. The client holds the same bearer token either way —
+/// only how a person comes to hold one changes.
+$("signin-provider").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("signin-provider");
+  button.disabled = true;
+  button.textContent = "Waiting for your browser…";
+  try {
+    const token = await invoke<string>("sign_in_with_provider",
+      { server: import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000" });
+    api.useToken(token);
+    signedInThroughBrowser = true;
+    $<HTMLDialogElement>("signin").close();
+  } catch (err) {
+    alert(String(err));
+  } finally {
+    button.disabled = false;
+    button.textContent = "Sign in with your organisation";
+  }
+});
+
 $("skill-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = $<HTMLInputElement>("skill-title").value.trim();
@@ -650,10 +673,17 @@ $("skill-form").addEventListener("submit", async (e) => {
 
 async function boot() {
   const dialog = $<HTMLDialogElement>("signin");
+  const how = await api.methods().catch(() => ({ development: true, provider: false }));
+  $("signin-provider-block").hidden = !how.provider;
+  $("signin-dev").hidden = !how.development;
+  $("signin-none").hidden = how.provider || how.development;
+
   dialog.showModal();
   await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
 
-  const { user } = await api.signIn($<HTMLInputElement>("email").value.trim());
+  const { user } = signedInThroughBrowser
+    ? await api.whoAmI()
+    : await api.signIn($<HTMLInputElement>("email").value.trim());
   me = user.email;
   $("who").textContent = user.name;
 

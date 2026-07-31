@@ -97,5 +97,7 @@ approval queue. A wrong entry is corrected by superseding it.
   sign-in — any address, no proof — is on in development and test and off
   everywhere else; `WORKROOM_DEV_SIGNIN=1` forces it on if you really mean it.
 
-  The desktop client still signs in the development way. Carrying the browser
-  round trip into the client is its own card.
+  The client asks the workspace how it lets people in, and offers what is there.
+  With a provider configured it opens your own browser, your provider answers,
+  and the client ends up holding the same bearer token it would have got the
+  development way — no token of the provider's reaches it.

@@ -1,6 +1,10 @@
 Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # A desktop sign-in starts here so the return address is remembered before the
+  # provider is visited; OmniAuth mounts /auth/:provider itself.
+  get "auth/openid_connect", to: "sessions#start", as: :start_sign_in
+
   # OmniAuth mounts /auth/:provider itself; these are where it comes back to.
   get  "auth/:provider/callback", to: "sessions#create"
   post "auth/:provider/callback", to: "sessions#create"
@@ -8,6 +12,8 @@ Rails.application.routes.draw do
 
   namespace :api do
     post "auth", to: "auth#create"
+    get  "auth/methods", to: "auth#methods_available", as: :auth_methods
+    get  "me", to: "auth#me", as: :me
 
     # One MCP endpoint per channel — the channel in the url is the scope.
     post "rail/:slug", to: "rail#call", as: :rail

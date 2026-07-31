@@ -1,4 +1,5 @@
 mod acp;
+mod signin;
 mod workspace;
 
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
@@ -125,6 +127,35 @@ async fn agent_read(workspace: String, path: String) -> Result<String, String> {
         return Err(format!("{path} is too large to attach"));
     }
     Ok(BASE64.encode(bytes))
+}
+
+/// Sign in through the person's own browser.
+///
+/// The listener is opened *before* the browser, or the provider could come back
+/// to a port nothing is holding. What comes back is the bearer token this client
+/// already carries — no token of the provider's reaches this process.
+#[tauri::command]
+async fn sign_in_with_provider(app: AppHandle, server: String) -> Result<String, String> {
+    let listener = signin::Listener::open().map_err(|e| format!("cannot listen: {e}"))?;
+    let port = listener.port();
+    let state = signin::nonce(port);
+
+    let url = format!(
+        "{}/auth/openid_connect?return_port={port}&state={state}",
+        server.trim_end_matches('/')
+    );
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| format!("cannot open a browser: {e}"))?;
+
+    let expected = state.clone();
+    tokio::task::spawn_blocking(move || {
+        listener.wait(std::time::Duration::from_secs(180), Some(&expected))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|callback| callback.token)
+    .ok_or_else(|| "sign-in was not completed".to_string())
 }
 
 /// Which of this person's agents are running.
@@ -273,6 +304,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            sign_in_with_provider,
             agent_start,
             agent_list,
             agent_workspace,

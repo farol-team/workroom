@@ -69,12 +69,23 @@
     </div>
 
     <dialog id="signin">
-      <form method="dialog">
-        <h2>Sign in</h2>
+      <h2>Sign in</h2>
+
+      <div id="signin-provider-block" hidden>
+        <button type="button" id="signin-provider">Sign in with your organisation</button>
+        <p class="muted">Your browser opens, your provider answers, and this window continues.</p>
+      </div>
+
+      <form method="dialog" id="signin-dev">
         <p class="muted">Development sign-in. Any email works; try alice@farol.run.</p>
         <input id="email" value="alice@farol.run" />
         <button value="ok">Enter</button>
       </form>
+
+      <p id="signin-none" class="muted" hidden>
+        This workspace has no way to sign in configured. Set OIDC_ISSUER, or
+        WORKROOM_DEV_SIGNIN=1 if you meant to leave it open.
+      </p>
     </dialog>
 
     <script type="module" src="/src/main.ts"></script>

@@ -2,7 +2,21 @@ module Api
   # Development sign-in. Replaced by OmniAuth; the shape of what it returns
   # (a bearer token identifying a User) does not change.
   class AuthController < BaseController
-    skip_before_action :authenticate!
+    skip_before_action :authenticate!, only: %i[create methods_available]
+
+    # How this workspace lets people in. The client cannot guess, and guessing
+    # wrong means offering a box that takes any address to a workspace that has
+    # a provider.
+    def methods_available
+      render json: { development: Rails.configuration.x.dev_signin,
+                     provider: ENV["OIDC_ISSUER"].present? }
+    end
+
+    # Who the token in hand belongs to. A client that signed in through the
+    # browser holds a token and has never been told whose it is.
+    def me
+      render json: { user: current_user.slice(:id, :email, :name) }
+    end
 
     def create
       return head :not_found unless Rails.configuration.x.dev_signin

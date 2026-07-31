@@ -5,6 +5,16 @@
 class SessionsController < ActionController::Base
   skip_forgery_protection
 
+  # A native application cannot receive a redirect the way a website can, so it
+  # listens on the loopback interface and tells us where (RFC 8252). Remembered
+  # before the provider is visited, because the provider brings back nothing of
+  # ours.
+  def start
+    session[:return_port] = loopback_port(params[:return_port])
+    session[:return_state] = params[:state].to_s.first(64).presence
+    redirect_to "/auth/openid_connect", allow_other_host: false
+  end
+
   def create
     auth = request.env["omniauth.auth"]
     email = auth&.dig("info", "email").presence
@@ -24,7 +34,16 @@ class SessionsController < ActionController::Base
     user.save!
 
     Activity.log(actor: user, action: "session.signed_in", subject: user)
-    render plain: handoff(user)
+
+    port = session.delete(:return_port)
+    state = session.delete(:return_state)
+    return render(plain: handoff(user)) unless port
+
+    # Only ever the loopback interface, and only ever a port this server itself
+    # validated. An unvalidated return address is a way to have this server hand
+    # somebody's token to a host of an attacker's choosing.
+    query = { token: user.api_token, state: state }.compact.to_query
+    redirect_to "http://127.0.0.1:#{port}/?#{query}", allow_other_host: true
   end
 
   def failure
@@ -32,6 +51,14 @@ class SessionsController < ActionController::Base
   end
 
   private
+
+  # A port a listener on this machine could actually hold. Anything else — a
+  # privileged port, a hostname, a negative number, something that is not a
+  # number at all — is not a return address.
+  def loopback_port(raw)
+    port = raw.to_s[/\A\d+\z/].to_i
+    port if port.between?(1024, 65_535)
+  end
 
   # The desktop client reads the token from this page. It is deliberately plain:
   # a browser shows it, and a loopback listener can parse it.

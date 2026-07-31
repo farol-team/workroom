@@ -53,6 +53,37 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  test "a desktop sign-in comes back to the listener that started it" do
+    get "/auth/openid_connect", params: { return_port: 51_732, state: "abc123" }
+    get "/auth/openid_connect/callback"
+
+    assert_response :redirect
+    back = URI.parse(response.location)
+    assert_equal [ "http", "127.0.0.1", 51_732 ], [ back.scheme, back.host, back.port ],
+                 "the loopback interface, and the port the listener named"
+    assert_equal({ "token" => User.find_by!(email: "dana@farol.run").api_token,
+                   "state" => "abc123" }, Rack::Utils.parse_query(back.query))
+  end
+
+  test "a return port is a loopback port or it is nothing" do
+    # An unvalidated return address is a way to have this server hand somebody's
+    # token to a host of the attacker's choosing.
+    [ "80", "0", "70000", "1023", "evil.example.com:443", "', 'x", "-1" ].each do |port|
+      get "/auth/openid_connect", params: { return_port: port, state: "abc" }
+      get "/auth/openid_connect/callback"
+
+      refute_match(/evil|:80\b/, response.location.to_s, "#{port} must not become a redirect")
+      assert_response :success, "#{port} falls back to the page, never to a redirect"
+    end
+  end
+
+  test "without a listener the browser is told, and told nothing else" do
+    get "/auth/openid_connect/callback"
+
+    assert_response :success
+    assert_includes response.body, User.find_by!(email: "dana@farol.run").api_token
+  end
+
   test "a provider that says no signs nobody in" do
     OmniAuth.config.mock_auth[:openid_connect] = :invalid_credentials
 
@@ -70,6 +101,35 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     assert_no_difference -> { User.count } do
       get "/auth/openid_connect/callback"
     end
+    assert_response :unauthorized
+  end
+end
+
+class SignInMethodsTest < ActionDispatch::IntegrationTest
+  test "a workspace says how it lets people in" do
+    # The client cannot guess: a workspace with a provider must not offer a box
+    # that takes any address, and one without a provider must offer something.
+    get api_auth_methods_path
+
+    assert_response :success
+    assert_equal true, response.parsed_body["development"]
+    assert_equal false, response.parsed_body["provider"], "no issuer is configured in test"
+  end
+end
+
+class WhoAmITest < ActionDispatch::IntegrationTest
+  test "a client that signed in through the browser can ask whose token it holds" do
+    alice = user(name: "Alice")
+
+    get api_me_path, headers: auth(alice)
+
+    assert_response :success
+    assert_equal alice.name, response.parsed_body.dig("user", "name")
+  end
+
+  test "a token nobody issued gets nothing" do
+    get api_me_path, headers: { "Authorization" => "Bearer not-a-token" }
+
     assert_response :unauthorized
   end
 end
