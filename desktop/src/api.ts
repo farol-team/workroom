@@ -81,6 +81,12 @@ export class Api {
     });
   }
 
+  attachArtifact(runId: number, name: string, content: string, kind = "transcript") {
+    return this.call(`/runs/${runId}/artifacts`, {
+      method: "POST", body: JSON.stringify({ name, content, kind }),
+    });
+  }
+
   plan(runId: number, entries: unknown[]) {
     return this.call(`/runs/${runId}/plan`, {
       method: "POST", body: JSON.stringify({ entries }),

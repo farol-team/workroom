@@ -77,3 +77,10 @@ export function translateAcp(msg: unknown): Update | null {
   }
   return t ? { kind: "other", label: t } : null;
 }
+
+/// What an attached transcript is called. Named after the run rather than the
+/// session, because the run is what a colleague was watching.
+export function transcriptName(runId: number, at: Date): string {
+  const stamp = at.toISOString().slice(0, 16).replace("T", " ").replace(":", "");
+  return `run-${runId} transcript ${stamp}.json`;
+}

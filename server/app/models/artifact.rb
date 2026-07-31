@@ -5,4 +5,6 @@ class Artifact < ApplicationRecord
   has_one_attached :file
 
   validates :name, presence: true
+
+  scope :transcripts, -> { where(kind: "transcript") }
 end

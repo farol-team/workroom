@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { StepLedger, formatHistory, parseAddress, presenceState, translateAcp } from "../src/rules";
+import { StepLedger, formatHistory, parseAddress, presenceState, transcriptName, translateAcp } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -143,5 +143,18 @@ describe("acp translation", () => {
   test("anything that is not a session update is ignored", () => {
     expect(translateAcp({ method: "something/else" })).toBeNull();
     expect(translateAcp(null)).toBeNull();
+  });
+});
+
+describe("transcript naming", () => {
+  test("names the artifact after the run a colleague was watching", () => {
+    const name = transcriptName(42, new Date("2026-07-31T09:05:00Z"));
+    expect(name).toMatch(/^run-42 transcript /);
+    expect(name.endsWith(".json")).toBe(true);
+  });
+
+  test("two runs never collide", () => {
+    const at = new Date("2026-07-31T09:05:00Z");
+    expect(transcriptName(1, at)).not.toEqual(transcriptName(2, at));
   });
 });
