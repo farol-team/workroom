@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Bring the prototype up: database, schema, something worth looking at, server.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+DB_HOST="${WORKROOM_DB_HOST:-127.0.0.1}"
+DB_PORT="${WORKROOM_DB_PORT:-5433}"
+export DATABASE_URL="${DATABASE_URL:-postgres://workroom:workroom@${DB_HOST}:${DB_PORT}}"
+
+say()  { printf '\033[36m→ %s\033[0m\n' "$*"; }
+fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+up()   { (exec 3<>"/dev/tcp/${DB_HOST}/${DB_PORT}") 2>/dev/null; }
+
+say "database"
+if ! up; then
+  command -v docker >/dev/null || fail "Postgres is not on ${DB_HOST}:${DB_PORT} and docker is not installed."
+  docker compose up -d postgres >/dev/null
+  for _ in $(seq 30); do up && break; sleep 1; done
+  up || fail "Postgres did not come up on ${DB_HOST}:${DB_PORT}."
+fi
+
+cd server
+command -v bundle >/dev/null || fail "Ruby 3.4.10 with bundler is required. See docs/RUNNING.md."
+[ -d ../.bundle ] || bundle check >/dev/null 2>&1 || { say "gems"; bundle install --quiet; }
+
+say "schema"
+bin/rails db:prepare >/dev/null
+
+say "seed"
+bin/rails db:seed
+
+cat <<'NEXT'
+
+  The room is ready. In another terminal:
+
+      cd desktop && pnpm install && pnpm tauri dev
+
+  Sign in as alice@farol.run. Open # meetings — a finished turn is already
+  there, with the plan its agent followed and the answer it posted.
+
+  To run your own turn you need your own agent, under your own credentials:
+
+      npm i -g opencode-ai && opencode auth login
+
+  Press Start agent, then ask:
+
+      @agent what did we agree with Acme about reporting?
+
+  Nothing told that session about Acme. The answer comes from what the room
+  knows. Open "What the room knows" to see exactly what it was handed.
+
+NEXT
+
+say "server on http://127.0.0.1:3000  (ctrl-c to stop)"
+exec bin/rails server

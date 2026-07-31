@@ -7,8 +7,9 @@ alongside your own agent, running on your own machine. A colleague joins the sam
 with *their* agent and continues where you stopped, because what the room knows is held by
 the room, not by anyone's agent.
 
-> **Status: early.** A working vertical slice — channels, live messages, a local agent
-> in the room, and channel memory pushed into every session. See
+> **Status: a running prototype.** `bin/prototype` brings the whole thing up. Channels,
+> live messages, a local agent in the room over ACP, a capability rail the agent reaches
+> memory through, and rehydration across people and sessions. See
 > [Running it](docs/RUNNING.md).
 
 ```
@@ -65,13 +66,12 @@ Release tags are prefixed: `server-v*` and `desktop-v*`.
 
 ## Getting started
 
-See [Running it](docs/RUNNING.md). Short version:
-
 ```bash
-docker compose up -d postgres
-cd server  && bundle install && bin/rails db:prepare db:seed && bin/rails server
+bin/prototype                              # database, schema, a seeded room, server
 cd desktop && pnpm install && pnpm tauri dev
 ```
+
+See [Running it](docs/RUNNING.md) for what to try once it is up.
 
 Requires Ruby 3.4.10 and Node 24. The agent is yours: `npm i -g opencode-ai && opencode auth login`.
 
