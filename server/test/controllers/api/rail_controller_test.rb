@@ -54,6 +54,15 @@ class Api::RailControllerTest < ActionDispatch::IntegrationTest
     assert_includes found.map { |c| c["uri"] }, "workroom://memory/remember"
   end
 
+  test "an agent asking in a sentence still finds the action it needs" do
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "I should remember this conclusion" } })
+      .dig("result", "content", 0, "text"))
+
+    assert_includes found.map { |c| c["uri"] }, "workroom://memory/remember",
+      "the rail is discovered in the agent's own words, not by exact phrase"
+  end
+
   test "executing a knowledge capability returns the detail tier" do
     uri = MemoryEntry.last.uri
     out = rpc("tools/call", { name: "execute_capability", arguments: { uri: uri } })

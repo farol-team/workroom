@@ -11,6 +11,7 @@ development:
   cable:
     <<: *default
     database: workroom_development_cable
+    # No app migrations here — the cable database is defined by db/cable_schema.rb.
     migrations_paths: db/cable_migrate
 
 test:
@@ -24,4 +25,5 @@ production:
   cable:
     <<: *default
     database: workroom_production_cable
+    # No app migrations here — the cable database is defined by db/cable_schema.rb.
     migrations_paths: db/cable_migrate

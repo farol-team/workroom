@@ -73,10 +73,13 @@ module Rail
 
     def store = Memory::Store.current
 
+    # Read the same way knowledge is read: by terms, so an agent describing what
+    # it wants to do finds the action that does it.
     def matching_actions(query)
-      q = query.to_s.downcase
+      terms = Memory::Store.terms_in(query)
       ACTIONS.filter_map do |uri, a|
-        next if q.present? && !"#{uri} #{a[:title]} #{a[:summary]}".downcase.include?(q)
+        text = "#{uri} #{a[:title]} #{a[:summary]}".downcase
+        next if terms.any? && terms.none? { |t| text.include?(t) }
         { uri: uri, title: a[:title], summary: a[:summary], kind: "action", args: a[:args] }
       end
     end

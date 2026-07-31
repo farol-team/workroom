@@ -24,11 +24,24 @@ module Memory
       TEXT
     end
 
+    # Everything an entry says, as one string to match against.
+    HAYSTACK = "concat_ws(' ', title, abstract, overview, detail)".freeze
+
+    # Agents search with the question they were asked, not with a keyword. So the
+    # query is read as terms: an entry matching any of them is a candidate, and
+    # the one matching most of them comes first.
     def search(channel, query, limit: 10)
-      channel.memory_entries.current
-             .where("title ILIKE :q OR abstract ILIKE :q OR overview ILIKE :q OR detail ILIKE :q",
-                    q: "%#{query}%")
-             .by_trust.limit(limit)
+      terms = Store.terms_in(query)
+      scope = channel.memory_entries.current
+      return scope.by_trust.limit(limit) if terms.empty?
+
+      likes = terms.map { |t| "%#{t}%" }
+      matches = terms.map { "#{HAYSTACK} ILIKE ?" }.join(" OR ")
+      rank = terms.map { "(CASE WHEN #{HAYSTACK} ILIKE ? THEN 1 ELSE 0 END)" }.join(" + ")
+
+      scope.where(matches, *likes)
+           .order(Arel.sql(MemoryEntry.sanitize_sql_array([ "#{rank} DESC", *likes ])))
+           .by_trust.limit(limit)
     end
 
     def supersede(uri, reason: nil)
