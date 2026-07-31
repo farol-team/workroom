@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, contentTypeFor, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp, worthOffering } from "../src/rules";
+import { StepLedger, closingInstruction, contentTypeFor, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -319,5 +322,48 @@ describe("work product", () => {
     expect(worthOffering([])).toBe(false);
     expect(worthOffering([{ path: "a.md", bytes: 0 }])).toBe(false);
     expect(worthOffering([{ path: "a.md", bytes: 12 }])).toBe(true);
+  });
+});
+
+describe("distillation", () => {
+  test("a turn ends by asking what the room should keep", () => {
+    const closing = closingInstruction();
+
+    expect(closing).toContain("workroom://memory/remember");
+    expect(closing.length).toBeGreaterThan(80);
+  });
+
+  test("the question is appended to the turn, not sent as a second one", () => {
+    // A second prompt is a second model call the person pays for, on every
+    // turn, whether or not there was anything worth keeping.
+    const body = withClosing("Summarise the Acme call.");
+
+    expect(body.startsWith("Summarise the Acme call.")).toBe(true);
+    expect(body).toContain(closingInstruction());
+  });
+
+  test("it does not tell the agent to keep something regardless", () => {
+    // An entry the agent did not choose is an entry nobody will correct.
+    const closing = closingInstruction().toLowerCase();
+
+    expect(closing).toMatch(/if|when|only/);
+    expect(closing).not.toMatch(/always (record|remember|write)/);
+  });
+
+  test("an empty turn is left alone", () => {
+    expect(withClosing("   ")).toBe("   ");
+  });
+});
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+describe("the turn carries the question", () => {
+  test("send() wraps the body before prompting", async () => {
+    // A source-level guard, and it is one on purpose: `send()` needs a window,
+    // so nothing else here can catch the question being quietly dropped. Losing
+    // it would be invisible — turns keep working, and the room stops learning.
+    const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
+
+    expect(source).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
   });
 });

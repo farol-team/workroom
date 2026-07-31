@@ -86,6 +86,16 @@ module Rail
       end
     end
 
+    # The turn this call belongs to. The rail is reached by an agent holding its
+    # owner's token, not by the client, so the run is inferred from what that
+    # person currently has open in this channel — which is exactly one thing.
+    def working_run
+      AgentRun.joins(:agent_session)
+              .where(agent_sessions: { user_id: @user.id, channel_id: @channel.id })
+              .where(status: "running")
+              .order(started_at: :desc).first
+    end
+
     def run_action(uri, args)
       args = (args || {}).with_indifferent_access
       case uri
@@ -93,6 +103,7 @@ module Rail
         return [ :error, "title and detail are required" ] if args[:title].blank? || args[:detail].blank?
 
         entry = store.write(@channel, title: args[:title], detail: args[:detail], trust: "agent")
+        working_run&.update(distilled_at: Time.current)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         entry = store.supersede(args[:uri], reason: args[:reason])

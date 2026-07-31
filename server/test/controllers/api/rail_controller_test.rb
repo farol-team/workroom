@@ -54,6 +54,28 @@ class Api::RailControllerTest < ActionDispatch::IntegrationTest
     assert_includes found.map { |c| c["uri"] }, "workroom://memory/remember"
   end
 
+  test "what an agent chose to keep is attributed to the run that kept it" do
+    # A run that kept nothing and a run whose memory nobody can trace back look
+    # the same from the outside, and only one of them is fine.
+    message = @channel.messages.create!(author: @alice, body: "@agent what did we agree?")
+    run = agent_run(user: @alice, channel: @channel, trigger: message)
+
+    rpc("tools/call", { name: "execute_capability", arguments: {
+      uri: "workroom://memory/remember",
+      args: { title: "Monthly rollups", detail: "First Tuesday, agreed with Acme." } } })
+
+    assert run.reload.distilled_at, "the run that produced the entry is the run that records it"
+  end
+
+  test "a run that kept nothing says so by staying unmarked" do
+    message = @channel.messages.create!(author: @alice, body: "@agent what did we agree?")
+    run = agent_run(user: @alice, channel: @channel, trigger: message)
+
+    rpc("tools/call", { name: "search_capabilities", arguments: { query: "anything" } })
+
+    assert_nil run.reload.distilled_at, "silence is an outcome, not a missing record"
+  end
+
   test "an agent asking in a sentence still finds the action it needs" do
     found = JSON.parse(rpc("tools/call",
       { name: "search_capabilities", arguments: { query: "I should remember this conclusion" } })

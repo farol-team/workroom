@@ -58,15 +58,14 @@ instead of a discussion of work that happened elsewhere.
 
 ## Memory
 
-**`promotions`** — the discipline made concrete. A polymorphic `source` (a message, a run, or
-an artifact), a target channel, and a state: `proposed` → `approved` → `applied`, or
-`rejected`.
+**`agent_runs.distilled_at`** — when a run kept something. Every turn ends by asking the
+agent what the room should still know next week; if it answers by calling
+`workroom://memory/remember`, the run carries the moment it did. A run without the timestamp
+kept nothing, which is an answer rather than a gap.
 
-Distillation only ever creates `proposed`. A person approves. A job applies it and records the
-resulting URI. Nothing reaches shared memory by any other path.
-
-`rationale` carries why the promotion was suggested, which is what makes review possible
-without re-reading the source.
+There is no promotions table and no approval state. #22 removed the review queue, and
+distillation follows it: the agent writes to the channel's memory directly, and a wrong entry
+is corrected by superseding it (Article P3).
 
 ## Audit
 

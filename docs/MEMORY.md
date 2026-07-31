@@ -76,6 +76,21 @@ not a step they were required to take.
 An agent reads what the room knows, acts, and the action becomes part of the record. The
 record is distilled back into what the room knows. The agent reads it again.
 
+**The distiller is the agent.** Not a job on the server, and not the context store's own
+extraction. Every turn ends by asking it what the room should still know next week; it
+answers by calling `workroom://memory/remember`, or by keeping nothing. Two reasons, and
+neither is convenience:
+
+The person's agent is the only thing here that may think about the work. Article P2 permits
+an infrastructure credential for embedding and tiering and says so in those words — a
+server-side extractor would need one for neither.
+
+And a store that extracts on its own extracts for a different product. The context store's
+native session extraction was run against a real turn before being rejected: it writes to the
+*person's* long-term memory rather than the room's, types it as `events/`, `identity.md` and
+`soul.md`, and stores the entire chat log inside the entry. The room already has the
+messages. Memory is for the conclusion.
+
 Without discipline, this loop amplifies its own errors. A wrong inference enters memory as
 a fact, is retrieved on the next task, corroborates itself, and within a month is
 unarguable — with no trace of where it came from.

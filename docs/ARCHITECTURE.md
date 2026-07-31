@@ -15,7 +15,7 @@
 │  messages · artifacts        │   │  own machine        │
 │  permissions                 │   └──────────┬──────────┘
 │  capability rail ◄───────────┼──── MCP ─────┘
-│  distillation jobs           │
+│                              │
 └──────────────┬───────────────┘
                │ HTTP
                ▼
