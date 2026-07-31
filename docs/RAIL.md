@@ -34,7 +34,7 @@ Access derives from the URI path rather than from a grants table:
 | Path | Visible to |
 |---|---|
 | `viking://org/skills/` | everyone |
-| `viking://channels/<slug>/skills/` | members of that channel |
+| `viking://resources/channels/<slug>/skills/` | members of that channel |
 | `viking://personal/<user>/` | that person |
 
 A grants table appears only when skills must be assigned to people independently of channels.
@@ -76,7 +76,7 @@ Knowledge and actions are both capabilities, discovered and invoked the same way
 
 | | |
 |---|---|
-| `viking://channels/<slug>/…` | what the room knows — returns the detail tier |
+| `viking://resources/channels/<slug>/…` | what the room knows — returns the detail tier |
 | `workroom://memory/remember` | record a conclusion so later work starts from it |
 | `workroom://memory/supersede` | replace an entry this work contradicts |
 

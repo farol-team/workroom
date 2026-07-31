@@ -76,11 +76,12 @@ credentials are permitted, so it stays a checkable rule rather than a loophole.
 
 ## Open, deliberately not resolved here
 
-- **Namespace mapping.** `viking://channels/<slug>/` must map onto whatever
-  OpenViking's multi-tenant model calls a tenant. The upstream URI tree is
-  `resources/`, `user/{id}/…`, `agent/skills/` — our channel-shaped tree is not
-  the native one, and which side bends is the most expensive decision in the
-  epic. Settle it before the adapter, not during.
+- **Namespace mapping.** ~~`viking://channels/<slug>/` must map onto whatever
+  OpenViking's multi-tenant model calls a tenant.~~ **Settled by the server, not
+  by us.** A running instance refuses any uri outside four scopes: `agent`,
+  `resources`, `session`, `user`. Channel memory is shared knowledge belonging
+  to no single person, so it is `viking://resources/channels/<slug>/`. Our side
+  bent, and it had to.
 - **Trust and provenance.** Article P4 requires `human`/`agent` and a source
   reference to survive the round trip. Whether OpenViking has native metadata
   fields or we encode them is unverified — the contract suite must assert it

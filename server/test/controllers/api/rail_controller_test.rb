@@ -42,7 +42,7 @@ class Api::RailControllerTest < ActionDispatch::IntegrationTest
 
     assert_equal 1, found.length
     assert_equal "Acme reporting cadence", found.first["title"]
-    assert found.first["uri"].start_with?("viking://channels/#{@channel.slug}/")
+    assert found.first["uri"].start_with?("viking://resources/channels/#{@channel.slug}/")
     refute found.first.key?("detail"), "discovery returns the abstract, not the whole entry"
   end
 

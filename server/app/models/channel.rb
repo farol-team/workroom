@@ -15,13 +15,16 @@ class Channel < ApplicationRecord
   before_validation :default_memory_uri
 
   # Права на skills и память выводятся из пути, а не из таблицы грантов.
-  # viking://channels/<slug>/ виден участникам, viking://org/ — всем.
+  # viking://resources/channels/<slug>/ is the room's own knowledge.
   def skills_uri  = "#{memory_uri}skills/"
   def memory_root = memory_uri
 
   private
 
   def default_memory_uri
-    self.memory_uri ||= "viking://channels/#{slug}/" if slug.present?
+    # `resources` is not decoration: the context database accepts four scopes —
+    # agent, resources, session, user — and shared knowledge that belongs to no
+    # single person is a resource. A uri outside them is refused outright.
+    self.memory_uri ||= "viking://resources/channels/#{slug}/" if slug.present?
   end
 end
