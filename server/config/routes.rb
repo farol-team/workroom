@@ -20,6 +20,9 @@ Rails.application.routes.draw do
     patch "runs/:id",          to: "runs#update",  as: :run
     post  "runs/:id/steps",    to: "runs#step",    as: :run_steps
     post  "runs/:id/plan",     to: "runs#plan",    as: :run_plan
-    post  "runs/:id/messages", to: "runs#message", as: :run_messages
+
+    get  "channels/:channel_slug/artifacts", to: "artifacts#index",  as: :channel_artifacts
+    post "runs/:run_id/artifacts",           to: "artifacts#create", as: :run_artifacts
+    post "runs/:id/messages", to: "runs#message", as: :run_messages
   end
 end

@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, formatHistory, parseAddress, presenceState, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, formatHistory, parseAddress, presenceState, transcriptName, type PlanEntry, type RunSignal } from "./rules";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -90,6 +90,13 @@ const PLAN_MARK: Record<string, string> = {
   completed: "\u2713", in_progress: "\u2192", pending: "\u00b7",
 };
 
+function addArtifact(a: { id: number; name: string; kind: string | null }) {
+  const el = document.createElement("div");
+  el.className = "artifact";
+  el.textContent = `\u{1F4CE} ${a.name}`;
+  $("messages").append(el);
+}
+
 function showPlan(runId: number, entries: PlanEntry[]) {
   const box = $("messages");
   const id = `plan-${runId}`;
@@ -104,6 +111,36 @@ function showPlan(runId: number, entries: PlanEntry[]) {
     el.append(line);
   }
   if (!el.isConnected) box.append(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+/// Attaching is a decision made with the work in front of you, so it is an
+/// action on the finished run rather than a setting chosen once in the abstract.
+function offerTranscript(runId: number, sessionId: string) {
+  const box = $("messages");
+  const el = document.createElement("div");
+  el.className = "offer";
+
+  const button = document.createElement("button");
+  button.className = "ghost";
+  button.textContent = "Attach transcript";
+  button.onclick = async () => {
+    button.disabled = true;
+    button.textContent = "Attaching…";
+    try {
+      const body = await agent.exportSession(sessionId);
+      if (!body) { el.textContent = "This agent keeps no transcript."; return; }
+      await api.attachArtifact(runId, transcriptName(runId, new Date()), body);
+      el.remove();
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = "Attach transcript";
+      alert(String(err));
+    }
+  };
+
+  el.append(button);
+  box.append(el);
   box.scrollTop = box.scrollHeight;
 }
 
@@ -146,6 +183,7 @@ async function open(slug: string) {
     if (e.type === "step") addStep(e.step.run_id, e.step.label ?? e.step.kind, e.step.id);
     if (e.type === "run") showPresence(e.run);
     if (e.type === "plan") showPlan(e.plan.run_id, e.plan.entries);
+    if (e.type === "artifact") addArtifact(e.artifact);
   });
 }
 
@@ -183,6 +221,7 @@ async function send(text: string) {
     await agent.prompt(sessionId, body, context, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
+    offerTranscript(run.id, sessionId);
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});

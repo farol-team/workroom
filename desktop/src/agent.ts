@@ -43,6 +43,15 @@ export class Agent {
 
   /// `context` is what the room knows; `history` is what was just said in it,
   /// including by other people. Both are the channel's, not the agent's.
+  /// The agent's own record, when it keeps one. Null means this agent has no
+  /// exporter — not an error.
+  exportSession(sessionId: string, command?: string) {
+    return invoke<string | null>("agent_export_session", { sessionId, command });
+  }
+
+  /// The ACP session id for a channel, if one is open.
+  sessionIdFor(slug: string) { return this.sessions.get(slug); }
+
   prompt(sessionId: string, text: string, context: string | null, history: string | null = null) {
     return invoke<{ stopReason?: string }>("agent_prompt", { sessionId, text, context, history });
   }

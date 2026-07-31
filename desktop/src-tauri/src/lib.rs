@@ -66,6 +66,32 @@ async fn agent_prompt(
         .await
 }
 
+/// Ask the agent for its own record of a session.
+///
+/// Invoked as the agent's published command, not by reading its storage — the
+/// storage is an implementation detail and the command is an interface. Returns
+/// null when the configured agent has no exporter, so the feature is simply
+/// absent rather than broken.
+#[tauri::command]
+async fn agent_export_session(
+    command: Option<String>,
+    session_id: String,
+) -> Result<Option<String>, String> {
+    let command = command.unwrap_or_else(|| "opencode".into());
+
+    let out = tokio::process::Command::new(&command)
+        .args([ "export", &session_id ])
+        .output()
+        .await
+        .map_err(|e| format!("cannot run `{command} export`: {e}"))?;
+
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let body = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(if body.is_empty() { None } else { Some(body) })
+}
+
 #[tauri::command]
 async fn agent_stop(state: State<'_, AgentState>) -> Result<(), String> {
     if let Some(agent) = state.0.lock().await.take() {
@@ -95,6 +121,7 @@ pub fn run() {
             agent_start,
             agent_new_session,
             agent_prompt,
+            agent_export_session,
             agent_stop
         ])
         .run(tauri::generate_context!())

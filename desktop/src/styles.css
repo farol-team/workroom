@@ -57,3 +57,6 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 .plan-entry { color: var(--muted); }
 .plan-entry.in_progress { color: var(--text); }
 .plan-entry.completed { color: var(--muted); text-decoration: line-through; }
+
+.offer, .artifact { margin-left: 104px; font-size: 13px; color: var(--muted); }
+.artifact { padding: 4px 0; }

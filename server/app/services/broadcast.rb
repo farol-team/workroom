@@ -36,6 +36,13 @@ module Broadcast
     to_owner(s.agent_run.agent_session.user, payload)
   end
 
+  # Work product. The room came for this.
+  def artifact(a)
+    to_room(a.channel, { type: "artifact",
+                         artifact: { id: a.id, name: a.name, kind: a.kind,
+                                     run_id: a.agent_run_id } })
+  end
+
   # Process. Available to anyone who asks for it, never pushed at the room.
   def step(s)
     to_owner(s.agent_run.agent_session.user,
