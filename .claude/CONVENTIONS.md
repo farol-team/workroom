@@ -29,7 +29,7 @@ shows the body far more prominently than the author.
 Angle-bracket forms such as `<ai agent-flow>` do not survive: the markdown
 sanitizer strips unknown HTML tags and the marker disappears silently.
 
-The `ai-generated` label remains the machine-readable counterpart, for
+The `ai` label remains the machine-readable counterpart, for
 filtering. It complements both; it replaces neither.
 
 ## Credentials

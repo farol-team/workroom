@@ -34,7 +34,7 @@
     "auto_create_min_cluster": 3
   },
   "labels": {
-    "ai_generated": "ai-generated"
+    "ai_generated": "ai"
   },
   "worker": {
     "max_turns": 100,
