@@ -13,6 +13,11 @@ class AgentRun < ApplicationRecord
 
   delegate :channel, :user, to: :agent_session
 
+  # A finished run is a candidate for the room's memory — a candidate only.
+  after_update_commit :distil, if: -> { saved_change_to_status? && status == "succeeded" }
+
   def total_tokens = (input_tokens.to_i + output_tokens.to_i)
+
+  def distil = DistillRunJob.perform_later(id)
   def duration     = (ended_at && started_at) ? ended_at - started_at : nil
 end
