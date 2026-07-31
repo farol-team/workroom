@@ -1,5 +1,8 @@
 {
-  "tracker": { "provider": "github", "repo": "farol-team/workroom" },
+  "tracker": {
+    "provider": "github",
+    "repo": "farol-team/workroom"
+  },
   "states": {
     "icebox": "flow:icebox",
     "backlog": "flow:backlog",
@@ -18,12 +21,36 @@
     "max_risk": "medium",
     "strategy": "squash"
   },
-  "research": { "marker": "[research]", "doc_dir": "docs/spikes", "target_repo": ".", "route": "review" },
-  "epic": { "marker": "[epic]", "label_prefix": "epic:", "auto_refresh_checklist": true, "auto_create_min_cluster": 3 },
-  "labels": { "ai_generated": "ai-generated" },
-  "worker": { "max_turns": 100, "model": "", "resume_sessions": true },
-  "acceptance": { "max_turns": 50, "model": "" },
-  "tdd_gate": { "enabled": true, "min_size": "M", "min_risk": "medium", "max_spec_iterations": 2 },
+  "research": {
+    "marker": "[research]",
+    "doc_dir": "docs/spikes",
+    "target_repo": ".",
+    "route": "review"
+  },
+  "epic": {
+    "marker": "[epic]",
+    "label_prefix": "epic:",
+    "auto_refresh_checklist": true,
+    "auto_create_min_cluster": 3
+  },
+  "labels": {
+    "ai_generated": "ai-generated"
+  },
+  "worker": {
+    "max_turns": 100,
+    "model": "",
+    "resume_sessions": true
+  },
+  "acceptance": {
+    "max_turns": 50,
+    "model": ""
+  },
+  "tdd_gate": {
+    "enabled": true,
+    "min_size": "M",
+    "min_risk": "medium",
+    "max_spec_iterations": 2
+  },
   "split_confirmation_phrase": "split confirmed",
   "card_prefix": "WR",
   "branch_prefix": "flow/",
@@ -58,8 +85,18 @@
       "lint_cmd": ""
     }
   },
-  "project_context_docs": [ "README.md", "docs/ARCHITECTURE.md", "docs/MEMORY.md", "docs/AGENTS.md", "docs/RAIL.md" ],
+  "project_context_docs": [
+    "README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/MEMORY.md",
+    "docs/AGENTS.md",
+    "docs/RAIL.md"
+  ],
   "session_log": ".flow/session-log.md",
   "learnings": ".claude/learnings.jsonl",
-  "comment_prefixes": { "meta": "[meta] ", "worker": "[worker] " }
+  "comment_prefixes": {
+    "meta": "[meta] ",
+    "worker": "[worker] "
+  },
+  "comment_signature": "\n\n\u2014 Farol AI Agent Flow"
 }
