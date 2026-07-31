@@ -18,6 +18,19 @@ class FullTurnTest < ActionDispatch::IntegrationTest
       detail: "Monthly rollups, first Tuesday. Weekly created noise nobody read.",
       trust: "human", author: @alice, key: "acme-cadence")
 
+    # The turn below finds something the room *already knew*, and that word is
+    # doing work: a store that computes its index makes "written" and "findable"
+    # different moments. A store that does not returns on the first attempt.
+    # The turn below finds something the room *already knew*, and that word is
+    # doing work. A store that computes its index makes "written" and "findable"
+    # different moments, and how different depends on what else it is indexing —
+    # seconds when idle, longer behind a burst of writes. A store that does not
+    # compute returns on the first attempt.
+    90.times do
+      break if Memory::Store.current.search(@channel, "Acme reporting cadence").present?
+      sleep 1
+    end
+
     @json = { "Content-Type" => "application/json" }
   end
 

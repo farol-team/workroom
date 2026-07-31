@@ -33,6 +33,10 @@ module Memory
       uris.filter_map { |uri| read(uri) }.sort_by.with_index { |e, i| [ e.trust == "human" ? 0 : 1, i ] }
     end
 
+    def fetch(uri)
+      read(uri)
+    end
+
     def context_for(channel, limit: 20)
       entries = all(channel, limit: limit)
       return nil if entries.empty?

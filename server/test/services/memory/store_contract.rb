@@ -162,6 +162,27 @@ module Memory
       assert_empty @store.all(@other)
     end
 
+    def test_fetch_returns_the_entry_a_search_pointed_at
+      written = @store.write(@channel, title: "Cadence", detail: "Monthly rollups, first Tuesday.")
+
+      found = @store.fetch(written.uri)
+
+      refute_nil found, "the rail executes against a uri; a store that cannot be asked for one is useless to it"
+      assert_equal "Cadence", found.title
+      assert_includes found.detail, "first Tuesday"
+    end
+
+    def test_fetch_is_nil_for_something_that_is_not_there
+      assert_nil @store.fetch("#{@channel.memory_uri}nothing-here.md")
+    end
+
+    def test_fetch_does_not_return_a_superseded_entry
+      entry = @store.write(@channel, title: "Weekly", detail: "Weekly rollups.", key: "cadence")
+      @store.supersede(entry.uri)
+
+      assert_nil @store.fetch(entry.uri), "what the room used to know is not what it knows"
+    end
+
     # --- search --------------------------------------------------------------
 
     def test_search_finds_an_entry_by_its_content

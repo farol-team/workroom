@@ -170,7 +170,7 @@ with OpenAI embeddings:
 |---|---|
 | write | 0.09 s |
 | what the room knows, for a session | 0.02 s |
-| findable by meaning | ~15 s later |
+| findable by meaning | ~15 s later, and longer behind a burst of writes |
 
 The entry is readable immediately — it is in the room the moment it is written.
 Only retrieval *by meaning* waits for the index, and it waits where nobody is
