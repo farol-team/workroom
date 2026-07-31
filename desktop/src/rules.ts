@@ -78,6 +78,48 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// The channel's rail, as the protocol says an MCP server is described.
+///
+/// Headers are a list of `{ name, value }`. Sent as an object the agent reaches
+/// the rail unauthenticated, every call comes back 401, and it answers from
+/// nothing — which reads as the product not working rather than as a wire
+/// format we got wrong.
+export interface Rail { url: string; token: string }
+
+export function mcpServersFor(rail?: Rail): unknown[] {
+  if (!rail) return [];
+  return [ {
+    name: "workroom", type: "http", url: rail.url,
+    headers: [ { name: "Authorization", value: `Bearer ${rail.token}` } ],
+  } ];
+}
+
+/// The agent asking to do something, and waiting.
+///
+/// Nothing is decided here and nothing is auto-allowed: the options are the
+/// agent's, shown as it sent them. A client that answers on somebody's behalf
+/// has quietly moved the decision, and a client that invents an option the
+/// agent did not offer is answering a question it was not asked.
+export interface Asked {
+  id: number;
+  title: string;
+  options: Array<{ id: string; name: string; kind?: string }>;
+}
+
+export function permissionAsked(event: unknown): Asked | null {
+  const e = event as { id?: number; request?: { method?: string; params?: any } };
+  if (e?.request?.method !== "session/request_permission") return null;
+
+  const params = e.request.params ?? {};
+  return {
+    id: Number(e.id),
+    title: params.toolCall?.title ?? "The agent is asking to do something",
+    options: (params.options ?? []).map((o: any) => ({
+      id: String(o.optionId), name: String(o.name ?? o.optionId), kind: o.kind,
+    })),
+  };
+}
+
 /// What to do with an answer that may never come.
 ///
 /// A call across the bridge to the native side usually answers. "Usually" is

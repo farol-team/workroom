@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { sessionKey, translateAcp, type AgentDef, type ConfigOption, type Update } from "./rules";
+import { mcpServersFor, permissionAsked, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -75,10 +75,7 @@ export class Agents {
     const existing = this.sessions.get(key);
     if (existing) return existing;
 
-    const mcpServers = rail
-      ? [ { name: "workroom", type: "http", url: rail.url,
-            headers: { Authorization: `Bearer ${rail.token}` } } ]
-      : [];
+    const mcpServers = mcpServersFor(rail);
 
     const res = await invoke<{ sessionId: string; configOptions?: ConfigOption[] }>(
       "agent_new_session", { name, cwd, mcpServers });
@@ -124,6 +121,21 @@ export class Agents {
          context: string | null, history: string | null = null) {
     return invoke<{ stopReason?: string }>("agent_prompt",
       { name, sessionId, text, context, history });
+  }
+
+  /// The agent asking to do something. It is blocked until somebody answers,
+  /// so this is the one event that must not be dropped.
+  onAsk(handler: (asked: Asked) => void) {
+    return listen<any>("acp://ask", (ev) => {
+      const asked = permissionAsked(ev.payload);
+      if (asked) handler(asked);
+    });
+  }
+
+  /// The person's answer. No option id means they declined to choose, which the
+  /// protocol calls cancelled.
+  permit(name: string, requestId: number, optionId: string | null) {
+    return invoke("agent_permit", { name, requestId, optionId });
   }
 
   /// Translate ACP notifications into something the room can display.

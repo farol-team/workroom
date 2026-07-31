@@ -39,6 +39,18 @@ The handshake reports `mcpCapabilities`, which is how the capability rail reache
 the client passes the rail's MCP configuration when it opens a session. It also reports
 `loadSession`, which is the hook rehydration builds on.
 
+**The protocol runs both ways.** The agent asks the client things too, and waits for an
+answer. `session/request_permission` is the one that matters: every tool call that touches
+anything is authorised through it, and an unanswered request is a turn that never ends.
+
+The options in that request are the agent's — `allow_once`, `allow_always`, `reject_once`,
+`reject_always` — and they are shown as sent. Nothing is auto-allowed and no option is
+invented: a client that answers on somebody's behalf has quietly moved the decision, and one
+that adds an option is answering a question it was not asked.
+
+`fs/*` and `terminal/*` are declined by capability rather than by silence, so they are never
+sent.
+
 ## Several models, several agents
 
 Two different things hide behind "I have several subscriptions", and they cost very

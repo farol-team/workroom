@@ -224,6 +224,38 @@ async function renderSkills() {
   }
 }
 
+/// The agent is waiting on a person, so this goes where that person is looking.
+/// It is process rather than outcome, so it is theirs alone (Article S2).
+function askPermission(name: string, asked: import("./rules").Asked) {
+  const box = $("messages");
+  const el = document.createElement("div");
+  el.className = "offer ask";
+  el.append(document.createTextNode(`${asked.title} `));
+
+  const answer = async (optionId: string | null) => {
+    el.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    try {
+      await agents.permit(name, asked.id, optionId);
+      el.textContent = `${asked.title} — ${optionId ?? "not answered"}`;
+    } catch (err) {
+      el.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      alert(String(err));
+    }
+  };
+
+  // The options are the agent's. Nothing is added and nothing is reinterpreted.
+  for (const option of asked.options) {
+    const button = document.createElement("button");
+    button.className = "ghost";
+    button.textContent = option.name;
+    button.onclick = () => answer(option.id);
+    el.append(button);
+  }
+
+  box.append(el);
+  box.scrollTop = box.scrollHeight;
+}
+
 /// The latest revision replaces the one on screen; the record keeps them all.
 const PLAN_MARK: Record<string, string> = {
   completed: "\u2713", in_progress: "\u2192", pending: "\u00b7",
@@ -468,6 +500,7 @@ async function send(text: string) {
   renderOptions();
 
   let reply = "";
+  const stopAsking = await agents.onAsk((asked) => askPermission(name, asked));
   const stop = await agents.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
@@ -487,6 +520,7 @@ async function send(text: string) {
     await api.finishRun(run.id, "failed").catch(() => {});
   } finally {
     stop();
+    stopAsking();
   }
 }
 

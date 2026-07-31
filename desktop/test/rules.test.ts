@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, orAfter, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, mcpServersFor, orAfter, permissionAsked, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -564,5 +564,69 @@ describe("a bridge that does not answer", () => {
 
   test("a call that fails is not a reason to stop either", async () => {
     expect(await orAfter(Promise.reject(new Error("bridge is gone")), 500, [])).toEqual([]);
+  });
+});
+
+describe("the rail, as the protocol describes it", () => {
+  test("a header is a name and a value, not a key on an object", () => {
+    // Sent as an object the agent reaches the rail unauthenticated, every call
+    // comes back 401, and it answers from nothing.
+    const [ server ] = mcpServersFor({ url: "http://127.0.0.1:3000/api/rail/meetings", token: "tok" }) as any[];
+
+    expect(server.type).toBe("http");
+    expect(server.url).toBe("http://127.0.0.1:3000/api/rail/meetings");
+    expect(server.headers).toEqual([ { name: "Authorization", value: "Bearer tok" } ]);
+    expect(Array.isArray(server.headers)).toBe(true);
+  });
+
+  test("no rail is no server, not a server with no address", () => {
+    expect(mcpServersFor(undefined)).toEqual([]);
+  });
+});
+
+describe("the agent asking to do something", () => {
+  const ask = {
+    id: 7,
+    request: {
+      method: "session/request_permission",
+      params: {
+        sessionId: "ses_1",
+        toolCall: { toolCallId: "call_1", title: "Run the migration" },
+        options: [
+          { optionId: "yes", name: "Allow once", kind: "allow_once" },
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "no", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    },
+  };
+
+  test("the question reaches the person with what was asked and the choices given", () => {
+    const asked = permissionAsked(ask)!;
+
+    expect(asked.id).toBe(7);
+    expect(asked.title).toBe("Run the migration");
+    expect(asked.options.map((o) => o.id)).toEqual([ "yes", "always", "no" ]);
+    expect(asked.options[0].name).toBe("Allow once");
+  });
+
+  test("the options are the agent's, not ours", () => {
+    // An agent that offers one way to say yes must not be given two, and one
+    // that offers none must not have one invented for it.
+    const spare = { id: 1, request: { method: "session/request_permission",
+      params: { options: [ { optionId: "only", name: "Fine", kind: "allow_once" } ] } } };
+
+    expect(permissionAsked(spare)!.options).toHaveLength(1);
+  });
+
+  test("a question with no title still says something", () => {
+    const bare = { id: 1, request: { method: "session/request_permission", params: { options: [] } } };
+
+    expect(permissionAsked(bare)!.title).toBe("The agent is asking to do something");
+  });
+
+  test("anything that is not a permission request is not one", () => {
+    expect(permissionAsked({ id: 1, request: { method: "fs/read_text_file", params: {} } })).toBeNull();
+    expect(permissionAsked({ id: 1, request: {} })).toBeNull();
   });
 });
