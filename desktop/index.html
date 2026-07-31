@@ -40,6 +40,18 @@
         </form>
       </main>
 
+      <aside id="thread" hidden>
+        <header>
+          <strong>Thread</strong>
+          <button id="thread-close" class="ghost" title="Close">×</button>
+        </header>
+        <div id="thread-messages"></div>
+        <form id="thread-composer">
+          <input id="thread-input" placeholder="Reply…" autocomplete="off" />
+          <button type="submit">Reply</button>
+        </form>
+      </aside>
+
       <aside id="memory" hidden>
         <header><strong>Memory</strong><span id="memory-uri" class="muted"></span></header>
         <div id="memory-list"></div>

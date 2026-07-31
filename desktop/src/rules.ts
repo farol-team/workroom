@@ -196,6 +196,37 @@ export class WorkingSignal {
   }
 }
 
+/// A message as the room deals with it: who wrote it, and what it answers.
+export interface Threaded {
+  id: number;
+  parent_id: number | null;
+  author: { kind: string; name: string };
+}
+
+/// What the room itself shows. A person replying to a message is starting a
+/// side conversation; an agent answering is doing the room's work, and putting
+/// that answer in a panel would leave a room full of questions and no answers.
+export function inTimeline(m: Threaded): boolean {
+  return m.parent_id === null || m.author.kind === "agent";
+}
+
+/// A thread is its root and everything hanging off it, in the order it was said.
+export function threadOf<T extends Threaded>(all: T[], rootId: number): T[] {
+  return all.filter((m) => m.id === rootId || m.parent_id === rootId);
+}
+
+/// What the room is told about a conversation it is not being shown. An agent's
+/// answer is already in the room, so counting it would advertise a conversation
+/// that never happened.
+export function threadSummary(replies: Threaded[]): string | null {
+  const people = replies.filter((m) => m.author.kind !== "agent");
+  if (!people.length) return null;
+
+  const voices = [ ...new Set(people.map((m) => m.author.name)) ];
+  const count = `${people.length} ${people.length === 1 ? "reply" : "replies"}`;
+  return `${count} · ${voices.join(", ")}`;
+}
+
 /// A conversation is read a day at a time.
 export function dayLabel(at: string, today = new Date()): string {
   const day = at.slice(0, 10);
