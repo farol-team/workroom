@@ -120,6 +120,21 @@ describe("acp translation", () => {
       .toEqual({ kind: "tool", label: "search memory" });
   });
 
+  test("a plan becomes a plan, with its entries", () => {
+    const out = translateAcp(update({
+      sessionUpdate: "plan",
+      entries: [ { content: "Read the deck", priority: "high", status: "in_progress" } ],
+    }));
+    expect(out).toEqual({
+      kind: "plan",
+      entries: [ { content: "Read the deck", priority: "high", status: "in_progress" } ],
+    });
+  });
+
+  test("a plan with no entries is not an update", () => {
+    expect(translateAcp(update({ sessionUpdate: "plan", entries: [] }))).toBeNull();
+  });
+
   test("an unknown update surfaces rather than vanishing", () => {
     expect(translateAcp(update({ sessionUpdate: "plan_changed" })))
       .toEqual({ kind: "other", label: "plan_changed" });

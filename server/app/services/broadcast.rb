@@ -24,6 +24,18 @@ module Broadcast
     to_owner(r.agent_session.user, payload)
   end
 
+  # The agent saying what it intends. Unlike the steps behind it this belongs in
+  # the room — it is what a colleague reads to decide whether to wait or step in.
+  # A separate method rather than a branch inside `step`, because a plan is a
+  # different kind of thing with a different audience.
+  def plan(s)
+    payload = { type: "plan", plan: { run_id: s.agent_run_id,
+                                      entries: s.payload["entries"] || [],
+                                      created_at: s.created_at } }
+    to_room(s.agent_run.agent_session.channel, payload)
+    to_owner(s.agent_run.agent_session.user, payload)
+  end
+
   # Process. Available to anyone who asks for it, never pushed at the room.
   def step(s)
     to_owner(s.agent_run.agent_session.user,

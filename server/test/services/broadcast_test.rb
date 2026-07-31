@@ -54,6 +54,18 @@ class BroadcastTest < ActiveSupport::TestCase
     assert_equal 1, owner.count { |p| p[:type] == "run" }
   end
 
+  # A plan is what the room came for: the agent saying what it intends.
+  test "a plan reaches the room, unlike the steps behind it" do
+    step = @run.run_steps.create!(kind: "plan", payload: {
+      entries: [ { content: "Read the Q3 deck", status: "in_progress" } ] })
+
+    room, owner = route { Broadcast.plan(step) }
+
+    assert_equal 1, room.count { |p| p[:type] == "plan" }
+    assert_equal 1, owner.count { |p| p[:type] == "plan" }
+    assert_equal "Read the Q3 deck", room.first.dig(:plan, :entries, 0, "content")
+  end
+
   test "the run payload carries no message body" do
     room, = route { Broadcast.run(@run) }
 

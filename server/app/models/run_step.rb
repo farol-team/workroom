@@ -1,5 +1,5 @@
 class RunStep < ApplicationRecord
-  KINDS = %w[tool_use tool_result thinking].freeze
+  KINDS = %w[tool_use tool_result thinking plan].freeze
 
   belongs_to :agent_run
 

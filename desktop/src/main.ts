@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, formatHistory, parseAddress, presenceState, type RunSignal } from "./rules";
+import { StepLedger, formatHistory, parseAddress, presenceState, type PlanEntry, type RunSignal } from "./rules";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -85,6 +85,28 @@ async function renderMemory() {
   }
 }
 
+/// The latest revision replaces the one on screen; the record keeps them all.
+const PLAN_MARK: Record<string, string> = {
+  completed: "\u2713", in_progress: "\u2192", pending: "\u00b7",
+};
+
+function showPlan(runId: number, entries: PlanEntry[]) {
+  const box = $("messages");
+  const id = `plan-${runId}`;
+  const el = document.getElementById(id) ?? document.createElement("div");
+  el.id = id;
+  el.className = "plan";
+  el.innerHTML = "";
+  for (const e of entries) {
+    const line = document.createElement("div");
+    line.className = `plan-entry ${e.status ?? ""}`;
+    line.textContent = `${PLAN_MARK[e.status ?? "pending"] ?? "\u00b7"} ${e.content}`;
+    el.append(line);
+  }
+  if (!el.isConnected) box.append(el);
+  box.scrollTop = box.scrollHeight;
+}
+
 const escape = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
@@ -123,6 +145,7 @@ async function open(slug: string) {
     if (e.type === "message") addMessage(e.message);
     if (e.type === "step") addStep(e.step.run_id, e.step.label ?? e.step.kind, e.step.id);
     if (e.type === "run") showPresence(e.run);
+    if (e.type === "plan") showPlan(e.plan.run_id, e.plan.entries);
   });
 }
 
@@ -152,6 +175,7 @@ async function send(text: string) {
   let reply = "";
   const stop = await agent.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
+    else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 

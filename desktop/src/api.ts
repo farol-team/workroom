@@ -81,6 +81,12 @@ export class Api {
     });
   }
 
+  plan(runId: number, entries: unknown[]) {
+    return this.call(`/runs/${runId}/plan`, {
+      method: "POST", body: JSON.stringify({ entries }),
+    });
+  }
+
   step(runId: number, kind: string, label: string) {
     return this.call(`/runs/${runId}/steps`, {
       method: "POST", body: JSON.stringify({ kind, label }),
