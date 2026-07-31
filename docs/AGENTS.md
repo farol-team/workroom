@@ -51,6 +51,23 @@ that adds an option is answering a question it was not asked.
 `fs/*` and `terminal/*` are declined by capability rather than by silence, so they are never
 sent.
 
+### What has been verified against a real agent
+
+Against opencode 1.18.10, with a real model, through a real rail:
+
+| | |
+|---|---|
+| `initialize` | accepted; it reports `mcpCapabilities: { http: true, sse: true }` |
+| `session/new` carrying the rail | accepted, **and the rail is called** — `tools/list` arrives authenticated |
+| `session/set_config_option` | the model is a session option, as the client assumes |
+| `session/prompt` | tool calls, an answer from channel memory, `stopReason: end_turn` |
+| `workroom://memory/remember` | the agent wrote an entry to the channel itself |
+| `opencode export <session>` | 21 kB of transcript, which is what the client attaches |
+
+What has **not** been verified: any of it from inside the desktop window. The
+protocol, the rail and the memory loop are proven; the client that drives them is
+proven only by its own tests.
+
 ## Several models, several agents
 
 Two different things hide behind "I have several subscriptions", and they cost very
