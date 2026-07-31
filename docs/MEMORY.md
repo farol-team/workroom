@@ -44,26 +44,26 @@ Push alone means paying for context nobody reads. Pull alone means the agent ent
 and spends its first turns on reconnaissance. The tiers exist precisely so that the cheap
 thing can always happen and the expensive thing happens only on demand.
 
-## Promotion
+## Writing
 
-Nothing reaches shared memory as a side effect.
+An agent writes to its channel's memory directly. There is no approval step and
+no queue: the person is in the room to work, and a knowledge base that has to be
+curated does not get curated.
 
-```
-work happens in a channel
-        │
-        ▼
-distillation job proposes    →  promotion (state: proposed)
-        │
-        ▼
-a person reviews             →  approved  or  rejected
-        │
-        ▼
-apply job writes             →  context database, state: applied
-```
+What keeps that safe is that **correction is cheap**, rather than writing being
+expensive:
 
-The proposal is cheap and automatic. The approval is human and required. The temptation to
-close that gap — to let good-looking conclusions flow straight into shared memory — is
-strong and should be resisted, for the reason below.
+- **Provenance is mandatory.** Every entry records the run it came from and whose
+  agent produced it. An entry nobody can trace is a defect.
+- **Correction supersedes.** Entries are never edited or deleted; a correction is
+  a new entry that replaces the old one, and the history stays readable.
+- **An agent that finds a contradiction resolves it.** Encountering memory its
+  current work contradicts, it supersedes the stale entry rather than adding a
+  second, conflicting one. This is what replaces the human gate: the store
+  converges instead of accumulating.
+
+A person may supersede any entry at any time — a correction they chose to make,
+not a step they were required to take.
 
 ## The feedback loop
 

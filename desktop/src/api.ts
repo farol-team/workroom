@@ -69,13 +69,6 @@ export class Api {
     });
   }
 
-  /// How much of a session's process the room sees. The owner's call.
-  setVisibility(sessionId: number, visibility: "full" | "outcomes" | "private") {
-    return this.call(`/agent_sessions/${sessionId}`, {
-      method: "PATCH", body: JSON.stringify({ visibility }),
-    });
-  }
-
   startRun(slug: string, triggerMessageId: number, externalId: string) {
     return this.call<{ id: number; agent_session_id: number }>(`/channels/${slug}/runs`, {
       method: "POST",

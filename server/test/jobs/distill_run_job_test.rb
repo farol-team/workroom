@@ -9,50 +9,47 @@ class DistillRunJobTest < ActiveSupport::TestCase
     @channel.messages.create!(author: @run, body: "Acme asked for monthly rollups, first Tuesday.")
   end
 
-  # The article the whole memory design rests on. If this ever passes by
-  # accident, an agent can write what the room believes.
-  test "a finished run never writes to memory on its own" do
+  # Article P3 as amended: the agent writes. No approval, no queue, no person
+  # in the path — their attention belongs on the work.
+  test "a finished run writes to the channel's memory" do
+    assert_difference -> { MemoryEntry.count }, 1 do
+      DistillRunJob.perform_now(@run.id)
+    end
+
+    entry = MemoryEntry.last
+    assert_equal @channel, entry.channel
+    assert_equal "agent", entry.trust, "a distilled conclusion is an inference"
+    assert_equal @run, entry.source, "provenance is mandatory (Article P4)"
+    assert entry.uri.start_with?(@channel.memory_uri)
+  end
+
+  test "nothing is proposed, because there is nothing to approve" do
+    DistillRunJob.perform_now(@run.id)
+
+    refute defined?(Promotion), "the gate is gone"
+  end
+
+  test "a run that produced nothing writes nothing" do
+    session = AgentSession.create!(user: @alice, channel: @channel, agent_kind: "opencode")
+    empty = session.agent_runs.create!(status: "succeeded", ended_at: Time.current)
+
+    assert_no_difference -> { MemoryEntry.count } do
+      DistillRunJob.perform_now(empty.id)
+    end
+  end
+
+  test "a failed run writes nothing" do
+    @run.update!(status: "failed")
+
     assert_no_difference -> { MemoryEntry.count } do
       DistillRunJob.perform_now(@run.id)
     end
   end
 
-  test "it proposes, and the proposal is not applied" do
-    assert_difference -> { Promotion.count }, 1 do
-      DistillRunJob.perform_now(@run.id)
-    end
-
-    promotion = Promotion.last
-    assert_equal "proposed", promotion.state
-    assert_nil promotion.viking_uri, "nothing is written until a person approves"
-    assert_equal @channel, promotion.channel
-    assert_equal @run, promotion.source
-  end
-
-  test "a proposal carries why it was suggested, so review does not mean re-reading the run" do
+  test "distilling the same run twice writes once" do
     DistillRunJob.perform_now(@run.id)
-    assert Promotion.last.rationale.present?
-  end
 
-  test "a run that produced nothing proposes nothing" do
-    session = AgentSession.create!(user: @alice, channel: @channel, agent_kind: "opencode")
-    empty = session.agent_runs.create!(status: "succeeded", ended_at: Time.current)
-
-    assert_no_difference -> { Promotion.count } do
-      DistillRunJob.perform_now(empty.id)
-    end
-  end
-
-  test "a failed run proposes nothing" do
-    @run.update!(status: "failed")
-    assert_no_difference -> { Promotion.count } do
-      DistillRunJob.perform_now(@run.id)
-    end
-  end
-
-  test "distilling the same run twice does not propose twice" do
-    DistillRunJob.perform_now(@run.id)
-    assert_no_difference -> { Promotion.count } do
+    assert_no_difference -> { MemoryEntry.count } do
       DistillRunJob.perform_now(@run.id)
     end
   end

@@ -88,6 +88,29 @@ module Memory
       refute_includes @store.context_for(@channel), "Weekly."
     end
 
+    # --- supersede ------------------------------------------------------------
+
+    def test_an_agent_resolving_a_contradiction_supersedes_the_stale_entry
+      stale = @store.write(@channel, title: "Cadence", detail: "Weekly.", key: "cadence")
+
+      returned = @store.supersede(stale.uri, reason: "contradicted by a later run")
+
+      assert_equal stale.id, returned.id
+      assert stale.reload.superseded_at, "history is corrected by superseding (Article P6)"
+      assert_nil @store.context_for(@channel), "a superseded entry leaves retrieval"
+    end
+
+    def test_superseding_something_that_is_not_there_is_not_an_error
+      assert_nil @store.supersede("#{@channel.memory_uri}nothing")
+    end
+
+    def test_superseding_twice_is_harmless
+      entry = @store.write(@channel, title: "T", detail: "D", key: "t")
+      @store.supersede(entry.uri)
+
+      assert_nil @store.supersede(entry.uri), "already gone from current"
+    end
+
     # --- search --------------------------------------------------------------
 
     def test_search_finds_an_entry_by_its_content
