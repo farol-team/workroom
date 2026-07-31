@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# harvest-learnings — append validated learnings from a verdict to the
+# project learnings file. Mechanical half of flow-run's "Learnings
+# harvest" rule; meta stays the single writer by being the only caller.
+#
+# Usage: harvest-learnings <learnings-file> <card-short> <max> < verdict.json
+#   (verdict.json = normalized output of parse-verdict; only .learnings is read)
+#
+# Rules (same as the prompt contract):
+#   - truncate to <max> entries (acceptance 2, critic 1);
+#   - entry valid iff type/key/insight/confidence/files all present,
+#     type ∈ pitfall|pattern|architecture|tool|operational, files non-empty;
+#     invalid entries are dropped silently;
+#   - add date (ISO today) + card;
+#   - dedup by key: replace the existing line only when the new confidence
+#     is STRICTLY higher, else skip.
+#
+# Harvest is best-effort by contract: this script exits 0 even when it
+# writes nothing; real errors go to stderr. stdout: one line per outcome
+# (`harvested <key> (new|replaced)` / `skipped <key> (existing >= confidence)`).
+set -uo pipefail
+
+[ $# -eq 3 ] || { echo "usage: harvest-learnings <file> <card-short> <max>" >&2; exit 0; }
+FILE="$1"; CARD="$2"; MAX="$3"
+command -v jq >/dev/null 2>&1 || { echo "harvest-learnings: jq missing, skipped" >&2; exit 0; }
+
+TODAY="$(date -I)"
+NEW="$(jq -c --arg d "$TODAY" --arg c "$CARD" --argjson m "$MAX" '
+  (.learnings // [])[:$m][]
+  | select(type == "object")
+  | select((.type? | type) == "string" and (.key? | type) == "string"
+           and (.insight? | type) == "string"
+           and (.confidence? | type) == "number"
+           and (.files? | type) == "array" and (.files | length) > 0)
+  | select(.type | IN("pitfall","pattern","architecture","tool","operational"))
+  | {date: $d, card: $c, type, key, insight, confidence, files}
+' 2>/dev/null)" || { echo "harvest-learnings: verdict unreadable, skipped" >&2; exit 0; }
+[ -n "$NEW" ] || exit 0
+
+mkdir -p "$(dirname "$FILE")" 2>/dev/null || true
+touch "$FILE" 2>/dev/null || { echo "harvest-learnings: cannot write $FILE, skipped" >&2; exit 0; }
+
+TMP="$(mktemp)"
+cp "$FILE" "$TMP"
+
+# Per-line jq comparison (not grep -F, not whole-file jq): keys containing
+# JSON-escaped characters compare correctly, and a corrupt/foreign line —
+# realistic now that the file is committed and can carry merge-conflict
+# debris — is preserved untouched instead of aborting the rewrite mid-way.
+find_existing() { # key -> last parseable line with that key ('' if none)
+  local k="$1" l out=""
+  while IFS= read -r l; do
+    if printf '%s' "$l" | jq -e --arg k "$k" '.key? == $k' >/dev/null 2>&1; then out="$l"; fi
+  done < "$TMP"
+  printf '%s' "$out"
+}
+drop_key() { # key -> rewrite $TMP keeping every line EXCEPT parseable ones with that key
+  local k="$1" l
+  : > "$TMP.filtered"
+  while IFS= read -r l; do
+    if printf '%s' "$l" | jq -e --arg k "$k" '.key? == $k' >/dev/null 2>&1; then continue; fi
+    printf '%s\n' "$l" >> "$TMP.filtered"
+  done < "$TMP"
+  mv "$TMP.filtered" "$TMP"
+}
+
+while IFS= read -r entry; do
+  key="$(printf '%s' "$entry" | jq -r '.key')"
+  conf="$(printf '%s' "$entry" | jq -r '.confidence')"
+  existing="$(find_existing "$key")"
+  if [ -z "$existing" ]; then
+    printf '%s\n' "$entry" >> "$TMP"
+    echo "harvested $key (new)"
+  else
+    oldconf="$(printf '%s' "$existing" | jq -r '.confidence // 0')"
+    if jq -ne --argjson a "$conf" --argjson b "$oldconf" '$a > $b' >/dev/null 2>&1; then
+      drop_key "$key"
+      printf '%s\n' "$entry" >> "$TMP"
+      echo "harvested $key (replaced, $oldconf -> $conf)"
+    else
+      echo "skipped $key (existing confidence $oldconf >= $conf)"
+    fi
+  fi
+done <<EOF
+$NEW
+EOF
+mv "$TMP" "$FILE"
+exit 0
