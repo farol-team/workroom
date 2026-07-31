@@ -27,7 +27,9 @@
         </header>
         <section id="messages"></section>
         <form id="composer">
-          <input id="input" placeholder="Message the room, or ask your agent…" autocomplete="off" />
+          <button type="button" id="summon" class="ghost" title="Address your agent">@agent</button>
+          <input id="input" placeholder="Message the room…" autocomplete="off" />
+          <span id="destination" class="muted">&rarr; the room</span>
           <button type="submit">Send</button>
         </form>
       </main>

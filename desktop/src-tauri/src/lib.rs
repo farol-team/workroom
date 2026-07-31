@@ -38,20 +38,26 @@ async fn agent_new_session(
         .await
 }
 
-/// Send a turn. What the room knows is prepended here, not stored in the agent —
-/// the memory belongs to the channel, and every session starts from it.
+/// Send a turn. What the room knows, and what was just said in it, are prepended
+/// here rather than stored in the agent — both belong to the channel, and every
+/// session starts from them.
 #[tauri::command]
 async fn agent_prompt(
     state: State<'_, AgentState>,
     session_id: String,
     text: String,
     context: Option<String>,
+    history: Option<String>,
 ) -> Result<Value, String> {
     let agent = current(&state).await?;
-    let body = match context.filter(|c| !c.trim().is_empty()) {
-        Some(c) => format!("{c}\n\n---\n\n{text}"),
-        None => text,
-    };
+    let mut body = String::new();
+    for block in [ context, history ].into_iter().flatten() {
+        if !block.trim().is_empty() {
+            body.push_str(block.trim());
+            body.push_str("\n\n---\n\n");
+        }
+    }
+    body.push_str(&text);
     agent
         .request(
             "session/prompt",

@@ -33,8 +33,10 @@ export class Agent {
     return res.sessionId;
   }
 
-  prompt(sessionId: string, text: string, context: string | null) {
-    return invoke<{ stopReason?: string }>("agent_prompt", { sessionId, text, context });
+  /// `context` is what the room knows; `history` is what was just said in it,
+  /// including by other people. Both are the channel's, not the agent's.
+  prompt(sessionId: string, text: string, context: string | null, history: string | null = null) {
+    return invoke<{ stopReason?: string }>("agent_prompt", { sessionId, text, context, history });
   }
 
   /// Translate ACP notifications into something the room can display.
