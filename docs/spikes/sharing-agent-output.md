@@ -8,8 +8,39 @@ obvious answers — share everything, share nothing — fail in opposite directi
 
 ## Recommendation in one line
 
-**The run is the unit, the visibility level supplies the default, and the
-gesture exists only where the default is silence.**
+**The question and the answer are visible; the steps are not.**
+
+## Why that is the whole rule
+
+A colleague could work with their agent in their own terminal. Choosing to work
+*in a channel instead* is already the decision to share — it is what you trade
+for the room's memory and for your colleagues seeing the result. A private mode
+offers people the thing they should have got by not opening the room at all.
+
+So the design collapses. There is no gesture to invent, because entering the
+room was the gesture.
+
+Everything below is the earlier, more elaborate version of this. It is kept
+because the reasoning about *what* is noise and *what* is an outcome survives
+the simplification, and because the two-gesture distinction between showing and
+remembering still holds. The three visibility levels do not.
+
+### What changes
+
+| Earlier | Now |
+|---|---|
+| Three levels: `full`, `outcomes`, `private` | One behaviour, plus a debugging toggle for steps |
+| A Share gesture for private runs | No gesture — arriving in the channel is the sharing |
+| Presence line so `private` stays translucent | Still useful, now trivial: the question itself is the presence |
+| `share_output` capability on the rail | Dropped — nothing left for it to do |
+| `propose_memory` capability | **Kept.** Memory is the one place a human still decides |
+
+### What survives
+
+Steps do not belong in the feed. That was always the real finding, and it is
+independent of the levels: a colleague wants the outcome, not forty tool calls.
+`outcomes` was the right behaviour; it was wrong to make it one option among
+three rather than simply how the room works.
 
 ## 1. Two gestures, not one — and one implies the other
 
