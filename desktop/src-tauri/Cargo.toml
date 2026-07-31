@@ -1,6 +1,9 @@
 [package]
 name = "workroom-desktop"
 version = "0.1.0"
+# An application, not a library. Saying so is what lets the licence check skip a
+# crate that has no licence field and does not need one.
+publish = false
 description = "WorkRoom desktop client"
 authors = ["Farol Labs"]
 edition = "2021"
