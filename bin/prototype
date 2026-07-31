@@ -5,7 +5,23 @@ cd "$(dirname "$0")/.."
 
 DB_HOST="${WORKROOM_DB_HOST:-127.0.0.1}"
 DB_PORT="${WORKROOM_DB_PORT:-5433}"
-export DATABASE_URL="${DATABASE_URL:-postgres://workroom:workroom@${DB_HOST}:${DB_PORT}}"
+
+if [ -n "${DATABASE_URL:-}" ]; then
+  # Look where the url points, not where the default would have been.
+  hostport=${DATABASE_URL#*://}; hostport=${hostport##*@}
+  hostport=${hostport%%/*};      hostport=${hostport%%\?*}
+  case "$hostport" in
+    "")      ;;                                    # url carries no host; leave the default
+    \[*\]*)  host=${hostport%%\]*}; host=${host#\[}   # [::1] and [::1]:5432
+             rest=${hostport##*\]}
+             DB_HOST=$host
+             case "$rest" in :?*) DB_PORT=${rest#:} ;; *) DB_PORT=5432 ;; esac ;;
+    *:*)     DB_HOST=${hostport%%:*}; DB_PORT=${hostport##*:} ;;
+    *)       DB_HOST=$hostport; DB_PORT=5432 ;;
+  esac
+else
+  export DATABASE_URL="postgres://workroom:workroom@${DB_HOST}:${DB_PORT}"
+fi
 
 say()  { printf '\033[36m→ %s\033[0m\n' "$*"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -13,7 +29,10 @@ up()   { (exec 3<>"/dev/tcp/${DB_HOST}/${DB_PORT}") 2>/dev/null; }
 
 say "database"
 if ! up; then
-  command -v docker >/dev/null || fail "Postgres is not on ${DB_HOST}:${DB_PORT} and docker is not installed."
+  docker compose version >/dev/null 2>&1 || fail \
+    "Nothing is listening on ${DB_HOST}:${DB_PORT}, and Docker Compose is not available to start it.
+Either install Docker Compose, or point WorkRoom at a Postgres you already run:
+    DATABASE_URL=postgres://user:pass@host:port bin/prototype"
   docker compose up -d postgres >/dev/null
   for _ in $(seq 30); do up && break; sleep 1; done
   up || fail "Postgres did not come up on ${DB_HOST}:${DB_PORT}."
