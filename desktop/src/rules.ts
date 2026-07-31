@@ -78,6 +78,18 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// What to do with an answer that may never come.
+///
+/// A call across the bridge to the native side usually answers. "Usually" is
+/// what leaves somebody looking at a window that never filled in, with nothing
+/// to report — so a call that hangs, or fails, falls back instead of winning.
+export function orAfter<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    work.catch(() => fallback),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 /// Where a channel's work happens.
 ///
 /// The default is a directory derived for it — safe, and a channel cannot

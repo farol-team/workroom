@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { invoke } from "@tauri-apps/api/core";
 import * as settings from "./settings";
@@ -687,15 +687,19 @@ async function boot() {
   me = user.email;
   $("who").textContent = user.name;
 
-  // Agents already running from an earlier window of this session stay
-  // addressable — the registry is the process's, not this view's.
-  agents.use(settings.load());
-  for (const name of await agents.listRunning()) agents.markRunning(name);
-  renderAgentPicker();
-
+  // The room first. It is the product, and everything below is a detail of the
+  // toolbar that can arrive late without anybody minding.
   channels = await api.channels();
   renderChannels();
   if (channels.length) await open(channels[0].slug);
+
+  // Agents already running from an earlier window of this session stay
+  // addressable — the registry is the process's, not this view's. If the bridge
+  // does not answer, the picker is briefly wrong, which is better than a room
+  // that never appeared.
+  agents.use(settings.load());
+  for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
+  renderAgentPicker();
 }
 
 boot().catch((e) => alert(`Cannot reach the server.\n\n${String(e)}`));
