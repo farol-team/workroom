@@ -21,6 +21,17 @@ const TOKEN = process.env.WORKROOM_TOKEN ?? "dev-alice";
 const AGENT = process.env.WORKROOM_AGENT ?? "opencode";
 const MODEL = process.env.WORKROOM_MODEL ?? "opencode/deepseek-v4-flash-free";
 
+// The same endpoints, in the same order, as `send()` in the client. If this
+// diverges it stops being evidence about what a real turn records.
+const api = async (path, init = {}) => {
+  const res = await fetch(`${SERVER}/api${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}`, ...init.headers },
+  });
+  if (!res.ok) throw new Error(`${init.method ?? "GET"} ${path} → ${res.status} ${await res.text()}`);
+  return res.status === 204 ? null : res.json();
+};
+
 const agent = spawn(AGENT, [ "acp" ], { stdio: [ "pipe", "pipe", "pipe" ] });
 agent.on("error", (e) => {
   console.error(`cannot start \`${AGENT} acp\`: ${e.message}\n\nInstall one with: npm i -g opencode-ai`);
@@ -57,12 +68,30 @@ createInterface({ input: agent.stdout }).on("line", (line) => {
                   result: { outcome: { outcome: "selected", optionId: option.optionId } } });
   }
 
-  if (msg.method === "session/update") {
-    const update = msg.params.update;
-    if (update.sessionUpdate === "agent_message_chunk") process.stdout.write(update.content?.text ?? "");
-    if (update.sessionUpdate === "tool_call") console.log(`\n  tool   ${update.title ?? update.kind}`);
-  }
+  if (msg.method === "session/update") onUpdateHandler?.(msg.params.update);
 });
+
+let onUpdateHandler = null;
+const onUpdate = (fn) => { onUpdateHandler = fn; };
+
+// The same closing instruction the client appends, so what a real agent decides
+// to keep is part of what this proves.
+const CLOSING = [
+  "Before you finish: if this turn produced something the room should still",
+  "know next week — a decision, a constraint, something that turned out to be",
+  "true — record it with workroom://memory/remember, in your own words, as one",
+  "entry. If it did not, keep nothing. Do not record the conversation itself;",
+  "the room already has it.",
+].join("\n");
+
+const exportSession = (id) =>
+  new Promise((resolve) => {
+    const out = spawn(AGENT, [ "export", id ]);
+    let body = "";
+    out.stdout.on("data", (d) => (body += d));
+    out.on("error", () => resolve(null));
+    out.on("close", (code) => resolve(code === 0 && body.trim() ? body : null));
+  });
 
 await ask("initialize", {
   protocolVersion: 1,
@@ -82,13 +111,78 @@ console.log(`session  ${sessionId}\nchannel  # ${channel}`);
 
 try { await ask("session/set_config_option", { sessionId, configId: "model", value: MODEL }); } catch {}
 
+// What the room knows, and the message that asked — both before the turn, as
+// the client does it.
+const { context } = await api(`/channels/${channel}/context`);
+const asked = await api(`/channels/${channel}/messages`, {
+  method: "POST", body: JSON.stringify({ body: `@agent ${prompt}` }),
+});
+const run = await api(`/channels/${channel}/runs`, {
+  method: "POST",
+  body: JSON.stringify({ trigger_message_id: asked.id, agent_kind: AGENT,
+                         external_id: sessionId, model: MODEL }),
+});
+console.log(`run      ${run.id}`);
+
 console.log(`\n> ${prompt}\n`);
+let answer = "";
+let recorded = { steps: 0, plan: false, usage: false };
+
+onUpdate(async (update) => {
+  if (update.sessionUpdate === "agent_message_chunk") {
+    const text = update.content?.text ?? "";
+    answer += text;
+    process.stdout.write(text);
+  }
+  if (update.sessionUpdate === "plan") {
+    recorded.plan = true;
+    await api(`/runs/${run.id}/plan`, { method: "POST",
+      body: JSON.stringify({ entries: update.entries ?? [] }) }).catch(() => {});
+  }
+  if (update.sessionUpdate === "usage_update") {
+    recorded.usage = true;
+    await api(`/runs/${run.id}`, { method: "PATCH",
+      body: JSON.stringify({ status: "running", context_used: update.used,
+                             context_size: update.size, cost: update.cost }) }).catch(() => {});
+  }
+  if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+    // Named by what it is, or not recorded — an id is not a name. Same rule as
+    // the client's, and for the same reason: somebody reads these.
+    const label = update.title ?? update.kind;
+    if (!label) return;
+    recorded.steps += 1;
+    console.log(`\n  tool   ${label}`);
+    await api(`/runs/${run.id}/steps`, { method: "POST",
+      body: JSON.stringify({ kind: "tool_use", label }) }).catch(() => {});
+  }
+});
+
 try {
+  const body = [ context, `${prompt}\n\n---\n\n${CLOSING}` ].filter(Boolean).join("\n\n---\n\n");
   const { stopReason } = await ask("session/prompt", {
-    sessionId, prompt: [ { type: "text", text: prompt } ],
+    sessionId, prompt: [ { type: "text", text: body } ],
   });
+
+  if (answer.trim()) {
+    await api(`/runs/${run.id}/messages`, { method: "POST",
+      body: JSON.stringify({ body: answer.trim() }) });
+  }
+  await api(`/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "succeeded" }) });
+
+  // The client offers the transcript and a person accepts it. There is nobody
+  // here to click, so this does what they would have done, and says so.
+  const transcript = await exportSession(sessionId);
+  if (transcript) {
+    await api(`/runs/${run.id}/artifacts`, { method: "POST",
+      body: JSON.stringify({ name: `run-${run.id} transcript.json`, kind: "transcript",
+                             content: transcript }) });
+  }
+
   console.log(`\n\nstopReason: ${stopReason}`);
+  console.log(`recorded: ${recorded.steps} steps, plan ${recorded.plan}, usage ${recorded.usage}` +
+              `, transcript ${transcript ? `${transcript.length} bytes` : "none"} (attached for you)`);
 } catch (err) {
+  await api(`/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "failed" }) }).catch(() => {});
   console.error(`\nthe turn failed: ${err.message}`);
 }
 
