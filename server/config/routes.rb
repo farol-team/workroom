@@ -13,6 +13,10 @@ Rails.application.routes.draw do
     get  "channels/:channel_slug/memory", to: "memory#index",  as: :channel_memory
     post "channels/:channel_slug/memory", to: "memory#create"
 
+    get  "channels/:channel_slug/promotions", to: "promotions#index", as: :channel_promotions
+    post "promotions/:id/approve", to: "promotions#approve", as: :approve_promotion
+    post "promotions/:id/reject",  to: "promotions#reject",  as: :reject_promotion
+
     post  "channels/:channel_slug/runs", to: "runs#create", as: :channel_runs
     patch "agent_sessions/:id", to: "agent_sessions#update", as: :agent_session
 

@@ -27,6 +27,7 @@ end
 class ActiveSupport::TestCase
   parallelize(workers: 1)
   include Build
+  include ActiveJob::TestHelper
 
   # Capture what the room would see, without stubbing the broadcast path away.
   def broadcasts(channel)
@@ -46,6 +47,7 @@ end
 
 class ActionDispatch::IntegrationTest
   include Build
+  include ActiveJob::TestHelper
 
   def auth(user) = { "Authorization" => "Bearer #{user.api_token}" }
 end
