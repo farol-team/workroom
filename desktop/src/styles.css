@@ -64,3 +64,16 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 #session-options { display: flex; gap: 8px; padding: 8px 16px 0; }
 .session-option select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
   border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; max-width: 220px; }
+
+/* The picker only appears when a person has more than one agent, so it must not
+   claim space in the common case. */
+#agent-pick {
+  background: var(--panel);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+#agent-pick[hidden] { display: none; }

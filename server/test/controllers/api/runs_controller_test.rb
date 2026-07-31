@@ -7,6 +7,45 @@ class Api::RunsControllerTest < ActionDispatch::IntegrationTest
     @json = { "Content-Type" => "application/json" }
   end
 
+  test "two agents in one channel keep two sessions" do
+    # A session id belongs to the process that issued it. Reused across agents,
+    # the second agent inherits an id its process has never heard of — and the
+    # transcript exported afterwards is somebody else's.
+    m1 = @channel.messages.create!(author: @alice, body: "first")
+    m2 = @channel.messages.create!(author: @alice, body: "second")
+
+    post api_channel_runs_path(@channel.slug),
+         params: { trigger_message_id: m1.id, agent_kind: "opencode", external_id: "ses_open" }.to_json,
+         headers: auth(@alice).merge(@json)
+    assert_response :created
+
+    post api_channel_runs_path(@channel.slug),
+         params: { trigger_message_id: m2.id, agent_kind: "claude", external_id: "ses_claude" }.to_json,
+         headers: auth(@alice).merge(@json)
+    assert_response :created
+
+    sessions = AgentSession.where(user: @alice, channel: @channel)
+    assert_equal 2, sessions.count, "one session per agent, not one per channel"
+    assert_equal %w[ses_claude ses_open], sessions.pluck(:external_id).sort
+    assert_equal %w[claude opencode], sessions.pluck(:agent_kind).sort
+  end
+
+  test "the same agent asked twice keeps one session" do
+    m1 = @channel.messages.create!(author: @alice, body: "first")
+    m2 = @channel.messages.create!(author: @alice, body: "second")
+
+    2.times do |i|
+      post api_channel_runs_path(@channel.slug),
+           params: { trigger_message_id: [ m1, m2 ][i].id, agent_kind: "opencode",
+                     external_id: "ses_open" }.to_json,
+           headers: auth(@alice).merge(@json)
+      assert_response :created
+    end
+
+    assert_equal 1, AgentSession.where(user: @alice, channel: @channel).count
+    assert_equal 2, AgentSession.last.agent_runs.count, "both turns belong to the one session"
+  end
+
   test "a full turn records the run, its steps, and an answer attributed to the run" do
     message = @channel.messages.create!(author: @alice, body: "what did we agree?")
 

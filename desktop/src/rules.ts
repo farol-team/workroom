@@ -5,9 +5,77 @@
 /// is posted, so the marker never reaches the channel body.
 export const ADDRESS = /^\s*@agent\b[:,]?\s*/i;
 
-export function parseAddress(text: string): { addressed: boolean; body: string } {
-  const m = text.match(ADDRESS);
-  return m ? { addressed: true, body: text.slice(m[0].length) } : { addressed: false, body: text };
+/// A person's agent: a command to run, under a name they choose. Never a
+/// credential — the agent authenticates itself on this machine (Article P2).
+export interface AgentDef {
+  name: string;
+  command: string;
+  args: string[];
+  default?: boolean;
+}
+
+/// What a name may be, and therefore what `@` can reach.
+export const AGENT_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
+const NAMED = /^\s*@([a-z0-9][a-z0-9._-]*)\b[:,]?\s*/i;
+
+/// `@agent` summons whichever agent is default; `@<name>` summons that one. A
+/// name nobody configured is a colleague, not a summons — the room is full of
+/// people, and addressing one of them is not addressing an agent.
+export function parseAddress(
+  text: string,
+  agents: AgentDef[] = [],
+): { addressed: boolean; agent?: string; body: string } {
+  const generic = text.match(ADDRESS);
+  if (generic) {
+    return { addressed: true, agent: defaultAgent(agents), body: text.slice(generic[0].length) };
+  }
+
+  const named = text.match(NAMED);
+  const match = named && agents.find((a) => a.name.toLowerCase() === named[1].toLowerCase());
+  if (match) return { addressed: true, agent: match.name, body: text.slice(named![0].length) };
+
+  return { addressed: false, body: text };
+}
+
+export function defaultAgent(agents: AgentDef[]): string | undefined {
+  return (agents.find((a) => a.default) ?? agents[0])?.name;
+}
+
+/// opencode ships a first-party ACP server, so a person who has configured
+/// nothing still has an agent.
+export const FALLBACK_AGENT: AgentDef = {
+  name: "opencode", command: "opencode", args: ["acp"], default: true,
+};
+
+/// Definitions come from a file a person edits, so they arrive malformed. Two
+/// defaults is a coin toss over who answers `@agent`; none is a dead `@agent`.
+export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
+  const seen = new Set<string>();
+  const clean: AgentDef[] = [];
+
+  for (const d of defs) {
+    const name = d.name?.trim();
+    const command = d.command?.trim();
+    if (!name || !command || !AGENT_NAME.test(name)) continue;
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    clean.push({ name, command, args: d.args ?? [], ...(d.default ? { default: true } : {}) });
+  }
+
+  if (!clean.length) return [{ ...FALLBACK_AGENT }];
+
+  const first = clean.findIndex((d) => d.default);
+  return clean.map((d, i) => {
+    const isDefault = first === -1 ? i === 0 : i === first;
+    const { default: _, ...rest } = d;
+    return isDefault ? { ...rest, default: true } : rest;
+  });
+}
+
+/// A session belongs to the agent that opened it, in the channel it was opened
+/// for. Keyed by anything less, two agents in one room share a session id.
+export function sessionKey(agent: string, slug: string): string {
+  return `${agent}/${slug}`;
 }
 
 /// What the room just said, as the agent would read it. Channel history is

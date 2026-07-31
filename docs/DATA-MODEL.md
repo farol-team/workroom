@@ -40,7 +40,7 @@ rejected. Unbounded nesting is a UX trap that no team escapes once entered.
 
 ## Agent
 
-**`agent_sessions`** — one per (user, channel) pair, holding the ACP session's external id and
+**`agent_sessions`** — one per (user, agent, channel) triple, holding the ACP session's external id and
 lifecycle state. This is the table that makes channel-scoped memory fall out naturally rather
 than needing to be enforced.
 

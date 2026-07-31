@@ -74,10 +74,13 @@ export class Api {
     });
   }
 
-  startRun(slug: string, triggerMessageId: number, externalId: string, model?: string) {
+  /// `agentKind` is the name this person addresses the agent by. The server
+  /// keys the session on it, so two agents in one channel keep two sessions.
+  startRun(slug: string, triggerMessageId: number, agentKind: string,
+           externalId: string, model?: string) {
     return this.call<{ id: number; agent_session_id: number }>(`/channels/${slug}/runs`, {
       method: "POST",
-      body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: "opencode",
+      body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: agentKind,
                              external_id: externalId, model }),
     });
   }

@@ -6,9 +6,10 @@ module Api
     before_action :require_channel_access!, only: :create
 
     def create
-      session = AgentSession.live_for(current_user, channel!).first ||
+      agent_kind = params[:agent_kind].presence || "opencode"
+      session = AgentSession.live_for(current_user, channel!, agent_kind).first ||
                 AgentSession.create!(user: current_user, channel: channel!,
-                                     agent_kind: params[:agent_kind] || "opencode",
+                                     agent_kind: agent_kind,
                                      external_id: params[:external_id], status: "running",
                                      started_at: Time.current)
       session.update!(status: "running", external_id: params[:external_id].presence || session.external_id)

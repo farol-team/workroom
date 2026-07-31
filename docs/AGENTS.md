@@ -39,11 +39,41 @@ The handshake reports `mcpCapabilities`, which is how the capability rail reache
 the client passes the rail's MCP configuration when it opens a session. It also reports
 `loadSession`, which is the hook rehydration builds on.
 
+## Several models, several agents
+
+Two different things hide behind "I have several subscriptions", and they cost very
+different amounts to support.
+
+**Several models, one agent.** opencode is provider-agnostic: one process reaches Claude,
+GLM, Kimi and the rest, and the model is a session option the agent already exposes. This is
+the common case, and WorkRoom does nothing for it beyond rendering the option the agent
+sends — wrapping the agent's own mechanism would be an abstraction over something already
+exposed.
+
+**Several agent runtimes.** opencode and Claude Code are separate processes with their own
+harness, skills and behaviour. For that a person names them:
+
+| | |
+|---|---|
+| `@agent` | whichever agent is default |
+| `@claude` | that agent by name |
+| `@bob` | a colleague — a name nobody configured is a person, not a summons |
+
+Definitions live on the person's machine: a name, a command, its arguments. Never a
+credential — the agent authenticates itself (Article P2). A name has to be something `@` can
+reach, so an agent nobody can address cannot be configured.
+
+Because memory belongs to the channel rather than to the agent, switching costs nothing.
+What the room knows is pushed into whichever agent is summoned, so choosing a cheap model
+for a cheap question is a per-task decision rather than a configuration change.
+
 ## Sessions
 
-**One session per (user, channel) pair.** Everything else follows from this.
+**One session per (user, agent, channel) triple.** Everything else follows from this.
 
-- Switching channels switches session
+- Switching channels switches session, and so does switching agent
+- Two agents in one channel hold two sessions; sharing one would hand an agent a session id
+  its process has never heard of
 - The memory scope of a session is the channel's scope
 - Rehydration is what happens at session start
 - A run belongs to a session, so cost and history roll up per person per domain
@@ -74,8 +104,8 @@ where `plan` disallows every edit tool. Whatever it offers is rendered; nothing
 is hardcoded, because a different agent names things differently or offers
 nothing at all.
 
-Options are per session and therefore **per channel**, which follows from one
-session per (user, channel). A cheap model for routine work in one room and an
+Options are per session and therefore **per agent and per channel**, which follows from one
+session per (user, agent, channel). A cheap model for routine work in one room and an
 expensive one where it matters in another, in the same client, without
 reconfiguring anything between them.
 
@@ -144,7 +174,7 @@ An agent writes files to its working directory by default. Left alone, results s
 laptop and a colleague sees the conversation without its output.
 
 The rule is that work product goes to the channel. Each session has a working directory
-scoped to its (user, channel) pair; on completion, produced files are uploaded as artifacts
+scoped to its (user, agent, channel) triple; on completion, produced files are uploaded as artifacts
 belonging to the channel and, where applicable, to the run that made them.
 
 This is what makes a channel a complete record rather than a discussion of work that
