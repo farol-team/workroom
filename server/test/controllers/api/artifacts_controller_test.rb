@@ -26,6 +26,30 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
     assert_equal @transcript, artifact.file.download
   end
 
+  test "a work product that is not text survives the trip" do
+    # A chart, a spreadsheet, a rendered document. Sent as text it arrives
+    # corrupted, and nothing complains — the file is simply wrong on download.
+    png = "\x89PNG\r\n\x1a\n\x00\x00\x00binary".b
+
+    post api_run_artifacts_path(@run),
+         params: { name: "chart.png", kind: "file", content_type: "image/png",
+                   content_base64: Base64.strict_encode64(png) }.to_json,
+         headers: auth(@alice).merge(@json)
+
+    assert_response :created
+    assert_equal png, Artifact.last.file.download, "byte for byte"
+    assert_equal "image/png", Artifact.last.file.content_type
+  end
+
+  test "an attachment must carry something" do
+    post api_run_artifacts_path(@run),
+         params: { name: "empty.png", kind: "file" }.to_json,
+         headers: auth(@alice).merge(@json)
+
+    assert_response :unprocessable_content
+    assert_equal 0, Artifact.count, "an artifact with no file is not an artifact"
+  end
+
   test "attaching does not touch the channel's memory" do
     assert_no_difference -> { MemoryEntry.count } do
       post api_run_artifacts_path(@run),

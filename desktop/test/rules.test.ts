@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { StepLedger, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp } from "../src/rules";
+import { StepLedger, contentTypeFor, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -296,5 +296,28 @@ describe("sessions are per agent and per channel", () => {
     expect(sessionKey("opencode", "meetings")).not.toBe(sessionKey("claude", "meetings"));
     expect(sessionKey("opencode", "meetings")).not.toBe(sessionKey("opencode", "marketing"));
     expect(sessionKey("opencode", "meetings")).toBe(sessionKey("opencode", "meetings"));
+  });
+});
+
+describe("work product", () => {
+  test("a file is offered under the type it is, not the type it was sent as", () => {
+    // Attached as application/json a chart downloads unopenable, and nothing
+    // anywhere reports an error.
+    expect(contentTypeFor("out/q3.png")).toBe("image/png");
+    expect(contentTypeFor("report.md")).toBe("text/markdown");
+    expect(contentTypeFor("data.csv")).toBe("text/csv");
+    expect(contentTypeFor("deck.pdf")).toBe("application/pdf");
+    expect(contentTypeFor("chart.SVG")).toBe("image/svg+xml");
+  });
+
+  test("an unknown extension is bytes, not a guess", () => {
+    expect(contentTypeFor("model.bin")).toBe("application/octet-stream");
+    expect(contentTypeFor("Makefile")).toBe("application/octet-stream");
+  });
+
+  test("what a run produced is worth offering only if there is any", () => {
+    expect(worthOffering([])).toBe(false);
+    expect(worthOffering([{ path: "a.md", bytes: 0 }])).toBe(false);
+    expect(worthOffering([{ path: "a.md", bytes: 12 }])).toBe(true);
   });
 });

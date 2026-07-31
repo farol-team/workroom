@@ -174,8 +174,16 @@ An agent writes files to its working directory by default. Left alone, results s
 laptop and a colleague sees the conversation without its output.
 
 The rule is that work product goes to the channel. Each session has a working directory
-scoped to its (user, agent, channel) triple; on completion, produced files are uploaded as artifacts
-belonging to the channel and, where applicable, to the run that made them.
+scoped to its (user, agent, channel) triple, **derived rather than chosen** — an agent that
+could name its own working directory could name someone else's. A channel slug that looks
+like a path does not become one.
+
+When a turn ends, the directory is compared with how it was when the session opened. Files
+that appeared or changed are **offered**; files the agent deleted, and files it never
+touched, are not. Hidden entries are skipped, so `.git` and `.env` are never in the offer.
+
+Offered, not uploaded. Work product belongs to the channel, but what leaves the machine is
+still the person's decision — the same shape as the transcript offer, for the same reason.
 
 This is what makes a channel a complete record rather than a discussion of work that
 happened elsewhere.

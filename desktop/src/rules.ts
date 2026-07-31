@@ -78,6 +78,24 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// What a produced file is, so it downloads as itself. Everything unrecognised
+/// is bytes rather than a guess — a wrong type is worse than none.
+const TYPES: Record<string, string> = {
+  md: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv",
+  html: "text/html", svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg",
+  jpeg: "image/jpeg", gif: "image/gif", pdf: "application/pdf", zip: "application/zip",
+};
+
+export function contentTypeFor(path: string): string {
+  const ext = path.includes(".") ? path.split(".").pop()!.toLowerCase() : "";
+  return TYPES[ext] ?? "application/octet-stream";
+}
+
+/// An empty file is not work product, and an empty offer is noise.
+export function worthOffering(files: Array<{ path: string; bytes: number }>): boolean {
+  return files.some((f) => f.bytes > 0);
+}
+
 /// What the room just said, as the agent would read it. Channel history is
 /// context even when it came from a colleague — an agent reads the room.
 export function formatHistory(rows: Array<{ who: string; what: string }>, limit = 20): string | null {

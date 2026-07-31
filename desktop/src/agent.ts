@@ -30,6 +30,22 @@ export class Agents {
     this.live.add(name);
   }
 
+  /// Where this session works. Derived from who is working, with which agent,
+  /// in which channel — the agent never names its own directory.
+  workspace(user: string, name: string, channel: string) {
+    return invoke<string>("agent_workspace", { user, name, channel });
+  }
+
+  /// What the run wrote or changed there, since the directory was opened.
+  produced(workspace: string) {
+    return invoke<Array<{ path: string; bytes: number }>>("agent_produced", { workspace });
+  }
+
+  /// One produced file, base64 — a work product is not always text.
+  read(workspace: string, path: string) {
+    return invoke<string>("agent_read", { workspace, path });
+  }
+
   /// What the Rust side says is running — the registry outlives this view.
   async listRunning(): Promise<string[]> {
     return invoke<string[]>("agent_list");

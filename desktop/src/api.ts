@@ -34,7 +34,7 @@ export class Api {
   }
 
   async signIn(email: string) {
-    const r = await this.call<{ token: string; user: { name: string } }>("/auth", {
+    const r = await this.call<{ token: string; user: { id: number; email: string; name: string } }>("/auth", {
       method: "POST", body: JSON.stringify({ email }),
     });
     this.token = r.token;
@@ -88,6 +88,15 @@ export class Api {
   attachArtifact(runId: number, name: string, content: string, kind = "transcript") {
     return this.call(`/runs/${runId}/artifacts`, {
       method: "POST", body: JSON.stringify({ name, content, kind }),
+    });
+  }
+
+  /// Bytes rather than text, for work product that is not a document.
+  attachBytes(runId: number, name: string, base64: string, contentType: string) {
+    return this.call(`/runs/${runId}/artifacts`, {
+      method: "POST",
+      body: JSON.stringify({ name, kind: "file", content_base64: base64,
+                             content_type: contentType }),
     });
   }
 

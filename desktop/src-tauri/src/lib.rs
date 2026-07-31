@@ -1,10 +1,14 @@
 mod acp;
+mod workspace;
 
 use std::sync::Arc;
 
 use acp::{Agent, AgentState};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
+use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
 /// Defaults to opencode, which ships a first-party ACP server; any other ACP
@@ -28,6 +32,86 @@ async fn agent_start(
         previous.shutdown().await;
     }
     Ok(json!({ "ok": true, "name": name, "command": command }))
+}
+
+/// Open the working directory for this session and remember what was in it.
+/// The path is derived from who is working, with which agent, in which channel —
+/// the agent never names its own directory.
+#[tauri::command]
+async fn agent_workspace(
+    app: AppHandle,
+    shots: State<'_, Workspaces>,
+    user: String,
+    name: String,
+    channel: String,
+) -> Result<String, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app data directory: {e}"))?
+        .join("workspaces");
+
+    let dir = workspace::workspace_path(&root, &user, &name, &channel);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+
+    shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?
+        .insert(dir.clone(), workspace::snapshot(&dir));
+
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// What this run wrote or changed, offered rather than uploaded — what leaves
+/// the machine stays the person's decision (Article D3 does not override P2).
+#[tauri::command]
+async fn agent_produced(
+    shots: State<'_, Workspaces>,
+    workspace: String,
+) -> Result<Vec<Produced>, String> {
+    let dir = std::path::PathBuf::from(&workspace);
+    let after = workspace::snapshot(&dir);
+
+    let mut state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    let before = state.get(&dir).cloned().unwrap_or_default();
+
+    let files = workspace::produced(&before, &after)
+        .into_iter()
+        .filter_map(|rel| {
+            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
+            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
+                path: rel.to_string_lossy().into_owned(),
+                bytes,
+            })
+        })
+        .collect();
+
+    // The next turn is measured from here, so one file is not offered twice.
+    state.insert(dir, after);
+    Ok(files)
+}
+
+/// Read one produced file, as base64 — a work product is not always text.
+#[tauri::command]
+async fn agent_read(workspace: String, path: String) -> Result<String, String> {
+    let dir = std::path::PathBuf::from(&workspace)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
+    // A path that resolves outside its own workspace is not this session's to read.
+    if !file.starts_with(&dir) {
+        return Err(format!("{path} is outside the workspace"));
+    }
+
+    let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+    if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+        return Err(format!("{path} is too large to attach"));
+    }
+    Ok(BASE64.encode(bytes))
 }
 
 /// Which of this person's agents are running.
@@ -171,11 +255,15 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AgentState::default());
+            app.manage(Workspaces::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             agent_start,
             agent_list,
+            agent_workspace,
+            agent_produced,
+            agent_read,
             agent_new_session,
             agent_prompt,
             agent_set_config,
