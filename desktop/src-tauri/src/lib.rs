@@ -70,7 +70,7 @@ async fn agent_prompt(
 ) -> Result<Value, String> {
     let agent = current(&state).await?;
     let mut body = String::new();
-    for block in [ context, history ].into_iter().flatten() {
+    for block in [context, history].into_iter().flatten() {
         if !block.trim().is_empty() {
             body.push_str(block.trim());
             body.push_str("\n\n---\n\n");
@@ -99,7 +99,7 @@ async fn agent_export_session(
     let command = command.unwrap_or_else(|| "opencode".into());
 
     let out = tokio::process::Command::new(&command)
-        .args([ "export", &session_id ])
+        .args(["export", &session_id])
         .output()
         .await
         .map_err(|e| format!("cannot run `{command} export`: {e}"))?;
