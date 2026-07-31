@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Look at the interface.
+#
+# Renders the built client against a running server with the native bridge
+# stubbed, and writes a picture of each state worth seeing.
+#
+#   bin/prototype        # in another terminal
+#   bin/preview
+#
+# Everything shipped into this client for weeks was tested and unseen. The first
+# time anybody looked, two defects turned up in half an hour (#65, #66): a panel
+# that had never been hidden, and a room that never opened when the bridge was
+# silent. Neither was reachable by any test.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+SERVER="${WORKROOM_SERVER:-http://127.0.0.1:3000}"
+OUT="${WORKROOM_SHOTS:-$PWD/tmp/preview}"
+PORT="${WORKROOM_PREVIEW_PORT:-4173}"
+
+say()  { printf '\033[36m→ %s\033[0m\n' "$*"; }
+fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+
+curl -sf "$SERVER/up" >/dev/null 2>&1 || fail "No server on $SERVER. Start one with bin/prototype."
+
+BROWSER="${WORKROOM_BROWSER:-}"
+if [ -z "$BROWSER" ]; then
+  BROWSER=$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)
+  [ -z "$BROWSER" ] && BROWSER=$(ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | head -1 || true)
+fi
+[ -n "$BROWSER" ] || fail "No headless browser found. Set WORKROOM_BROWSER to one."
+
+say "building the client"
+(cd desktop && pnpm --silent build >/dev/null)
+
+STAGE=$(mktemp -d)
+PROFILE=$(mktemp -d)
+trap 'kill %1 2>/dev/null || true; rm -rf "$STAGE" "$PROFILE"' EXIT
+
+cp -r desktop/dist/. "$STAGE/"
+cp desktop/preview/bridge.js "$STAGE/bridge.js"
+python3 - "$STAGE/index.html" <<'INJECT'
+import sys, pathlib
+page = pathlib.Path(sys.argv[1])
+page.write_text(page.read_text().replace("</head>", '<script src="/bridge.js"></script></head>'))
+INJECT
+
+# Threaded, deliberately. `python3 -m http.server` answers one request at a time
+# and a browser opens several at once, so the page arrives without its script and
+# it reads as flakiness rather than as a one-request-at-a-time server.
+cat > "$STAGE/serve.py" <<'SERVE'
+import sys
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), SimpleHTTPRequestHandler).serve_forever()
+SERVE
+
+say "serving it with the bridge stubbed"
+(cd "$STAGE" && exec python3 serve.py "$PORT" >/dev/null 2>&1) &
+
+# It must be *ours* on that port. A stale server left by an earlier run serves a
+# directory that no longer exists, the browser renders its own error page, and
+# every picture comes out empty for no visible reason.
+for _ in $(seq 20); do
+  curl -sf "http://127.0.0.1:$PORT/bridge.js" >/dev/null 2>&1 && break
+  sleep 0.5
+done
+curl -sf "http://127.0.0.1:$PORT/bridge.js" >/dev/null 2>&1 \
+  || fail "Something else is on port $PORT. Set WORKROOM_PREVIEW_PORT."
+
+# A budget of *virtual* time: timers fire instantly, so it drains through the
+# gaps between real network responses rather than measuring them. Generous, or
+# pages come out half-loaded.
+render() {
+  local query=$1 what=$2 out=${3:-}
+  "$BROWSER" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+    --user-data-dir="$PROFILE" --window-size=1440,900 \
+    "$what${out:+=$out}" --virtual-time-budget=60000 \
+    "http://127.0.0.1:$PORT/?v=$RANDOM$query" 2>/dev/null
+}
+
+# One profile, reused, and warmed once: a cold start happens in real time while
+# the virtual clock is already running, so the first picture paid for it and
+# every one after it came out fine.
+render "&signed-in=no" --dump-dom > /dev/null 2>&1 || true
+
+mkdir -p "$OUT"
+
+shoot() {
+  local name=$1 query=$2 want=$3 attempt=1
+  while [ "$attempt" -le 3 ]; do
+    # Ask what rendered before keeping a picture of it — a screenshot cannot be
+    # inspected by a script, and the dom can. To a file rather than a pipe:
+    # `grep -q` closes the pipe on its first match, the browser dies of SIGPIPE,
+    # and `pipefail` calls the check failed exactly when it succeeded.
+    render "$query" --dump-dom > "$STAGE/dom.html" 2>/dev/null || true
+    if grep -q "$want" "$STAGE/dom.html"; then
+      # The dom check settles correctness. The picture is a separate navigation
+      # and races the same way — Chrome captures on load, and this room fills in
+      # after it. A page that did not finish is a smaller image than one that
+      # did, so take a few and keep the fullest.
+      local best=0 size
+      for _ in 1 2 3 4 5; do
+        render "$query" --screenshot "$STAGE/shot.png" > /dev/null 2>&1 || true
+        size=$(wc -c < "$STAGE/shot.png" 2>/dev/null || echo 0)
+        if [ "$size" -gt "$best" ]; then best=$size; cp "$STAGE/shot.png" "$OUT/$name.png"; fi
+      done
+      printf '   %-11s %s\n' "$name" "$OUT/$name.png"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  # Say what did arrive. "It did not load" is not a diagnosis, and twice now the
+  # answer has been something outside the client entirely.
+  printf '\033[31m%s never rendered %s\033[0m\n' "$name" "$want" >&2
+  printf '   what arrived instead:\n' >&2
+  head -c 400 "$STAGE/dom.html" | sed 's/^/   /' >&2
+  exit 1
+}
+
+say "looking"
+shoot "signed-out" "&signed-in=no" "Sign in"
+shoot "room"       ""              'class="msg'
+shoot "memory"     "&open=memory"  '<aside id="memory">'
+shoot "thread"     "&open=thread"  '<aside id="thread">'
+
+say "written to $OUT"
