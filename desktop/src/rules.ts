@@ -148,16 +148,73 @@ export class StepLedger {
 
 export type RunSignal = { id: number; status: string; user: string };
 
-/// Who the room should currently be told is working. Presence survives every
-/// visibility level — without it a private session is indistinguishable from an
-/// absent colleague.
-export function presenceState(signals: RunSignal[]): Map<number, string> {
-  const working = new Map<number, string>();
-  for (const s of signals) {
-    if (s.status === "running") working.set(s.id, s.user);
-    else working.delete(s.id);
+/// Who is working, computed once and read by every surface that shows it.
+///
+/// The pain this product exists for is not knowing what is going on, and a
+/// signal each surface computes for itself disagrees with itself: the sidebar
+/// says one thing, the room another. There is one of these.
+export interface Working { who: string; since: number }
+
+export class WorkingSignal {
+  private runs = new Map<number, { channel: string; who: string; at: number }>();
+
+  observed(run: { runId: number; channel: string; who: string; at: number }) {
+    this.runs.set(run.runId, { channel: run.channel, who: run.who, at: run.at });
   }
-  return working;
+
+  ended(runId: number) { this.runs.delete(runId); }
+
+  /// One line per person, anchored at their earliest run — a second run
+  /// starting must not reset the elapsed time a colleague is watching.
+  inChannel(channel: string): Working[] {
+    const earliest = new Map<string, number>();
+    for (const r of this.runs.values()) {
+      if (r.channel !== channel) continue;
+      earliest.set(r.who, Math.min(earliest.get(r.who) ?? r.at, r.at));
+    }
+    return [...earliest].map(([ who, since ]) => ({ who, since }));
+  }
+
+  anywhere(): Array<Working & { channel: string }> {
+    const seen = new Map<string, Working & { channel: string }>();
+    for (const r of this.runs.values()) {
+      const key = `${r.who} ${r.channel}`;
+      const at = Math.min(seen.get(key)?.since ?? r.at, r.at);
+      seen.set(key, { who: r.who, since: at, channel: r.channel });
+    }
+    return [...seen.values()];
+  }
+
+  /// What a room says out loud. Naming one person is worth more than a count;
+  /// past that, a count is worth more than a list.
+  label(channel: string): string | null {
+    const working = this.inChannel(channel);
+    if (!working.length) return null;
+    return working.length === 1
+      ? `${working[0].who}'s agent is working`
+      : `${working.length} agents are working`;
+  }
+}
+
+/// A conversation is read a day at a time.
+export function dayLabel(at: string, today = new Date()): string {
+  const day = at.slice(0, 10);
+  const shift = (n: number) => new Date(today.getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  if (day === shift(0)) return "Today";
+  if (day === shift(-1)) return "Yesterday";
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined,
+    { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+/// What arrived since you last looked, from the count the channel already
+/// reports. The client is subscribed to the room it has open and to nothing
+/// else, so this cannot come from the stream.
+///
+/// A channel you have never opened is not a channel full of unread — it is a
+/// channel you have not opened.
+export function unreadCount(total: number, seen?: number): number {
+  if (seen === undefined) return 0;
+  return Math.max(0, total - seen);
 }
 
 /// Translate an ACP session/update notification into something the room can

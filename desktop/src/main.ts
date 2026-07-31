@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, contentTypeFor, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
 
@@ -15,13 +15,37 @@ let me = "";   // who is signed in, so a workspace belongs to a person
 
 // ---------- rendering ----------
 
+/// What each channel has that you have not seen, and whether anyone's agent is
+/// at work in it. Both read from state, never recomputed per surface.
+const seenCount = new Map<string, number>();
+
 function renderChannels() {
   $("channels").innerHTML = "";
   for (const c of channels) {
     const b = document.createElement("button");
-    b.textContent = `# ${c.slug}`;
     b.className = c.slug === current?.slug ? "active" : "";
     b.onclick = () => open(c.slug);
+
+    const name = document.createElement("span");
+    name.textContent = `# ${c.slug}`;
+    b.append(name);
+
+    const unread = unreadCount(c.message_count ?? 0, seenCount.get(c.slug));
+    if (unread && c.slug !== current?.slug) {
+      const pill = document.createElement("span");
+      pill.className = "pill";
+      pill.textContent = String(unread);
+      b.append(pill);
+      b.classList.add("unread");
+    }
+
+    if (working.inChannel(c.slug).length) {
+      const dot = document.createElement("span");
+      dot.className = "working-dot";
+      dot.title = working.label(c.slug) ?? "";
+      b.append(dot);
+    }
+
     $("channels").append(b);
   }
 }
@@ -39,12 +63,34 @@ function messageEl(m: Message) {
 function addMessage(m: Message) {
   const box = $("messages");
   if (box.querySelector(`[data-id="${m.id}"]`)) return;
+  box.querySelector(".intro")?.remove();
+
+  const day = m.created_at.slice(0, 10);
+  if (!box.querySelector(`.day[data-day="${day}"]`)) {
+    const divider = document.createElement("div");
+    divider.className = "day";
+    divider.dataset.day = day;
+    divider.textContent = dayLabel(m.created_at);
+    box.append(divider);
+  }
+
   box.append(messageEl(m));
   box.scrollTop = box.scrollHeight;
+
+  if (current) seenCount.set(current.slug, (seenCount.get(current.slug) ?? 0) + 1);
+}
+
+/// A new room is not a blank page. It says what it is for and what to try.
+function showIntro(channel: Channel) {
+  const el = document.createElement("div");
+  el.className = "intro";
+  const purpose = channel.purpose ? `${channel.purpose}\n\n` : "";
+  el.textContent = `${purpose}Nothing has been said here yet. Talk to the room, ` +
+    `or address your agent with @agent and it will start from what this room knows.`;
+  $("messages").append(el);
 }
 
 const stepLedger = new StepLedger();
-const runSignals: RunSignal[] = [];
 
 /// Steps are why a minutes-long turn is legible instead of silent. Under the
 /// default level only the owner receives them, so a colleague sees the run line
@@ -244,12 +290,14 @@ const escape = (s: string) =>
 type Presence = RunSignal & { context_used?: number; context_size?: number };
 
 const occupancyByRun = new Map<number, string>();
+const working = new WorkingSignal();
 
 function showPresence(run: Presence) {
-  runSignals.push(run);
-  const working = presenceState(runSignals);
-  const box = $("messages");
-
+  if (run.status === "running") {
+    working.observed({ runId: run.id, channel: current?.slug ?? "", who: run.user, at: Date.now() });
+  } else {
+    working.ended(run.id);
+  }
   // Occupancy is why somebody starts a fresh session; it belongs beside the
   // line that says work is happening.
   if (run.context_used != null && run.context_size != null) {
@@ -258,16 +306,14 @@ function showPresence(run: Presence) {
     else occupancyByRun.delete(run.id);
   }
 
-  box.querySelectorAll(".presence").forEach((el) => el.remove());
-  for (const [ id, who ] of working) {
-    const el = document.createElement("div");
-    el.id = `presence-${id}`;
-    el.className = "presence";
-    const occupancy = occupancyByRun.get(id);
-    el.textContent = `${who} is working with their agent…${occupancy ? `  (${occupancy})` : ""}`;
-    box.append(el);
-  }
-  box.scrollTop = box.scrollHeight;
+  // The rail sits in the composer dock and does not move the timeline: an
+  // agent starting work must not shift what somebody is reading.
+  const rail = $("activity");
+  const label = current ? working.label(current.slug) : null;
+  const occupancy = [ ...occupancyByRun.values() ][0];
+  rail.textContent = label ? `${label}…${occupancy ? `  (${occupancy})` : ""}` : "";
+  rail.classList.toggle("on", Boolean(label));
+  renderChannels();
 }
 
 async function open(slug: string) {
@@ -277,7 +323,10 @@ async function open(slug: string) {
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
   $("messages").innerHTML = "";
-  full.messages.forEach(addMessage);
+  seenCount.set(slug, full.messages.length);
+  if (full.messages.length) full.messages.forEach(addMessage);
+  else showIntro(full);
+  renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); }
   renderOptions();
 
