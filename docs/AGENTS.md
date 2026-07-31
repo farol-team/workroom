@@ -178,9 +178,26 @@ scoped to its (user, agent, channel) triple, **derived rather than chosen** — 
 could name its own working directory could name someone else's. A channel slug that looks
 like a path does not become one.
 
+A channel may instead be **bound** to a folder somebody already has. `cwd` in ACP is the
+project root — an agent reads its conventions from there, and the code being asked about lives
+there — so a derived scratch directory is right for `# meetings` and useless for a channel with
+a repository behind it.
+
+A binding is **per person and stays on their machine**. One keeps the repository in
+`~/src/billing` and a colleague in `~/work/billing`; the same channel points somewhere
+different for each of them, and a filesystem layout is not something the workspace should
+learn. It is also deliberate: an agent in somebody's real repository can change anything in
+it, which is normal for a coding agent and normal precisely because the person opened it there.
+
 When a turn ends, the directory is compared with how it was when the session opened. Files
 that appeared or changed are **offered**; files the agent deleted, and files it never
 touched, are not. Hidden entries are skipped, so `.git` and `.env` are never in the offer.
+
+**In a bound folder that is a git repository, git answers instead.** `node_modules` and
+`target` are not hidden, so one install would turn a diff into thousands of files. git already
+answers exactly this question — what changed, ignoring what the team decided to ignore — and
+answers it by their rules rather than by a list we invented. Either way the offer is capped,
+and says how many files it left out.
 
 Offered, not uploaded. Work product belongs to the channel, but what leaves the machine is
 still the person's decision — the same shape as the transcript offer, for the same reason.

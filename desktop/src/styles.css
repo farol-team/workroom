@@ -137,3 +137,8 @@ aside#thread[hidden] { display: none; }
   background: hsl(var(--hue) 40% 42%); color: var(--text); }
 .member { display: flex; align-items: center; padding: 4px 16px; font-size: 13px; }
 .earlier { color: var(--muted); font-size: 12px; text-align: center; padding: 10px 0; }
+
+/* A bound channel says so quietly: the agent is working in somebody's own
+   repository, and that is worth knowing without being shouted about. */
+#folder.bound { color: var(--agent); }
+.offer.muted { color: var(--muted); }
