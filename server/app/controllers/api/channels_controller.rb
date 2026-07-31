@@ -6,7 +6,25 @@ module Api
       render json: Channel.order(:name).map { |c| serialize(c) }
     end
 
+    # The shape a workspace can start with. Offered, never created — a room
+    # nobody asked for is a room nobody opens.
+    def templates
+      render json: ChannelTemplate.all.map { |t|
+        { key: t.key, name: t.name, purpose: t.purpose, skills: t.skills.map { |s| s[:title] },
+          taken: Channel.exists?(slug: t.key) }
+      }
+    end
+
     def create
+      if params[:template].present?
+        template = ChannelTemplate.find(params[:template])
+        return render_error("no template called #{params[:template]}", :not_found) unless template
+
+        channel = template.create!(owner: current_user)
+        Activity.log(actor: current_user, action: "channel.created", subject: channel)
+        return render json: serialize(channel), status: :created
+      end
+
       channel = Channel.create!(
         slug: params.require(:slug), name: params.require(:name),
         purpose: params[:purpose], visibility: params[:visibility] || "open"

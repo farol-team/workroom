@@ -67,3 +67,18 @@ knowledge base quietly fills with confident mistakes.
 
 **Not a chat product.** Conversation is the interface, not the point. The point is that
 work done in a channel leaves the room better informed than it found it.
+
+## A workspace starts with a shape
+
+Not with a blank page. Teams that organise this work without a product like ours
+converge on nearly the same set of rooms — strategy, product, sales, operations,
+hiring, finance, legal, engineering, projects — and making the first person
+invent that list before anything can happen is a cost with no purpose.
+
+A template carries a name, a purpose, and **skills**: how work of that kind is
+done. It never carries memory. Seeding a room with facts would be seeding it with
+somebody else's facts, and the first thing memory has to be is true for this room.
+
+The set is a file rather than a migration, because a team without a legal
+department should not be handed an empty `# legal`, and one with a research group
+should be able to add it by editing a line.

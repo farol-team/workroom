@@ -1,0 +1,62 @@
+# The shape a workspace starts with.
+#
+# Data rather than code: a team without a legal department should not be handed
+# an empty channel called `# legal`, and one with a research group should be able
+# to add it without a migration.
+#
+# Templates carry skills and never memory. Seeding a room with facts would be
+# seeding it with somebody else's facts, and the first thing memory has to be is
+# true for this room.
+strategy:
+  name: Strategy
+  purpose: Where the company is going, and why
+  skills:
+    - title: Writing an objective
+      body: |
+        An objective is qualitative and worth wanting. Its key results are
+        measurable and time-bound, and there are three to five of them — more
+        than that is a list of tasks wearing a plan's clothes.
+product:
+  name: Product
+  purpose: What we are building, for whom, and what we have learned
+  skills:
+    - title: Recording what a user said
+      body: |
+        Their words, not your summary of them. A paraphrase loses the thing that
+        made it worth writing down, and it cannot be quoted back later.
+sales:
+  name: Sales
+  purpose: Pipeline, objections, and what actually closes
+  skills:
+    - title: Writing up a call
+      body: |
+        The decision, the objection, and the next step. Not a transcript — the
+        room already has one if anybody wants it.
+operations:
+  name: Operations
+  purpose: How the work runs day to day
+hiring:
+  name: Hiring
+  purpose: Roles, candidates, and what we decided about them
+  skills:
+    - title: Writing a decision about a candidate
+      body: |
+        What was assessed, what was seen, and what was decided. A decision
+        nobody can reconstruct in six months is a decision nobody can defend.
+finance:
+  name: Finance
+  purpose: Budgets, forecasts, and what changed
+legal:
+  name: Legal
+  purpose: Contracts, policies, and the questions that keep coming back
+engineering:
+  name: Engineering
+  purpose: The system, its decisions, and why they were made
+  skills:
+    - title: Recording an architectural decision
+      body: |
+        What was decided, what it rules out, and what would change it. The last
+        one is what makes it possible to revisit honestly.
+projects:
+  name: Projects
+  purpose: Work that crosses the other rooms
