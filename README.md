@@ -36,6 +36,7 @@ the room, not by anyone's agent.
 | [Data model](docs/DATA-MODEL.md) | Tables, and the reasoning behind each |
 | [Roadmap](docs/ROADMAP.md) | What gets built, in what order, and why |
 | [Running it](docs/RUNNING.md) | How to start it, and how to see the idea work |
+| [Spikes](docs/spikes) | Research: what an agent records, how output reaches the room, memory backends, files |
 
 ## Stack
 
