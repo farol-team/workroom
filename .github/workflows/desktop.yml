@@ -65,6 +65,15 @@ jobs:
       - name: Test
         run: cargo test
 
+      # What the crate pulls in, and under what licence. An advisory against a
+      # transitive dependency is not something anybody notices by reading a
+      # lockfile.
+      - name: Dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: desktop/src-tauri/Cargo.toml
+          command: check advisories licenses bans sources
+
   bundle:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
     strategy:
