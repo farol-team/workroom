@@ -73,14 +73,36 @@ supplied on-premise. Permitted server-side, and permitted **only** for embedding
 and tiering — an infrastructure credential used to answer a turn is a violation
 of the first paragraph, not an exception to it.
 
-### Article P3 — Promotion into shared memory is an explicit act
-*(Rationale: docs/MEMORY.md — undisciplined promotion makes the system amplify
-its own errors until a wrong inference is unarguable.)*
+### Article P3 — Memory is corrected, not gated
+*(Rationale: amended 2026-07-31. The article previously required a human to
+approve every entry. In practice that spends the attention the product exists to
+protect — a knowledge base that must be curated does not get curated, and the
+person is here to work, not to review. The risk it guarded against is real, so
+it is answered by making correction cheap rather than by making writing
+expensive.)*
 
-Distillation may only **propose** (`Promotion` in state `proposed`). Writing to
-a channel's memory requires either a human approval transition or a deliberate
-human-authored write. No code path may create an applied promotion or a memory
-entry directly from agent output.
+An agent writes to its channel's memory directly. No approval step, no queue, no
+human in the path.
+
+Three properties make that safe, and none of them costs a person anything:
+
+1. **Provenance is mandatory.** Every entry records the run it came from and
+   whose agent produced it (Article P4). An entry nobody can trace is a defect.
+2. **Correction is by superseding.** Entries are never edited or deleted;
+   a correction is a new entry that supersedes the old one, and the history
+   stays readable (Article P6).
+3. **An agent that finds a contradiction resolves it.** On encountering memory
+   that its current work contradicts, an agent supersedes the stale entry rather
+   than adding a second, conflicting one. This is what replaces the human gate:
+   the system converges instead of accumulating.
+
+A person may supersede any entry at any time. That is a correction they chose to
+make, not a step they were required to take.
+
+**Out of scope of this article:** organization-wide memory that crosses channels
+(`viking://org/`). Nothing writes there yet, and an error that escapes one
+channel has a different blast radius. When something does write there, it gets
+its own article.
 
 ### Article P4 — Memory carries provenance and trust
 *(Rationale: an unattributed claim cannot be audited, and unauditable memory
