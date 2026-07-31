@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# render-learnings — select and render the learnings relevant to one card.
+# Mechanical half of flow-run's "Rendering <learnings>" rule.
+#
+# Usage: render-learnings <learnings-file> <plan-files-file> <card-title>
+#   <plan-files-file>: newline-separated repo-relative paths from the
+#   PLAN's `## Files` (tails already stripped by the caller).
+#   Run from the TARGET REPO ROOT — staleness uses `git ls-files` of $PWD.
+#
+# stdout: up to 5 lines `[<type> <confidence>/10] <key>: <insight> (files: ...)`,
+#         or the literal `none`.
+# stderr: `stale: <key>` for entries whose anchored files are ALL gone
+#         (pruning candidates — surfaced, not silently forgotten).
+#
+# Selection (grep-class by design, see design-notes): an entry matches when
+# any of its files equals a plan path, shares a directory with one, or when
+# a word of its key (>3 chars) appears in the card title.
+set -uo pipefail
+
+[ $# -eq 3 ] || { echo "usage: render-learnings <file> <plan-files-file> <title>" >&2; echo "none"; exit 0; }
+FILE="$1"; PLANF="$2"; TITLE="$3"
+command -v jq >/dev/null 2>&1 || { echo "none"; exit 0; }
+[ -s "$FILE" ] || { echo "none"; exit 0; }
+
+TRACKED="$(mktemp)"; trap 'rm -f "$TRACKED"' EXIT
+# Staleness fails OPEN: if git ls-files fails (not a repo, wrong cwd) or
+# reports nothing, skip the staleness filter rather than declaring every
+# entry stale and silently eating the whole project memory.
+CHECK_STALE=1
+git ls-files > "$TRACKED" 2>/dev/null || CHECK_STALE=0
+[ -s "$TRACKED" ] || CHECK_STALE=0
+
+TITLE_LC="$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')"
+
+SELECTED=""
+while IFS= read -r entry; do
+  printf '%s' "$entry" | jq -e 'type == "object" and (.files? | type) == "array"' >/dev/null 2>&1 || continue
+  key="$(printf '%s' "$entry" | jq -r '.key // ""')"
+
+  # Staleness: every anchored file gone from the repo.
+  if [ "$CHECK_STALE" -eq 1 ]; then
+    alive=0
+    while IFS= read -r f; do
+      [ -n "$f" ] && grep -qxF "$f" "$TRACKED" && { alive=1; break; }
+    done <<EOF2
+$(printf '%s' "$entry" | jq -r '.files[]')
+EOF2
+    if [ "$alive" -eq 0 ]; then
+      echo "stale: $key" >&2
+      continue
+    fi
+  fi
+
+  match=0
+  # File / directory overlap with the PLAN's ## Files.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    fdir="$(dirname "$f")"
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if [ "$f" = "$p" ] || [ "$fdir" = "$(dirname "$p")" ]; then match=1; break; fi
+    done < "$PLANF"
+    [ "$match" -eq 1 ] && break
+  done <<EOF2
+$(printf '%s' "$entry" | jq -r '.files[]')
+EOF2
+  # Key word vs card title.
+  if [ "$match" -eq 0 ] && [ -n "$key" ]; then
+    for w in $(printf '%s' "$key" | tr '-' ' '); do
+      [ "${#w}" -le 3 ] && continue
+      case "$TITLE_LC" in *"$(printf '%s' "$w" | tr '[:upper:]' '[:lower:]')"*) match=1; break ;; esac
+    done
+  fi
+  [ "$match" -eq 1 ] && SELECTED="$SELECTED$entry
+"
+done < "$FILE"
+
+[ -n "$SELECTED" ] || { echo "none"; exit 0; }
+
+printf '%s' "$SELECTED" | jq -c -s '
+  sort_by(-(.confidence // 0)) | .[:5][]
+  | "[\(.type) \(.confidence)/10] \(.key): \(.insight) (files: \(.files | join(",")))"' -r

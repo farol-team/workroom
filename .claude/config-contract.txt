@@ -1,0 +1,22 @@
+# Required top-level keys of a consumer's .claude/tracker.json.
+# Single source of truth for the config contract:
+#   - tests/kit-invariants.sh checks docs/tracker.example.trello.json against it;
+#   - scripts/workflow-kit-sync checks the consumer's real config after
+#     every sync and fails loudly on missing keys.
+# Extend this list when a kit command grows a new config dependency —
+# never grow the lists inside those scripts directly.
+tracker
+states
+auto_merge_criteria
+research
+worker
+acceptance
+tdd_gate
+card_prefix
+branch_prefix
+default_target
+targets
+repo_label_prefix
+session_log
+learnings
+comment_prefixes

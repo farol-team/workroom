@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# parse-verdict — normalize a subagent verdict out of a Claude CLI JSON
+# envelope. Mechanical half of flow-run Step 2.3 / 2.1a: the orchestrator
+# (an LLM) should classify and decide, not regex-parse.
+#
+# Usage: parse-verdict acceptance <envelope.json>
+#        parse-verdict critic     <envelope.json>
+#
+# stdout on exit 0: ONE normalized JSON object —
+#   acceptance: {gaps, gaps_summary, minor, verdicts, learnings,
+#                _fingerprints: {gaps: [fp|null,...], minor: [fp|null,...]},
+#                _fps: {parsed, total},
+#                _session_id, _cost_usd, _num_turns}
+#   critic:     {verdict, findings, summary, learnings,
+#                _session_id, _cost_usd, _num_turns}
+# Exit 3: subagent said `BLOCKED: <reason>` → stdout {"blocked": "<reason>", ...meta}
+# Exit 4: envelope/verdict unusable (crash path) → reason on stderr.
+#
+# Tolerant extraction: the verdict is the LAST line of `result` that parses
+# as a JSON object with the mode's required keys — prose around it is
+# ignored (a chatty model should not turn a valid verdict into a Blocked
+# card). Missing optional keys get contract defaults (legacy two-key shape).
+set -uo pipefail
+
+die() { echo "parse-verdict: $1" >&2; exit 4; }
+
+[ $# -eq 2 ] || die "usage: parse-verdict acceptance|critic <envelope.json>"
+MODE="$1"; ENVELOPE="$2"
+case "$MODE" in acceptance|critic) ;; *) die "unknown mode '$MODE'" ;; esac
+command -v jq >/dev/null 2>&1 || die "jq is required"
+[ -f "$ENVELOPE" ] || die "envelope not found: $ENVELOPE"
+
+jq -e 'type == "object"' "$ENVELOPE" >/dev/null 2>&1 || die "envelope is not valid JSON: $ENVELOPE"
+jq -e '.is_error != true' "$ENVELOPE" >/dev/null 2>&1 || die "envelope has is_error=true"
+
+META="$(jq '{_session_id: (.session_id // null), _cost_usd: (.total_cost_usd // 0), _num_turns: (.num_turns // null)}' "$ENVELOPE")"
+RESULT="$(jq -r '.result // empty' "$ENVELOPE")"
+[ -n "$RESULT" ] || die "envelope has empty result"
+
+TRIMMED="$(printf '%s' "$RESULT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+case "$TRIMMED" in
+  BLOCKED:*)
+    # First line only — a multi-line remainder must not be smeared into
+    # the card comment as "the reason".
+    REASON="$(printf '%s' "$TRIMMED" | head -n1 | sed 's/^BLOCKED:[[:space:]]*//')"
+    jq -cn --arg r "$REASON" --argjson meta "$META" '{blocked: $r} + $meta'
+    exit 3
+    ;;
+esac
+
+# Required keys WITH types — has() alone lets a garbage verdict flow
+# downstream ({"verdict":7,"findings":"oops"} must be exit 4, not a value
+# whose == "rejected" check silently reads as approved).
+if [ "$MODE" = "acceptance" ]; then
+  REQUIRED='(.gaps? | type) == "array" and (.gaps_summary? | type) == "string" and ((.minor? // []) | type) == "array" and ((.learnings? // []) | type) == "array" and (.gaps | all(type == "string")) and (.minor // [] | all(type == "string"))'
+else
+  REQUIRED='(.verdict? | type) == "string" and (.findings? | type) == "array"'
+fi
+
+# Last verdict-shaped line wins (the prompts require the FINAL response to
+# be the verdict). Deliberate trade-off, pinned by test: if a model echoes
+# a contract example AFTER its real verdict, the example wins — the
+# one-line-final-response rule in the prompts is what keeps this honest.
+VERDICT=""
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  if printf '%s' "$line" | jq -e "(type == \"object\") and ($REQUIRED)" >/dev/null 2>&1; then
+    VERDICT="$line"
+  fi
+done <<EOF
+$RESULT
+EOF
+[ -n "$VERDICT" ] || die "no line of result parses as a $MODE verdict (required keys: $REQUIRED)"
+
+if [ "$MODE" = "critic" ]; then
+  printf '%s' "$VERDICT" | jq -c --argjson meta "$META" \
+    '{verdict, findings, summary: (.summary // ""), learnings: (.learnings // [])} + $meta'
+  exit 0
+fi
+
+# Acceptance: fill contract defaults, extract fingerprints (first [...] group
+# after the optional severity prefix; null when absent — fail-open, the entry
+# still counts as a gap/minor, it just leaves history tracking).
+printf '%s' "$VERDICT" | jq -c --argjson meta "$META" '
+  # capture on a NON-MATCHING string emits an empty stream (not an error),
+  # so wrap in an array and take first — otherwise unfingerprinted entries
+  # are dropped and _fingerprints misaligns against gaps[]/minor[].
+  def fp: [try (capture("^(?:[A-Z]+[[:space:]]+)?\\[(?<f>[^\\]]+)\\]") .f) catch null] | first // null;
+  {gaps, gaps_summary,
+   minor: (.minor // []),
+   verdicts: (.verdicts // {spec: "pass", quality: "approved"}),
+   learnings: (.learnings // [])}
+  | . + {_fingerprints: {gaps: [.gaps[] | fp], minor: [.minor[] | fp]}}
+  | . + {_fps: {parsed: ([.["_fingerprints"].gaps[], .["_fingerprints"].minor[]] | map(select(. != null)) | length),
+                total:  ((.gaps | length) + (.minor | length))}}
+  | . + $meta'

@@ -43,3 +43,7 @@ dialog::backdrop { background: #000a; }
 dialog input { display: block; width: 260px; margin: 12px 0; background: #0f1114;
   border: 1px solid var(--line); color: var(--text); padding: 9px 11px; border-radius: 8px; }
 h2 { margin: 0 0 4px; font-size: 16px; }
+
+#composer #destination { align-self: center; white-space: nowrap; font-size: 12px; }
+#composer #destination.to-agent { color: var(--agent); }
+#composer #summon { font-family: inherit; }

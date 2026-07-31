@@ -1,4 +1,4 @@
-import { Api, type Channel, type Message } from "./api";
+import { Api, parseAddress, type Channel, type Message } from "./api";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -99,13 +99,22 @@ async function open(slug: string) {
 
 async function send(text: string) {
   if (!current) return;
-  const posted = await api.post(current.slug, text);
 
-  if (!agent.running) return;               // plain conversation, no agent involved
+  // Default is the room. The agent joins only when its owner calls it.
+  const { addressed, body } = parseAddress(text);
+  const posted = await api.post(current.slug, body);
+  if (!addressed) return;
 
-  // What the room knows goes in at the top of the turn. The agent holds no
-  // memory of its own between sessions; the channel does.
+  if (!agent.running) {
+    alert("Your agent is not running. Press Start agent first.");
+    return;
+  }
+
+  // What the room knows, plus what was just said in it — both belong to the
+  // channel, so a colleague's message is context even though only the owner
+  // may give the instruction.
   const { context } = await api.context(current.slug);
+  const history = recentHistory();
   const sessionId = await agent.sessionFor(current.slug, "/tmp");
   const run = await api.startRun(current.slug, posted.id, sessionId);
 
@@ -116,7 +125,7 @@ async function send(text: string) {
   });
 
   try {
-    await agent.prompt(sessionId, text, context);
+    await agent.prompt(sessionId, body, context, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
   } catch (err) {
@@ -127,7 +136,35 @@ async function send(text: string) {
   }
 }
 
+/// The last few turns of the room, as the agent would read them.
+function recentHistory(limit = 20): string | null {
+  const rows = [...document.querySelectorAll<HTMLElement>("#messages .msg")].slice(-limit);
+  if (!rows.length) return null;
+  const lines = rows.map((el) => {
+    const who = el.querySelector(".from")?.textContent?.trim() ?? "?";
+    const what = el.querySelector(".body")?.textContent?.trim() ?? "";
+    return `${who}: ${what}`;
+  });
+  return `Recently in this channel:\n\n${lines.join("\n")}`;
+}
+
 // ---------- wiring ----------
+
+function refreshDestination() {
+  const input = $<HTMLInputElement>("input");
+  const { addressed } = parseAddress(input.value);
+  $("destination").textContent = addressed ? "→ your agent" : "→ the room";
+  $("destination").className = addressed ? "to-agent" : "muted";
+}
+
+$("input").addEventListener("input", refreshDestination);
+
+$("summon").addEventListener("click", () => {
+  const input = $<HTMLInputElement>("input");
+  if (!parseAddress(input.value).addressed) input.value = `@agent ${input.value}`;
+  input.focus();
+  refreshDestination();
+});
 
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -135,6 +172,7 @@ $("composer").addEventListener("submit", async (e) => {
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
+  refreshDestination();
   await send(text).catch((err) => alert(String(err)));
 });
 
