@@ -49,25 +49,59 @@ run holds the trigger. No caption is required, and none is invented.
 
 Intermediate agent messages inside a run are process. They stay with the owner.
 
-## 3. Defaults come from the visibility level, so most people never click
+## 3. The agent judges readiness; the person judges exposure
+
+The agent is better placed than any static rule to say whether what it just
+produced is a draft or a deliverable. A run can end with "I could not find it" —
+complete, and with nothing worth posting. A rule keyed on the run boundary posts
+it anyway; the agent knows not to.
+
+So the agent gets to mark its output, and the marking is a **tool call**, not a
+convention in prose. The capability rail (#3) is already the place an agent
+receives capabilities, so it gains two:
+
+| Capability | The agent is saying | Effect |
+|---|---|---|
+| `share_output(run_id, note?)` | this is finished, the room should see it | shares the run, subject to the owner's level |
+| `propose_memory(run_id, title, detail)` | the room should know this later | creates a `Promotion` in `proposed` — never applied |
+
+Calling a tool is explicit, auditable and appears as a run step. Parsing intent
+out of prose would be neither.
+
+**Where the agent's judgment stops.** It decides *readiness*. It does not decide
+*exposure*, and it never decides what the room remembers:
+
+- The owner's visibility level always wins. Under `private`, `share_output`
+  does not share — it surfaces in the owner's view as *your agent thinks this is
+  ready*, and the owner shares or does not.
+- `propose_memory` only ever proposes. Article P3 is not softened here: an agent
+  that could write to memory directly is the failure the article was written
+  against — a wrong inference entering as fact, self-confirming on the next
+  retrieval, unarguable within a month.
+
+The asymmetry is deliberate and worth stating plainly: **a wrongly shared draft
+is embarrassing; a wrongly remembered inference is corrupting.** The first is
+social and fades. The second compounds.
+
+## 4. Defaults come from the visibility level, so most people never click
 
 The gesture problem is real: a per-message click will not happen, and people
 will leave everything closed and the room will go quiet. The fix is that the
 level from #13 already expresses the owner's stance, so the default follows from
 it and the gesture only exists where the default is silence.
 
-| Level | Steps | Run's answer | Gesture needed |
-|---|---|---|---|
-| `full` | to the room | to the room | none |
-| `outcomes` *(default)* | owner only | **to the room, automatically** | none |
-| `private` | owner only | owner only | **Share, per run** |
+| Level | Steps | Output the agent marked finished | Everything else | Gesture |
+|---|---|---|---|---|
+| `full` | to the room | to the room | to the room | none |
+| `outcomes` *(default)* | owner only | **to the room, automatically** | owner only | none |
+| `private` | owner only | surfaced to the owner as a suggestion | owner only | **Share, per run** |
 
 The common case costs nothing. Someone working normally in a channel shares
 their outcomes without ever thinking about it, and the room stays quiet because
 process never reaches it. Only the person who deliberately chose `private` has a
 button to press.
 
-## 4. Presence is what keeps `private` translucent rather than invisible
+## 5. Presence is what keeps `private` translucent rather than invisible
 
 Under `private`, a run currently produces nothing at all in the channel, which
 makes a colleague hard at work indistinguishable from a colleague who is absent.
@@ -80,7 +114,7 @@ broadcast per run rather than per step.
 This is the "translucent" the room needs: you know work is happening, you do not
 watch it happen.
 
-## 5. Sharing is one-way; remembering is not
+## 6. Sharing is one-way; remembering is not
 
 A share cannot be withdrawn. #13 already fixed that visibility changes are not
 retroactive, on the grounds that pretending the room can unsee something makes
@@ -107,6 +141,16 @@ of forty tool calls mattered, and the owner can.
 **One gesture with two destinations.** Simpler to build, wrong in use: it forces
 a choice between announcing things nobody needs to remember and remembering
 things nobody needed announced. The altitudes are genuinely different.
+
+**Letting the agent write to memory directly.** Removes the last gesture and is
+the single change that would break the design. Article P3 is not a formality:
+memory is retrieved into future sessions, so a wrong entry is read back as
+established fact and confirms itself. The agent proposing is all the leverage
+its judgment can safely carry.
+
+**Inferring readiness from the text.** Cheaper than a tool call and unreliable in
+exactly the cases that matter — a hedged answer and a finished one read alike.
+A tool call is a decision; a phrase is a guess about one.
 
 **Server-side summarisation of a run into a line.** Attractive, and it is a
 model call on the organization's inference budget for something the owner can
