@@ -14,7 +14,8 @@ module Api
       session.update!(status: "running", external_id: params[:external_id].presence || session.external_id)
 
       run = session.agent_runs.create!(
-        trigger_message_id: params[:trigger_message_id], status: "running", started_at: Time.current
+        trigger_message_id: params[:trigger_message_id], status: "running",
+        started_at: Time.current, model: params[:model]
       )
       Broadcast.run(run)
       render json: { id: run.id, agent_session_id: session.id }, status: :created

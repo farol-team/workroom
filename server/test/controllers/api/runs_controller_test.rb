@@ -70,6 +70,16 @@ class Api::RunsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "a run remembers which model produced it" do
+    post api_channel_runs_path(@channel.slug),
+         params: { model: "opencode/mimo-v2.5-free" }.to_json,
+         headers: auth(@alice).merge(@json)
+
+    assert_response :created
+    assert_equal "opencode/mimo-v2.5-free", AgentRun.find(response.parsed_body["id"]).model,
+                 "memory distilled from a run inherits what produced it (Article P4)"
+  end
+
   test "one session is reused for the same person in the same channel" do
     2.times do
       post api_channel_runs_path(@channel.slug), params: {}.to_json,

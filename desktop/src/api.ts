@@ -74,10 +74,11 @@ export class Api {
     });
   }
 
-  startRun(slug: string, triggerMessageId: number, externalId: string) {
+  startRun(slug: string, triggerMessageId: number, externalId: string, model?: string) {
     return this.call<{ id: number; agent_session_id: number }>(`/channels/${slug}/runs`, {
       method: "POST",
-      body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: "opencode", external_id: externalId }),
+      body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: "opencode",
+                             external_id: externalId, model }),
     });
   }
 

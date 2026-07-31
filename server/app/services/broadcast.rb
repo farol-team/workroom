@@ -18,6 +18,7 @@ module Broadcast
   def run(r)
     payload = { type: "run", run: { id: r.id, status: r.status,
                                     user: r.agent_session.user.name,
+                                    model: r.model,
                                     context_used: r.context_used,
                                     context_size: r.context_size,
                                     context_fraction: r.context_fraction,

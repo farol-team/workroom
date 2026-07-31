@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_31_120001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_31_130001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -62,6 +62,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_120001) do
     t.decimal "cost", precision: 12, scale: 6
     t.datetime "created_at", null: false
     t.datetime "ended_at"
+    t.string "model"
     t.datetime "started_at"
     t.string "status", default: "queued", null: false
     t.bigint "trigger_message_id"

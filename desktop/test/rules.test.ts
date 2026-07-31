@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { StepLedger, formatHistory, parseAddress, presenceState, transcriptName, translateAcp } from "../src/rules";
+import { StepLedger, formatHistory, parseAddress, presenceState, selectable, transcriptName, translateAcp } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -145,6 +145,18 @@ describe("acp translation", () => {
       .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
   });
 
+  test("a config update carries the whole option list", () => {
+    const options = [ { id: "model", name: "Model", type: "select",
+                        currentValue: "a", options: [ { value: "a", name: "A" } ] } ];
+    expect(translateAcp(update({ sessionUpdate: "config_option_update", configOptions: options })))
+      .toEqual({ kind: "config", options });
+  });
+
+  test("a config update with no options is not an update", () => {
+    expect(translateAcp(update({ sessionUpdate: "config_option_update", configOptions: [] })))
+      .toBeNull();
+  });
+
   test("an unknown update surfaces rather than vanishing", () => {
     expect(translateAcp(update({ sessionUpdate: "plan_changed" })))
       .toEqual({ kind: "other", label: "plan_changed" });
@@ -166,5 +178,23 @@ describe("transcript naming", () => {
   test("two runs never collide", () => {
     const at = new Date("2026-07-31T09:05:00Z");
     expect(transcriptName(1, at)).not.toEqual(transcriptName(2, at));
+  });
+});
+
+describe("selectable options", () => {
+  test("only selects are offered, because a control for an unknown shape is a guess", () => {
+    const options = [
+      { id: "model", name: "Model", type: "select", currentValue: "a",
+        options: [ { value: "a", name: "A" } ] },
+      { id: "temperature", name: "Temperature", type: "number", currentValue: "0.7" },
+      { id: "mode", name: "Mode", type: "select", currentValue: "build",
+        options: [ { value: "build", name: "build" } ] },
+    ];
+    expect(selectable(options as never).map((o) => o.id)).toEqual([ "model", "mode" ]);
+  });
+
+  test("a select with no choices is not offered", () => {
+    expect(selectable([ { id: "x", name: "X", type: "select", currentValue: "", options: [] } ] as never))
+      .toEqual([]);
   });
 });

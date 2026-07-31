@@ -41,6 +41,25 @@ async fn agent_new_session(
 /// Send a turn. What the room knows, and what was just said in it, are prepended
 /// here rather than stored in the agent — both belong to the channel, and every
 /// session starts from them.
+/// Change one of the session's options — the model, the mode, whatever the
+/// agent offers. Returns the full updated list, which is what the agent sends
+/// back, so the client never has to guess what took effect.
+#[tauri::command]
+async fn agent_set_config(
+    state: State<'_, AgentState>,
+    session_id: String,
+    config_id: String,
+    value: String,
+) -> Result<Value, String> {
+    let agent = current(&state).await?;
+    agent
+        .request(
+            "session/set_config_option",
+            json!({ "sessionId": session_id, "configId": config_id, "value": value }),
+        )
+        .await
+}
+
 #[tauri::command]
 async fn agent_prompt(
     state: State<'_, AgentState>,
@@ -121,6 +140,7 @@ pub fn run() {
             agent_start,
             agent_new_session,
             agent_prompt,
+            agent_set_config,
             agent_export_session,
             agent_stop
         ])

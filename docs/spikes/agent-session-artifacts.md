@@ -62,6 +62,21 @@ agents. For models *within* one agent it is a config option, not a second
 process. #9 shrinks to the genuinely separate case — several agent runtimes —
 and gains a much cheaper feature: a model picker per channel.
 
+### A gap between the schema and the agent
+
+`SetSessionConfigOptionRequest` in the published schema lists only `sessionId`
+and `configId` — there is no `value`. The agent accepts one regardless, and
+returns the updated option list:
+
+```
+model before: opencode/big-pickle
+model after:  opencode/mimo-v2.5-free    (same session)
+```
+
+Either the schema is incomplete or the field lives in an unstable variant. We
+depend on observed behaviour here, which is worth knowing when a future agent
+does not accept it.
+
 ## 3. Sessions are durable and enumerable
 
 opencode reports `sessionCapabilities: { list, resume, fork, close }` and

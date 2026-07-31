@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, formatHistory, occupancyLabel, parseAddress, presenceState, transcriptName, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, type PlanEntry, type RunSignal } from "./rules";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -144,6 +144,40 @@ function offerTranscript(runId: number, sessionId: string) {
   box.scrollTop = box.scrollHeight;
 }
 
+/// Whatever the agent offers, rendered as it comes. Per channel, because the
+/// session is per channel — a cheap model here and an expensive one there.
+function renderOptions() {
+  const box = $("session-options");
+  box.innerHTML = "";
+  if (!current || !agent.running) return;
+
+  for (const option of selectable(agent.configFor(current.slug))) {
+    const label = document.createElement("label");
+    label.className = "session-option";
+    label.title = option.name;
+
+    const select = document.createElement("select");
+    for (const choice of option.options ?? []) {
+      const el = document.createElement("option");
+      el.value = choice.value;
+      el.textContent = choice.name;
+      el.selected = choice.value === option.currentValue;
+      select.append(el);
+    }
+    select.onchange = async () => {
+      select.disabled = true;
+      try {
+        agent.rememberConfig(current!.slug, await agent.setConfig(current!.slug, option.id, select.value));
+      } catch (err) { alert(String(err)); }
+      select.disabled = false;
+      renderOptions();
+    };
+
+    label.append(select);
+    box.append(label);
+  }
+}
+
 const escape = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
@@ -189,6 +223,7 @@ async function open(slug: string) {
   $("messages").innerHTML = "";
   full.messages.forEach(addMessage);
   if (!$("memory").hidden) renderMemory();
+  renderOptions();
 
   socket?.close();
   socket = api.live(slug, (e) => {
@@ -221,13 +256,15 @@ async function send(text: string) {
   const { context } = await api.context(current.slug);
   const history = recentHistory();
   const sessionId = await agent.sessionFor(current.slug, "/tmp", api.rail(current.slug));
-  const run = await api.startRun(current.slug, posted.id, sessionId);
+  const run = await api.startRun(current.slug, posted.id, sessionId, agent.modelFor(current.slug));
+  renderOptions();
 
   let reply = "";
   const stop = await agent.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
     else if (u.kind === "usage") api.reportUsage(run.id, u.used, u.size, u.cost).catch(() => {});
+    else if (u.kind === "config") { agent.rememberConfig(current!.slug, u.options); renderOptions(); }
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 
@@ -292,6 +329,7 @@ $("agent-toggle").addEventListener("click", async () => {
       await agent.start();
       $("agent-status").textContent = "ready";
       $("agent-toggle").textContent = "Stop agent";
+      if (current) { await agent.sessionFor(current.slug, "/tmp", api.rail(current.slug)); renderOptions(); }
     }
   } catch (err) {
     $("agent-status").textContent = "failed";

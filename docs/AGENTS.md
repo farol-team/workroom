@@ -67,6 +67,22 @@ share of how good the system feels is decided here.
 Runs also carry cost and timing, which is where per-channel and per-person spend reporting
 comes from.
 
+## Session options
+
+An agent exposes options for a session — opencode offers the model and a mode
+where `plan` disallows every edit tool. Whatever it offers is rendered; nothing
+is hardcoded, because a different agent names things differently or offers
+nothing at all.
+
+Options are per session and therefore **per channel**, which follows from one
+session per (user, channel). A cheap model for routine work in one room and an
+expensive one where it matters in another, in the same client, without
+reconfiguring anything between them.
+
+A run records the model that produced it. Memory distilled from that run
+inherits the provenance: knowing a conclusion came from a small free model is
+part of knowing what it is worth.
+
 ## What a run records
 
 A run carries what the agent reported about itself, not what the client guessed:

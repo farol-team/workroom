@@ -50,6 +50,24 @@ export function presenceState(signals: RunSignal[]): Map<number, string> {
 
 /// Translate an ACP session/update notification into something the room can
 /// display. Unknown update kinds surface as themselves rather than vanishing.
+export interface ConfigChoice { value: string; name: string; description?: string }
+
+export interface ConfigOption {
+  id: string;
+  name: string;
+  type: string;
+  currentValue: string;
+  options?: ConfigChoice[];
+  category?: string;
+}
+
+/// Only offer controls for shapes the agent actually sends. A control for a
+/// type nobody has produced is a guess, and the option list is meant to be read
+/// rather than assumed — a different agent names things differently.
+export function selectable(options: ConfigOption[]): ConfigOption[] {
+  return options.filter((o) => o.type === "select" && (o.options?.length ?? 0) > 0);
+}
+
 export interface PlanEntry { content: string; priority?: string; status?: string }
 
 export type Update =
@@ -57,6 +75,7 @@ export type Update =
   | { kind: "tool"; label: string }
   | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "usage"; used: number; size: number; cost?: number }
+  | { kind: "config"; options: ConfigOption[] }
   | { kind: "other"; label: string };
 
 export function translateAcp(msg: unknown): Update | null {
@@ -68,6 +87,10 @@ export function translateAcp(msg: unknown): Update | null {
   if (t === "agent_message_chunk") {
     const text = (u.content as { text?: string } | undefined)?.text ?? "";
     return text ? { kind: "text", text } : null;
+  }
+  if (t === "config_option_update") {
+    const options = (u.configOptions as ConfigOption[] | undefined) ?? [];
+    return options.length ? { kind: "config", options } : null;
   }
   if (t === "usage_update") {
     return { kind: "usage", used: Number(u.used), size: Number(u.size),
