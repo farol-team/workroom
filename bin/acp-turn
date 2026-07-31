@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+// One turn against a real agent, the way the client drives it — without the window.
+//
+// This exists because everything about the bridge was, for a long time, tested
+// against fixtures we wrote ourselves. A second implementation of the protocol
+// found two defects that a suite of thirty passing tests could not (#68); a real
+// agent is the next thing after that, and this is how to reach one in a minute.
+//
+//   bin/acp-turn meetings "what did we agree with Acme about reporting?"
+//
+// It needs a server (bin/prototype) and an agent on PATH. It does not need a
+// model credential: opencode ships free models, and the default below is one.
+
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+
+const [ channel = "meetings", prompt = "What did we agree with Acme about reporting?" ] =
+  process.argv.slice(2);
+const SERVER = process.env.WORKROOM_SERVER ?? "http://127.0.0.1:3000";
+const TOKEN = process.env.WORKROOM_TOKEN ?? "dev-alice";
+const AGENT = process.env.WORKROOM_AGENT ?? "opencode";
+const MODEL = process.env.WORKROOM_MODEL ?? "opencode/deepseek-v4-flash-free";
+
+const agent = spawn(AGENT, [ "acp" ], { stdio: [ "pipe", "pipe", "pipe" ] });
+agent.on("error", (e) => {
+  console.error(`cannot start \`${AGENT} acp\`: ${e.message}\n\nInstall one with: npm i -g opencode-ai`);
+  process.exit(1);
+});
+
+const send = (m) => agent.stdin.write(JSON.stringify(m) + "\n");
+const pending = new Map();
+let id = 0;
+const ask = (method, params) =>
+  new Promise((resolve, reject) => {
+    const mine = ++id;
+    pending.set(mine, { resolve, reject });
+    send({ jsonrpc: "2.0", id: mine, method, params });
+  });
+
+createInterface({ input: agent.stdout }).on("line", (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }   // an agent may log to stdout
+
+  if (msg.id !== undefined && msg.method === undefined) {
+    const waiting = pending.get(msg.id);
+    pending.delete(msg.id);
+    return msg.error ? waiting?.reject(new Error(JSON.stringify(msg.error))) : waiting?.resolve(msg.result);
+  }
+
+  // The agent asking to do something, and waiting. Answered with its own option,
+  // out loud — a tool that silently allows everything teaches the wrong thing
+  // about what this product does.
+  if (msg.method === "session/request_permission") {
+    const option = msg.params.options.find((o) => o.kind === "allow_once") ?? msg.params.options[0];
+    console.log(`\n  asked  ${msg.params.toolCall?.title ?? "?"} → ${option.optionId}`);
+    return send({ jsonrpc: "2.0", id: msg.id,
+                  result: { outcome: { outcome: "selected", optionId: option.optionId } } });
+  }
+
+  if (msg.method === "session/update") {
+    const update = msg.params.update;
+    if (update.sessionUpdate === "agent_message_chunk") process.stdout.write(update.content?.text ?? "");
+    if (update.sessionUpdate === "tool_call") console.log(`\n  tool   ${update.title ?? update.kind}`);
+  }
+});
+
+await ask("initialize", {
+  protocolVersion: 1,
+  clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+});
+
+// The rail, exactly as the client sends it: headers are a list, or the agent
+// reaches it unauthenticated and answers from nothing.
+const { sessionId } = await ask("session/new", {
+  cwd: process.cwd(),
+  mcpServers: [ {
+    name: "workroom", type: "http", url: `${SERVER}/api/rail/${channel}`,
+    headers: [ { name: "Authorization", value: `Bearer ${TOKEN}` } ],
+  } ],
+});
+console.log(`session  ${sessionId}\nchannel  # ${channel}`);
+
+try { await ask("session/set_config_option", { sessionId, configId: "model", value: MODEL }); } catch {}
+
+console.log(`\n> ${prompt}\n`);
+try {
+  const { stopReason } = await ask("session/prompt", {
+    sessionId, prompt: [ { type: "text", text: prompt } ],
+  });
+  console.log(`\n\nstopReason: ${stopReason}`);
+} catch (err) {
+  console.error(`\nthe turn failed: ${err.message}`);
+}
+
+agent.kill();
+process.exit(0);

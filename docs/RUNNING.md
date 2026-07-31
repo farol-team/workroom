@@ -19,17 +19,44 @@ yourself, set `DATABASE_URL` and `bin/prototype` will use it instead of Docker.
 
 ## Your own agent
 
-The client starts an agent for you, but the agent runs on your machine under
-**your** credentials — that is the point of the design, not a limitation of the
-prototype. Install and authenticate it once:
+The client starts an agent for you, and it runs on your machine under **your**
+credentials — that is the point of the design, not a limitation of the prototype.
 
 ```bash
 npm i -g opencode-ai
-opencode auth login
 ```
+
+**You do not need a credential to try this.** opencode ships free models, and one
+of them is the default below. `opencode auth login` is for using your own
+subscription, which is what the design is actually for — but nothing here is
+gated behind it.
 
 Then press **Start agent**. Any agent that speaks ACP works; pass a different
 command to `agent_start`.
+
+## One turn, without opening the app
+
+```bash
+bin/acp-turn meetings "What did we agree with Acme about reporting?"
+```
+
+```
+session  ses_046bf32f7ffenWwgpDIisRZJZy
+channel  # meetings
+
+> What did we agree with Acme about reporting?
+
+  tool   workroom_search_capabilities
+  tool   workroom_execute_capability
+We agreed to send Acme monthly reporting rollups (first Tuesday of each month),
+replacing the weekly reports they found noisy and unread.
+
+stopReason: end_turn
+```
+
+Nothing told that session about Acme. It searched the channel's rail, read the
+entry, and answered from it — which is the whole idea, in one command, before
+any window is opened.
 
 ---
 
