@@ -143,3 +143,7 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
    repository, and that is worth knowing without being shouted about. */
 #folder.bound { color: var(--agent); }
 .offer.muted { color: var(--muted); }
+
+/* A question the agent is blocked on reads differently from an offer nobody has
+   to answer. */
+.offer.ask { border-left: 2px solid var(--accent); padding-left: 10px; }

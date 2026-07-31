@@ -158,6 +158,24 @@ async fn sign_in_with_provider(app: AppHandle, server: String) -> Result<String,
     .ok_or_else(|| "sign-in was not completed".to_string())
 }
 
+/// Answer something the agent asked — a tool it wants to run, and is waiting on.
+#[tauri::command]
+async fn agent_permit(
+    state: State<'_, AgentState>,
+    name: Option<String>,
+    request_id: u64,
+    option_id: Option<String>,
+) -> Result<(), String> {
+    let agent = running(&state, name).await?;
+    let outcome = match option_id {
+        Some(id) => json!({ "outcome": "selected", "optionId": id }),
+        None => json!({ "outcome": "cancelled" }),
+    };
+    agent
+        .answer(request_id, json!({ "outcome": outcome }))
+        .await
+}
+
 /// Which of this person's agents are running.
 #[tauri::command]
 async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String> {
@@ -306,6 +324,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sign_in_with_provider,
             agent_start,
+            agent_permit,
             agent_list,
             agent_workspace,
             agent_produced,
