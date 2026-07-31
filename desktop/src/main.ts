@@ -40,8 +40,20 @@ function addMessage(m: Message) {
   box.scrollTop = box.scrollHeight;
 }
 
-/// Steps are why a minutes-long turn is legible instead of silent.
-function addStep(runId: number, label: string) {
+const seenSteps = new Set<number>();
+
+/// Steps are why a minutes-long turn is legible instead of silent. Under the
+/// default level only the owner receives them, so a colleague sees the run line
+/// and not the forty tool calls behind it.
+function addStep(runId: number, label: string, id?: number) {
+  if (id !== undefined) {
+    if (seenSteps.has(id)) return;    // may arrive on both streams
+    seenSteps.add(id);
+  }
+  addStepLine(runId, label);
+}
+
+function addStepLine(runId: number, label: string) {
   const box = $("messages");
   let holder = box.querySelector<HTMLElement>(`.steps[data-run="${runId}"]`);
   if (!holder) {
@@ -78,6 +90,25 @@ const escape = (s: string) =>
 
 // ---------- channel ----------
 
+/// A colleague at work must be distinguishable from a colleague who is absent —
+/// otherwise `private` turns translucent into invisible.
+function showPresence(run: { id: number; status: string; user: string }) {
+  const box = $("messages");
+  const id = `presence-${run.id}`;
+  const done = run.status !== "running";
+  const existing = document.getElementById(id);
+
+  if (done) { existing?.remove(); return; }
+  if (existing) return;
+
+  const el = document.createElement("div");
+  el.id = id;
+  el.className = "presence";
+  el.textContent = `${run.user} is working with their agent…`;
+  box.append(el);
+  box.scrollTop = box.scrollHeight;
+}
+
 async function open(slug: string) {
   const full = await api.channel(slug);
   current = full;
@@ -91,7 +122,8 @@ async function open(slug: string) {
   socket?.close();
   socket = api.live(slug, (e) => {
     if (e.type === "message") addMessage(e.message);
-    if (e.type === "step") addStep(e.step.run_id, e.step.label ?? e.step.kind);
+    if (e.type === "step") addStep(e.step.run_id, e.step.label ?? e.step.kind, e.step.id);
+    if (e.type === "run") showPresence(e.run);
   });
 }
 
@@ -117,6 +149,7 @@ async function send(text: string) {
   const history = recentHistory();
   const sessionId = await agent.sessionFor(current.slug, "/tmp");
   const run = await api.startRun(current.slug, posted.id, sessionId);
+  if (visibility !== "outcomes") await api.setVisibility(run.agent_session_id, visibility).catch(() => {});
 
   let reply = "";
   const stop = await agent.onUpdate((u: Update) => {
@@ -192,6 +225,12 @@ $("agent-toggle").addEventListener("click", async () => {
     $("agent-status").textContent = "failed";
     alert(`Could not start the agent.\n\n${String(err)}\n\nInstall it with: npm i -g opencode-ai`);
   }
+});
+
+let visibility: "full" | "outcomes" | "private" = "outcomes";
+
+$("visibility").addEventListener("change", (e) => {
+  visibility = (e.target as HTMLSelectElement).value as typeof visibility;
 });
 
 $("memory-toggle").addEventListener("click", () => {

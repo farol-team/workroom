@@ -84,6 +84,31 @@ good. That proviso is the whole design constraint: **rehydration quality is memo
 This is why the summary matters more than the raw transcript, and why an agent entering a
 channel should receive a distilled page rather than a thousand messages.
 
+## What the room sees
+
+The room shares outcomes, not process — and the person doing the work decides
+how much of the process to share. Visibility is a property of a session, because
+it is a stance towards a channel rather than a property of one turn.
+
+| Level | The room sees | The owner sees |
+|---|---|---|
+| `full` | steps, messages, outcomes | everything |
+| `outcomes` *(default)* | run presence, the answer, artifacts, memory proposals | everything |
+| `private` | presence only, until the owner shares something | everything |
+
+Two things hold this together.
+
+**Presence survives every level.** A run announces that it started and that it
+finished, with no content, at all three. Without it a private session is
+indistinguishable from an absent colleague, and translucent becomes invisible —
+which is the failure the whole design turns on.
+
+**A person's own messages are never governed by it.** Visibility applies to an
+agent session. What a human says in a channel is what they said in a channel.
+
+Changing the level is not retroactive. What was broadcast stays broadcast;
+pretending the room can unsee something would make the audit dishonest.
+
 ## Artifacts
 
 An agent writes files to its working directory by default. Left alone, results stay on one
