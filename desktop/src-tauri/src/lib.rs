@@ -1,3 +1,21 @@
+// Lints chosen for what fails silently, not for everything that exists.
+//
+// This crate holds the bridge to an agent running under somebody's own
+// credentials. A panic here is a workspace that vanished mid-turn, not a stack
+// trace in a test — so the panicking constructs are denied outside tests, where
+// they are allowed deliberately: a test that cannot panic cannot fail.
+#![forbid(unsafe_code)]
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+#![deny(
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::dbg_macro,
+    clippy::print_stdout
+)]
+
 mod acp;
 mod signin;
 mod workspace;
@@ -360,5 +378,66 @@ pub fn run() {
             agent_stop
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // A panic here is a backtrace where a person needed a sentence: there is
+        // no window yet, so this is the only chance to say anything at all.
+        .unwrap_or_else(|error| {
+            eprintln!("WorkRoom could not start: {error}");
+            std::process::exit(1);
+        });
+}
+
+#[cfg(test)]
+mod capabilities {
+    /// What this application is allowed to do, and why each one is here.
+    ///
+    /// A permission added by accident is not a compile error, and this file grew
+    /// four times in a single day. Adding a seventh means editing this list,
+    /// which is the point: it turns a quiet grant into a line somebody has to
+    /// write a reason next to.
+    const GRANTED: &[(&str, &str)] = &[
+        ("core:default", "the baseline every window needs"),
+        (
+            "opener:default",
+            "open the browser for sign-in through a provider",
+        ),
+        (
+            "dialog:allow-open",
+            "the folder picker, when a channel is bound to one",
+        ),
+        (
+            "updater:default",
+            "check for a newer release and install when asked",
+        ),
+        (
+            "core:app:allow-version",
+            "read our own version, to notice drift from the workspace",
+        ),
+        (
+            "process:allow-restart",
+            "restart after an update the person accepted",
+        ),
+    ];
+
+    #[test]
+    fn the_app_is_allowed_exactly_what_it_asks_for() {
+        let file =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+
+        let mut granted: Vec<String> = json["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap().to_string())
+            .collect();
+        let mut expected: Vec<String> = GRANTED.iter().map(|(p, _)| p.to_string()).collect();
+        granted.sort();
+        expected.sort();
+
+        assert_eq!(
+            granted, expected,
+            "a permission changed. Add it to GRANTED with a reason, or take it out of the capability file"
+        );
+    }
 }
