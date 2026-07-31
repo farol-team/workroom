@@ -6,8 +6,8 @@ A channel owns a region of the context database. The mapping is stored as data o
 channel, not derived by convention, so renaming a channel never breaks what it knows.
 
 ```
-viking://channels/meetings/      what the meetings channel knows
-viking://channels/marketing/     what the marketing channel knows
+viking://resources/channels/meetings/      what the meetings channel knows
+viking://resources/channels/marketing/     what the marketing channel knows
 viking://org/                    organization-wide, readable everywhere
 viking://personal/<user>/        one person's working notes, never promoted automatically
 ```
@@ -110,3 +110,72 @@ An entry is identified by its **uri**, not by a row id. Superseding takes a uri,
 the capability rail executes against a uri, and an external context store hands
 back uris rather than primary keys. The API returns uris for the same reason: a
 row id is the local table's, and the local table is meant to be replaceable.
+
+## Two stores, one seam
+
+`Memory::Store` is the seam (Article S1). Two implementations satisfy the same
+contract suite, and no call site can tell which one is behind it.
+
+| | `Memory::Local` | `Memory::OpenViking` |
+|---|---|---|
+| Holds entries | PostgreSQL rows | files in the context database |
+| Retrieval | `ILIKE` over terms | by meaning, with a score |
+| Abstract | the title | computed from the entry |
+| Superseding | a timestamp on the row | the entry moves to `viking://resources/superseded/…` |
+| Needs | nothing | a model provider of its own |
+
+Set `OPENVIKING_URL` and `OPENVIKING_API_KEY` and the swap happens at boot.
+Without them the store is PostgreSQL, which is why the prototype runs with one
+command and no credentials at all.
+
+### What the uri had to become
+
+The context database accepts four scopes — `agent`, `resources`, `session`,
+`user` — and refuses everything else outright. Channel memory is shared
+knowledge belonging to no single person, which makes it a resource:
+
+```
+viking://resources/channels/meetings/acme-reporting-cadence.md
+viking://resources/superseded/meetings/acme-reporting-cadence.md
+```
+
+Our side bent, and it had to: the scope list is the store's, not ours.
+
+### What travels with an entry
+
+Trust, authorship and the moment of recording are ours, not the store's
+vocabulary. They travel twice — in front matter, which survives being read back,
+and as tags, which a search can be narrowed by:
+
+```markdown
+---
+title: Acme wants monthly reporting, not weekly
+trust: human
+author: Alice
+recorded: 2026-07-31T09:15:53Z
+---
+
+# Acme wants monthly reporting, not weekly
+
+Acme's ops lead asked for monthly rollups…
+```
+
+### Writing does not wait for thinking
+
+The store computes an abstract and an embedding on write. An agent recording a
+conclusion mid-turn does not sit through it. Measured against a local instance
+with OpenAI embeddings:
+
+| | |
+|---|---|
+| write | 0.09 s |
+| what the room knows, for a session | 0.02 s |
+| findable by meaning | ~15 s later, and longer behind a burst of writes |
+
+The entry is readable immediately — it is in the room the moment it is written.
+Only retrieval *by meaning* waits for the index, and it waits where nobody is
+looking.
+
+That asymmetry is a property of the store, not an implementation detail, so the
+contract every store must satisfy says the entry becomes findable rather than
+that it is findable at once. `Memory::Local` satisfies it on the first attempt.

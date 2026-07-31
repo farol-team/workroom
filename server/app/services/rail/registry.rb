@@ -37,7 +37,9 @@ module Rail
     def execute(uri, args = {})
       return run_action(uri, args) if ACTIONS.key?(uri)
 
-      entry = @channel.memory_entries.current.find_by(uri: uri)
+      # Through the store, not the table: search returns uris from whichever
+      # store is configured, and the rail must be able to read what it found.
+      entry = uri.to_s.start_with?(@channel.memory_uri) ? store.fetch(uri) : nil
       return [ :error, "no capability at #{uri}" ] unless entry
 
       [ :ok, entry.detail.presence || entry.overview.to_s ]

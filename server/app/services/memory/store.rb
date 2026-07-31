@@ -17,6 +17,11 @@ module Memory
     # an empty query: a store with real retrieval has no reason to read "" as
     # "everything", and listing must not rest on one backend's accident.
     def all(_channel, limit: 200)         = raise NotImplementedError
+
+    # One entry, by the uri that identifies it. Search hands back uris and the
+    # rail executes against them, so a store that cannot be asked for one is a
+    # store the rail can find things in and never read.
+    def fetch(_uri)                       = raise NotImplementedError
     def write(_channel, **_attrs)         = raise NotImplementedError
 
     # An agent that finds a contradiction resolves it rather than adding a

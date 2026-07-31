@@ -63,8 +63,24 @@ approval queue. A wrong entry is corrected by superseding it.
 
 ## What one command does not cover
 
-- **Memory is local.** `Memory::Local` backs the store; the OpenViking adapter
-  behind the same seam needs an embedding credential.
+- **Memory is local unless you bring a context database.** `Memory::Local` backs
+  the store by default. To use OpenViking instead, copy `ov.conf.example` to
+  `ov.conf`, fill in an embedding credential — the store computes abstracts and
+  embeddings, which Article P2 permits server-side and permits for nothing else —
+  then:
+
+  ```bash
+  docker compose --profile memory up -d openviking
+  curl -s -X POST http://127.0.0.1:1933/api/v1/admin/accounts \
+    -H "X-API-Key: <root_api_key from ov.conf>" -H "Content-Type: application/json" \
+    -d '{"account_id":"workroom","admin_user_id":"workroom-server"}'
+  # keep the user_key it returns
+  export OPENVIKING_URL=http://127.0.0.1:1933 OPENVIKING_API_KEY=<user_key>
+  bin/prototype
+  ```
+
+  Nothing else changes: the same channels, the same rail, the same client. What
+  changes is that a question finds an entry that shares no words with it.
 - **Files stay put.** The session transcript is attached to the run; files an
   agent writes on disk are not collected yet.
 - **Sign-in is development-only unless you configure a provider.** OIDC is wired;

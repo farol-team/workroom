@@ -12,6 +12,19 @@ module Memory
       @store   = build_store
     end
 
+    # A store that retrieves by meaning indexes asynchronously; one that
+    # retrieves by substring does not. The contract requires that a written
+    # entry becomes findable — not that it is findable in the same millisecond.
+    # A synchronous store satisfies this on the first attempt.
+    def retrieving(seconds: 90)
+      deadline = Time.current + seconds
+      loop do
+        result = yield
+        return result if result.present? || Time.current > deadline
+        sleep 2
+      end
+    end
+
     # --- context_for ---------------------------------------------------------
 
     def test_context_is_nil_when_the_room_knows_nothing
@@ -63,7 +76,7 @@ module Memory
       entry = @store.write(@channel, title: "T", detail: "D", trust: "human", author: alice)
 
       assert_equal "human", entry.trust
-      assert_equal alice, entry.author, "provenance must survive the write (Article P4)"
+      assert_equal alice.name, entry.author_name, "provenance must survive the write (Article P4)"
     end
 
     def test_write_defaults_to_agent_trust
@@ -81,11 +94,12 @@ module Memory
       first  = @store.write(@channel, title: "Cadence", detail: "Weekly.",  key: "cadence")
       second = @store.write(@channel, title: "Cadence", detail: "Monthly.", key: "cadence")
 
-      refute_equal first.id, second.id
-      assert MemoryEntry.find(first.id).superseded_at,
-             "history is corrected by superseding, never by editing (Article P6)"
+      # A uri identifies an entry — a row id belongs to one store's table, and
+      # the contract must not be able to tell which store it is talking to.
+      refute_equal first.uri, second.uri
       assert_includes @store.context_for(@channel), "Monthly."
-      refute_includes @store.context_for(@channel), "Weekly."
+      refute_includes @store.context_for(@channel), "Weekly.",
+                      "history is corrected by superseding, never by editing (Article P6)"
     end
 
     # --- supersede ------------------------------------------------------------
@@ -95,9 +109,9 @@ module Memory
 
       returned = @store.supersede(stale.uri, reason: "contradicted by a later run")
 
-      assert_equal stale.id, returned.id
-      assert stale.reload.superseded_at, "history is corrected by superseding (Article P6)"
-      assert_nil @store.context_for(@channel), "a superseded entry leaves retrieval"
+      assert_equal stale.uri, returned.uri
+      assert_nil @store.context_for(@channel),
+                 "history is corrected by superseding, and what was superseded leaves retrieval (Article P6)"
     end
 
     def test_superseding_something_that_is_not_there_is_not_an_error
@@ -148,12 +162,33 @@ module Memory
       assert_empty @store.all(@other)
     end
 
+    def test_fetch_returns_the_entry_a_search_pointed_at
+      written = @store.write(@channel, title: "Cadence", detail: "Monthly rollups, first Tuesday.")
+
+      found = @store.fetch(written.uri)
+
+      refute_nil found, "the rail executes against a uri; a store that cannot be asked for one is useless to it"
+      assert_equal "Cadence", found.title
+      assert_includes found.detail, "first Tuesday"
+    end
+
+    def test_fetch_is_nil_for_something_that_is_not_there
+      assert_nil @store.fetch("#{@channel.memory_uri}nothing-here.md")
+    end
+
+    def test_fetch_does_not_return_a_superseded_entry
+      entry = @store.write(@channel, title: "Weekly", detail: "Weekly rollups.", key: "cadence")
+      @store.supersede(entry.uri)
+
+      assert_nil @store.fetch(entry.uri), "what the room used to know is not what it knows"
+    end
+
     # --- search --------------------------------------------------------------
 
     def test_search_finds_an_entry_by_its_content
       @store.write(@channel, title: "Acme", detail: "asked for monthly rollups")
 
-      assert_equal [ "Acme" ], @store.search(@channel, "rollups").map(&:title)
+      assert_equal [ "Acme" ], retrieving { @store.search(@channel, "rollups") }.map(&:title)
     end
 
     def test_search_is_empty_when_nothing_matches
@@ -166,7 +201,7 @@ module Memory
       @store.write(@other, title: "Elsewhere", detail: "shared word")
       @store.write(@channel, title: "Here", detail: "shared word")
 
-      assert_equal [ "Here" ], @store.search(@channel, "shared word").map(&:title)
+      assert_equal [ "Here" ], retrieving { @store.search(@channel, "shared word") }.map(&:title)
     end
 
     # An agent does not search for keywords. It passes the question it was asked.
@@ -175,7 +210,7 @@ module Memory
                              detail: "Weekly created noise and nobody read it.")
 
       assert_equal [ "Acme wants monthly reporting" ],
-                   @store.search(@channel, "what did we agree with Acme about reporting?").map(&:title),
+                   retrieving { @store.search(@channel, "what did we agree with Acme about reporting?") }.map(&:title),
                    "a query that reads like a sentence must still find what the room knows"
     end
 
@@ -184,7 +219,7 @@ module Memory
       @store.write(@channel, title: "Reporting", detail: "generic note about reporting")
 
       assert_equal "Acme reporting cadence",
-                   @store.search(@channel, "Acme reporting cadence").first.title,
+                   retrieving { @store.search(@channel, "Acme reporting cadence") }.first.title,
                    "the entry answering more of the question comes first"
     end
 
@@ -192,7 +227,7 @@ module Memory
       @store.write(@channel, title: "Cadence", detail: "weekly rhythm", key: "cadence")
       @store.write(@channel, title: "Cadence", detail: "monthly rhythm", key: "cadence")
 
-      assert_equal [ "monthly rhythm" ], @store.search(@channel, "rhythm").map(&:detail)
+      assert_equal [ "monthly rhythm" ], retrieving { @store.search(@channel, "rhythm") }.map(&:detail)
     end
   end
 end

@@ -7,7 +7,7 @@ class CreateMemoryEntries < ActiveRecord::Migration[8.1]
       t.references :author,  null: true, polymorphic: true   # User | AgentRun
       t.references :source,  null: true, polymorphic: true   # Message | AgentRun
 
-      t.string :uri,   null: false            # viking://channels/<slug>/<key>
+      t.string :uri,   null: false            # viking://resources/channels/<slug>/<key>
       t.string :title, null: false
       t.text   :abstract                      # L0 — discovery
       t.text   :overview                      # L1 — orientation, pushed at session start

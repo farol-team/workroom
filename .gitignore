@@ -1,2 +1,5 @@
 .DS_Store
 .flow/
+
+# The context database's config carries an infrastructure model credential.
+ov.conf

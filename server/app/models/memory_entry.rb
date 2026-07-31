@@ -14,4 +14,8 @@ class MemoryEntry < ApplicationRecord
   scope :by_trust, -> { order(Arel.sql("case trust when 'human' then 0 else 1 end"), created_at: :desc) }
 
   def supersede!(at: Time.current) = update!(superseded_at: at)
+
+  # Provenance as every store can express it. A row can point at a User; a
+  # context database holds a name in the record it wrote.
+  def author_name = author&.name
 end
