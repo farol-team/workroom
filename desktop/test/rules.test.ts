@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, orAfter, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -544,5 +544,25 @@ describe("what a run produced in somebody's own folder", () => {
     const files = [ { path: "report.md", bytes: 12 }, { path: "empty.log", bytes: 0 } ];
 
     expect(offerable(files, 12).files).toEqual([ { path: "report.md", bytes: 12 } ]);
+  });
+});
+
+describe("a bridge that does not answer", () => {
+  test("a call that never settles does not hold the room shut", async () => {
+    // The room is the product; whatever the agent registry has to say can be
+    // said after it is on screen. An await with no timeout assumes the other
+    // side always answers, and "usually" is what leaves somebody staring at a
+    // blank window with nothing to report.
+    const never = new Promise<string[]>(() => {});
+
+    expect(await orAfter(never, 30, [])).toEqual([]);
+  });
+
+  test("an answer that arrives is the answer", async () => {
+    expect(await orAfter(Promise.resolve([ "opencode" ]), 500, [])).toEqual([ "opencode" ]);
+  });
+
+  test("a call that fails is not a reason to stop either", async () => {
+    expect(await orAfter(Promise.reject(new Error("bridge is gone")), 500, [])).toEqual([]);
   });
 });
