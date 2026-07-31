@@ -33,5 +33,9 @@ module Api
     rescue_from ActiveRecord::RecordInvalid do |e|
       render_error(e.record.errors.full_messages.join(", "), :unprocessable_entity)
     end
+
+    rescue_from ActionController::ParameterMissing do |e|
+      render_error("#{e.param} is required", :unprocessable_entity)
+    end
   end
 end

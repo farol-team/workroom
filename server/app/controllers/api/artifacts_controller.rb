@@ -17,11 +17,11 @@ module Api
                     .where(agent_sessions: { user_id: current_user.id })
                     .find(params[:run_id])
 
+      body = content!
       artifact = run.agent_session.channel.artifacts.create!(
         agent_run: run, name: params.require(:name), kind: params[:kind]
       )
-      artifact.file.attach(io: StringIO.new(params.require(:content)),
-                           filename: artifact.name,
+      artifact.file.attach(io: StringIO.new(body), filename: artifact.name,
                            content_type: params[:content_type] || "application/json")
 
       Activity.log(actor: current_user, action: "artifact.attached", subject: artifact)
@@ -30,6 +30,20 @@ module Api
     end
 
     private
+
+    # Work product is not always text. A chart sent as a string arrives
+    # corrupted and nothing complains, so bytes travel base64 and text does not
+    # have to.
+    def content!
+      return params[:content] if params[:content].present?
+
+      encoded = params[:content_base64]
+      raise ActionController::ParameterMissing, :content if encoded.blank?
+
+      Base64.strict_decode64(encoded)
+    rescue ArgumentError
+      raise ActionController::BadRequest, "content_base64 is not base64"
+    end
 
     def serialize(a)
       a.slice(:id, :name, :kind, :created_at)

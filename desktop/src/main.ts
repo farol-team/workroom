@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, contentTypeFor, defaultAgent, formatHistory, occupancyLabel, parseAddress, presenceState, selectable, transcriptName, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
 
@@ -11,6 +11,7 @@ let channels: Channel[] = [];
 let current: Channel | null = null;
 let socket: WebSocket | null = null;
 let runSteps = new Map<number, string[]>();
+let me = "";   // who is signed in, so a workspace belongs to a person
 
 // ---------- rendering ----------
 
@@ -117,6 +118,42 @@ function showPlan(runId: number, entries: PlanEntry[]) {
 
 /// Attaching is a decision made with the work in front of you, so it is an
 /// action on the finished run rather than a setting chosen once in the abstract.
+/// What the run wrote in its working directory, offered one file at a time.
+/// Offered, not uploaded: work product belongs to the channel (Article D3), but
+/// what leaves this machine stays the person's decision.
+async function offerProduced(runId: number, workspace: string) {
+  const files = await agents.produced(workspace);
+  if (!worthOffering(files)) return;
+
+  const box = $("messages");
+  for (const file of files.filter((f) => f.bytes > 0)) {
+    const el = document.createElement("div");
+    el.className = "offer";
+    el.append(document.createTextNode(`${file.path} · ${Math.ceil(file.bytes / 1024)} kB `));
+
+    const button = document.createElement("button");
+    button.className = "ghost";
+    button.textContent = "Share with the channel";
+    button.onclick = async () => {
+      button.disabled = true;
+      button.textContent = "Sharing…";
+      try {
+        const body = await agents.read(workspace, file.path);
+        await api.attachBytes(runId, file.path, body, contentTypeFor(file.path));
+        el.remove();
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = "Share with the channel";
+        alert(String(err));
+      }
+    };
+
+    el.append(button);
+    box.append(el);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
 function offerTranscript(runId: number, name: string, sessionId: string) {
   const box = $("messages");
   const el = document.createElement("div");
@@ -261,7 +298,8 @@ async function send(text: string) {
   // may give the instruction.
   const { context } = await api.context(current.slug);
   const history = recentHistory();
-  const sessionId = await agents.sessionFor(name, current.slug, "/tmp", api.rail(current.slug));
+  const workspace = await agents.workspace(me, name, current.slug);
+  const sessionId = await agents.sessionFor(name, current.slug, workspace, api.rail(current.slug));
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
   renderOptions();
@@ -280,6 +318,7 @@ async function send(text: string) {
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
     offerTranscript(run.id, name, sessionId);
+    await offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
@@ -367,7 +406,8 @@ $("agent-toggle").addEventListener("click", async () => {
       await agents.start(name);
       renderAgentPicker();
       if (current) {
-        await agents.sessionFor(name, current.slug, "/tmp", api.rail(current.slug));
+        const dir = await agents.workspace(me, name, current.slug);
+        await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
         renderOptions();
       }
     }
@@ -400,6 +440,7 @@ async function boot() {
   await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
 
   const { user } = await api.signIn($<HTMLInputElement>("email").value.trim());
+  me = user.email;
   $("who").textContent = user.name;
 
   // Agents already running from an earlier window of this session stay
