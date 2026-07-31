@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, inTimeline, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, identity, inTimeline, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
 
@@ -20,6 +20,7 @@ let me = "";   // who is signed in, so a workspace belongs to a person
 const seenCount = new Map<string, number>();
 let held: Message[] = [];      // every message of the open channel
 let openThread: number | null = null;
+const ON_SCREEN = 200;   // a room with ten thousand messages is not ten thousand elements
 
 function renderChannels() {
   $("channels").innerHTML = "";
@@ -57,7 +58,10 @@ function messageEl(m: Message) {
   el.className = `msg ${m.author.kind}`;
   el.dataset.id = String(m.id);
   const who = m.author.kind === "agent" ? `${m.author.name}'s agent` : m.author.name;
-  el.innerHTML = `<div class="from">${escape(who)}</div><div class="body"></div>`;
+  const id = identity(m.author);
+  el.innerHTML = `<div class="from">` +
+    `<span class="avatar${id.isAgent ? " is-agent" : ""}" style="--hue:${id.hue}">` +
+    `${escape(id.initials)}</span>${escape(who)}</div><div class="body"></div>`;
   const body = el.querySelector<HTMLElement>(".body")!;
   body.textContent = m.body;
 
@@ -185,6 +189,23 @@ async function renderMemory() {
 
 /// Procedures, alongside what the room knows but never mixed into it. A fact
 /// goes stale and a procedure does not, and a reader has to be able to tell.
+/// Who is in the room, so a name in the timeline is a colleague rather than a
+/// stranger.
+async function renderMembers() {
+  if (!current) return;
+  const members = await api.members(current.slug);
+  const box = $("members");
+  box.innerHTML = "";
+  for (const m of members) {
+    const id = identity({ kind: "user", name: m.name });
+    const el = document.createElement("div");
+    el.className = "member";
+    el.innerHTML = `<span class="avatar" style="--hue:${id.hue}">${escape(id.initials)}</span>`;
+    el.append(m.name + (m.role === "owner" ? " · owner" : ""));
+    box.append(el);
+  }
+}
+
 async function renderSkills() {
   if (!current) return;
   const skills = await api.skills(current.slug);
@@ -376,10 +397,18 @@ async function open(slug: string) {
   held = [ ...full.messages ];
   closeThread();
   seenCount.set(slug, full.messages.length);
-  if (full.messages.length) full.messages.forEach(addMessage);
+
+  const shown = onScreen(full.messages.filter(inTimeline), ON_SCREEN);
+  if (shown.hidden) {
+    const earlier = document.createElement("div");
+    earlier.className = "earlier";
+    earlier.textContent = `${shown.hidden} earlier messages are not shown`;
+    $("messages").append(earlier);
+  }
+  if (full.messages.length) shown.messages.forEach(addMessage);
   else showIntro(full);
   renderChannels();
-  if (!$("memory").hidden) { renderMemory(); renderSkills(); }
+  if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
   renderOptions();
 
   socket?.close();
@@ -389,6 +418,10 @@ async function open(slug: string) {
     if (e.type === "run") showPresence(e.run);
     if (e.type === "plan") showPlan(e.plan.run_id, e.plan.entries);
     if (e.type === "artifact") addArtifact(e.artifact);
+    if (e.type === "elsewhere" && e.channel !== current?.slug) {
+      const c = channels.find((x) => x.slug === e.channel);
+      if (c) { c.message_count = (c.message_count ?? 0) + 1; renderChannels(); }
+    }
   });
 }
 
@@ -548,7 +581,7 @@ $("show-steps").addEventListener("change", (e) => {
 $("memory-toggle").addEventListener("click", () => {
   const panel = $("memory");
   panel.hidden = !panel.hidden;
-  if (!panel.hidden) { renderMemory(); renderSkills(); }
+  if (!panel.hidden) { renderMemory(); renderSkills(); renderMembers(); }
 });
 
 $("thread-close").addEventListener("click", closeThread);

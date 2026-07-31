@@ -13,6 +13,22 @@ module Broadcast
     payload = { type: "message", message: MessageSerializer.call(m) }
     to_room(m.channel, payload)
     to_owner(m.author.agent_session.user, payload) if m.author.is_a?(AgentRun)
+    elsewhere(m)
+  end
+
+  # A client is subscribed to the room it has open and to nothing else, so
+  # without this an unread badge could only be computed at the moment somebody
+  # opens the very channel it was meant to save them opening.
+  #
+  # It carries no content: what happened is the room's business, and this is
+  # only the news that something did.
+  def elsewhere(m)
+    author = m.author.is_a?(User) ? m.author : m.author.agent_session.user
+    m.channel.memberships.includes(:user).each do |membership|
+      next if membership.user == author
+
+      to_owner(membership.user, { type: "elsewhere", channel: m.channel.slug })
+    end
   end
 
   def run(r)

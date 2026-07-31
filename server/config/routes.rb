@@ -18,6 +18,8 @@ Rails.application.routes.draw do
 
     post "channels/:channel_slug/messages", to: "messages#create", as: :channel_messages
 
+    get  "channels/:channel_slug/members", to: "members#index", as: :channel_members
+
     get  "channels/:channel_slug/skills", to: "skills#index",  as: :channel_skills
     post "channels/:channel_slug/skills", to: "skills#create"
 

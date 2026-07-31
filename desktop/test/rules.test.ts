@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, closingInstruction, inTimeline, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, closingInstruction, identity, inTimeline, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -451,5 +451,53 @@ describe("threads", () => {
     // that never happened.
     expect(threadSummary([ answered ])).toBeNull();
     expect(threadSummary([ answered, replied ])).toBe("1 reply · Bob");
+  });
+});
+
+describe("who said it", () => {
+  test("a person is recognisable before you read the name", () => {
+    const alice = identity({ kind: "user", name: "Alice Ruiz" });
+
+    expect(alice.initials).toBe("AR");
+    expect(alice.hue).toBe(identity({ kind: "user", name: "Alice Ruiz" }).hue,
+      "the same person is the same colour every time");
+    expect(alice.isAgent).toBe(false);
+  });
+
+  test("one name is one letter, and an empty one does not crash the room", () => {
+    expect(identity({ kind: "user", name: "Alice" }).initials).toBe("A");
+    expect(identity({ kind: "user", name: "  " }).initials).toBe("?");
+  });
+
+  test("two people are not the same colour by accident of length", () => {
+    expect(identity({ kind: "user", name: "Alice" }).hue)
+      .not.toBe(identity({ kind: "user", name: "Bob" }).hue);
+  });
+
+  test("an agent is marked as one, and carries its owner's colour", () => {
+    // It is Alice's agent, not a second Alice and not a stranger.
+    const alice = identity({ kind: "user", name: "Alice" });
+    const hers = identity({ kind: "agent", name: "Alice" });
+
+    expect(hers.isAgent).toBe(true);
+    expect(hers.hue).toBe(alice.hue);
+    expect(hers.initials).toBe("A");
+  });
+});
+
+describe("a long history", () => {
+  test("only the recent part is on screen", () => {
+    const messages = Array.from({ length: 500 }, (_, i) => ({ id: i + 1 }));
+
+    const shown = onScreen(messages, 200);
+    expect(shown.messages).toHaveLength(200);
+    expect(shown.messages[0].id).toBe(301, "the recent end, not the start");
+    expect(shown.hidden).toBe(300);
+  });
+
+  test("a short history is all of it, with nothing hidden", () => {
+    const messages = [ { id: 1 }, { id: 2 } ];
+
+    expect(onScreen(messages, 200)).toEqual({ messages, hidden: 0 });
   });
 });

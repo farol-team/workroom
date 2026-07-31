@@ -77,4 +77,50 @@ class BroadcastTest < ActiveSupport::TestCase
            "a level is a decision the user already made by opening the channel"
     refute AgentSession.new.respond_to?(:shares_process?)
   end
+
+  test "a message tells the rooms you are not looking at that something happened" do
+    # The client subscribes to the room it has open and to nothing else, so
+    # without this an unread badge can only ever be computed at the moment you
+    # open the very channel it was meant to save you opening.
+    bob = user(name: "Bob")
+    @channel.memberships.create!(user: bob)
+
+    payloads = user_broadcasts(bob) { Broadcast.message(@channel.messages.create!(author: @alice, body: "hello")) }
+
+    elsewhere = payloads.select { |p| p[:type] == "elsewhere" }
+    assert_equal 1, elsewhere.size
+    assert_equal @channel.slug, elsewhere.first[:channel]
+  end
+
+  test "you are not told about your own message" do
+    payloads = user_broadcasts(@alice) { Broadcast.message(@channel.messages.create!(author: @alice, body: "hello")) }
+
+    refute_includes payloads.map { |p| p[:type] }, "elsewhere",
+                    "a room you are typing in is not a room you have unread in"
+  end
+
+  test "somebody who is not in the room is not told about it" do
+    dana = user(name: "Dana")
+
+    payloads = user_broadcasts(dana) { Broadcast.message(@channel.messages.create!(author: @alice, body: "hello")) }
+
+    assert_empty payloads
+  end
+
+  private
+
+  # What one person's own stream carried.
+  def user_broadcasts(user)
+    captured = []
+    stream = Broadcast.user_stream_for(user)
+    original = ActionCable.server.method(:broadcast)
+    ActionCable.server.define_singleton_method(:broadcast) do |target, payload|
+      captured << payload if target == stream
+      original.call(target, payload)
+    end
+    yield
+    captured
+  ensure
+    ActionCable.server.define_singleton_method(:broadcast, original)
+  end
 end
