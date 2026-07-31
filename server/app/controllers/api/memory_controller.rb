@@ -1,10 +1,8 @@
 module Api
   class MemoryController < BaseController
-    def index
-      channel!
-      authorize_channel!
-      return if performed?
+    before_action :require_channel_access!
 
+    def index
       entries = params[:q].present? ?
         Memory::Store.current.search(channel!, params[:q]) :
         channel!.memory_entries.current.by_trust.limit(50)
@@ -14,10 +12,6 @@ module Api
     # Direct write. Distillation proposes a Promotion instead; this path is
     # for a person deliberately recording something the room should know.
     def create
-      channel!
-      authorize_channel!
-      return if performed?
-
       entry = Memory::Store.current.write(
         channel!, title: params.require(:title), detail: params.require(:detail),
         overview: params[:overview], trust: params[:trust] || "human", author: current_user

@@ -1,10 +1,8 @@
 module Api
   class MessagesController < BaseController
-    def create
-      channel!
-      authorize_channel!
-      return if performed?
+    before_action :require_channel_access!
 
+    def create
       message = channel!.messages.create!(
         author: current_user, body: params.require(:body), parent_id: params[:parent_id]
       )

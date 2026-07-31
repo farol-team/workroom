@@ -6,11 +6,9 @@ module Api
   # it does not reach distillation, so an attachment cannot become an injection
   # into every later session's context.
   class ArtifactsController < BaseController
-    def index
-      channel!
-      authorize_channel!
-      return if performed?
+    before_action :require_channel_access!, only: :index
 
+    def index
       render json: channel!.artifacts.order(created_at: :desc).map { |a| serialize(a) }
     end
 
