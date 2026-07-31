@@ -72,6 +72,21 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   });
 }
 
+/// A session outlives the window that opened it. Without this every restart
+/// creates a new one and loses the thread — in a product whose claim is that the
+/// room does not forget.
+export function remember(store: Record<string, string>, agent: string, slug: string, id: string) {
+  store[sessionKey(agent, slug)] = id;
+}
+
+export function recall(store: Record<string, string>, agent: string, slug: string) {
+  return store[sessionKey(agent, slug)];
+}
+
+export function forget(store: Record<string, string>, agent: string, slug: string) {
+  delete store[sessionKey(agent, slug)];
+}
+
 /// A session belongs to the agent that opened it, in the channel it was opened
 /// for. Keyed by anything less, two agents in one room share a session id.
 export function sessionKey(agent: string, slug: string): string {
@@ -424,6 +439,7 @@ export interface PlanEntry { content: string; priority?: string; status?: string
 
 export type Update =
   | { kind: "text"; text: string }
+  | { kind: "thought"; text: string }
   | { kind: "tool"; label: string }
   | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "usage"; used: number; size: number; cost?: number }
@@ -439,6 +455,13 @@ export function translateAcp(msg: unknown): Update | null {
   if (t === "agent_message_chunk") {
     const text = (u.content as { text?: string } | undefined)?.text ?? "";
     return text ? { kind: "text", text } : null;
+  }
+  // Process, and the rule already says process is recorded and never pushed at
+  // the room. It is what lets somebody reconstruct why a turn went the way it
+  // did, and it was being discarded.
+  if (t === "agent_thought_chunk") {
+    const text = (u.content as { text?: string } | undefined)?.text ?? "";
+    return text ? { kind: "thought", text } : null;
   }
   if (t === "config_option_update") {
     const options = (u.configOptions as ConfigOption[] | undefined) ?? [];

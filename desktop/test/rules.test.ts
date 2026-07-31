@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -703,5 +703,40 @@ describe("a client and a workspace that have drifted apart", () => {
     // Client and server ship together and will always be a few commits apart.
     // Saying so on every launch teaches people to ignore the one that matters.
     expect(driftNotice("0.2.1", "0.2.4")).toBeNull();
+  });
+});
+
+describe("a session that survives a restart", () => {
+  test("what the agent was thinking is process, and it is kept", () => {
+    // The one update kind that lets somebody reconstruct why a turn went the way
+    // it did. Recorded against the run, never pushed at the room.
+    expect(translateAcp({ method: "session/update", params: { update: {
+      sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "checking the rail first" } } } }))
+      .toEqual({ kind: "thought", text: "checking the rail first" });
+  });
+
+  test("a thought with nothing in it is nothing", () => {
+    expect(translateAcp({ method: "session/update", params: { update: {
+      sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "" } } } })).toBeNull();
+  });
+
+  test("a session is remembered per agent and channel, and survives the app", () => {
+    const store: Record<string, string> = {};
+    remember(store, "opencode", "meetings", "ses_1");
+    remember(store, "claude", "meetings", "ses_2");
+
+    expect(recall(store, "opencode", "meetings")).toBe("ses_1");
+    expect(recall(store, "claude", "meetings")).toBe("ses_2");
+    expect(recall(store, "opencode", "marketing")).toBeUndefined();
+  });
+
+  test("forgetting one agent's session leaves the others", () => {
+    const store: Record<string, string> = {};
+    remember(store, "opencode", "meetings", "ses_1");
+    remember(store, "claude", "meetings", "ses_2");
+    forget(store, "opencode", "meetings");
+
+    expect(recall(store, "opencode", "meetings")).toBeUndefined();
+    expect(recall(store, "claude", "meetings")).toBe("ses_2");
   });
 });
