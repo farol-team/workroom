@@ -48,6 +48,15 @@ module Api
       render json: MessageSerializer.call(m), status: :created
     end
 
+    # A revision appends. The client shows the latest; the record keeps them all.
+    def plan
+      run = find_run
+      entries = params.require(:entries).map { |e| e.permit(:content, :priority, :status).to_h }
+      step = run.run_steps.create!(kind: "plan", payload: { entries: entries })
+      Broadcast.plan(step)
+      render json: { ok: true, entries: entries.length }
+    end
+
     private
 
     def find_run

@@ -51,3 +51,9 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 .presence { font-size: 12px; color: var(--muted); font-style: italic; padding-left: 104px; }
 .vis select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
+
+.plan { margin-left: 104px; border-left: 2px solid var(--accent); padding: 6px 0 6px 10px;
+  font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.plan-entry { color: var(--muted); }
+.plan-entry.in_progress { color: var(--text); }
+.plan-entry.completed { color: var(--muted); text-decoration: line-through; }

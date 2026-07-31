@@ -19,6 +19,7 @@ Rails.application.routes.draw do
     post  "channels/:channel_slug/runs", to: "runs#create", as: :channel_runs
     patch "runs/:id",          to: "runs#update",  as: :run
     post  "runs/:id/steps",    to: "runs#step",    as: :run_steps
+    post  "runs/:id/plan",     to: "runs#plan",    as: :run_plan
     post  "runs/:id/messages", to: "runs#message", as: :run_messages
   end
 end

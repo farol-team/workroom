@@ -50,9 +50,12 @@ export function presenceState(signals: RunSignal[]): Map<number, string> {
 
 /// Translate an ACP session/update notification into something the room can
 /// display. Unknown update kinds surface as themselves rather than vanishing.
+export interface PlanEntry { content: string; priority?: string; status?: string }
+
 export type Update =
   | { kind: "text"; text: string }
   | { kind: "tool"; label: string }
+  | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "other"; label: string };
 
 export function translateAcp(msg: unknown): Update | null {
@@ -64,6 +67,10 @@ export function translateAcp(msg: unknown): Update | null {
   if (t === "agent_message_chunk") {
     const text = (u.content as { text?: string } | undefined)?.text ?? "";
     return text ? { kind: "text", text } : null;
+  }
+  if (t === "plan") {
+    const entries = (u.entries as PlanEntry[] | undefined) ?? [];
+    return entries.length ? { kind: "plan", entries } : null;
   }
   if (t === "tool_call" || t === "tool_call_update") {
     return { kind: "tool", label: (u.title ?? u.kind ?? u.toolCallId ?? "tool") as string };

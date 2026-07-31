@@ -44,6 +44,32 @@ class Api::RunsControllerTest < ActionDispatch::IntegrationTest
     assert_equal message.id, answer.parent_id, "the answer belongs to the thread that asked"
   end
 
+  test "a plan is recorded against the run and revisions append" do
+    post api_channel_runs_path(@channel.slug), params: {}.to_json, headers: auth(@alice).merge(@json)
+    run_id = response.parsed_body["id"]
+
+    2.times do |i|
+      post api_run_plan_path(run_id),
+           params: { entries: [ { content: "Step #{i}", status: "pending" } ] }.to_json,
+           headers: auth(@alice).merge(@json)
+      assert_response :success
+    end
+
+    steps = AgentRun.find(run_id).run_steps.where(kind: "plan").order(:created_at)
+    assert_equal 2, steps.count, "a revision appends; it never overwrites (Article P6)"
+    assert_equal "Step 1", steps.last.payload.dig("entries", 0, "content")
+  end
+
+  test "someone else's run will not take a plan" do
+    post api_channel_runs_path(@channel.slug), params: {}.to_json, headers: auth(@alice).merge(@json)
+    run_id = response.parsed_body["id"]
+
+    post api_run_plan_path(run_id), params: { entries: [] }.to_json,
+         headers: auth(user(name: "Bob")).merge(@json)
+
+    assert_response :not_found
+  end
+
   test "one session is reused for the same person in the same channel" do
     2.times do
       post api_channel_runs_path(@channel.slug), params: {}.to_json,
