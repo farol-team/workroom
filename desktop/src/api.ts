@@ -43,6 +43,11 @@ export class Api {
 
   channels() { return this.call<Channel[]>("/channels"); }
 
+  /// The channel's capability rail, as the agent should mount it.
+  rail(slug: string) {
+    return { url: `${this.base}/api/rail/${slug}`, token: this.token };
+  }
+
   channel(slug: string) {
     return this.call<Channel & { messages: Message[] }>(`/channels/${slug}`);
   }

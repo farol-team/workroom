@@ -4,6 +4,9 @@ Rails.application.routes.draw do
   namespace :api do
     post "auth", to: "auth#create"
 
+    # One MCP endpoint per channel — the channel in the url is the scope.
+    post "rail/:slug", to: "rail#call", as: :rail
+
     resources :channels, only: %i[index create], param: :slug
     get "channels/:slug",         to: "channels#show",    as: :channel
     get "channels/:slug/context", to: "channels#context",  as: :channel_context

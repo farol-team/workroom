@@ -64,6 +64,27 @@ Where local copies do help — offline work, pinning a known-good version, avoid
 a hot path — they remain available as a deliberate choice for specific capabilities, not as
 the mechanism everything depends on.
 
+## Scope is structural
+
+The rail is mounted per channel: the url carries the slug, and there is one agent
+session per channel, so a rail url cannot address another room. Scope is not a
+parameter somebody must remember to check — it is where the endpoint lives.
+
+## What an agent finds there
+
+Knowledge and actions are both capabilities, discovered and invoked the same way.
+
+| | |
+|---|---|
+| `viking://channels/<slug>/…` | what the room knows — returns the detail tier |
+| `workroom://memory/remember` | record a conclusion so later work starts from it |
+| `workroom://memory/supersede` | replace an entry this work contradicts |
+
+The last one is the obligation that replaced the human gate: an agent meeting a
+contradiction resolves it rather than adding a second conflicting entry. It is a
+capability rather than a convention because an obligation nobody can perform in
+one call does not get performed.
+
 ## Minimal surface
 
 For two tools the JSON-RPC surface is small: `initialize`, `tools/list`, `tools/call`. Server
