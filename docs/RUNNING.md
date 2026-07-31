@@ -146,3 +146,40 @@ approval queue. A wrong entry is corrected by superseding it.
   With a provider configured it opens your own browser, your provider answers,
   and the client ends up holding the same bearer token it would have got the
   development way — no token of the provider's reaches it.
+
+## Releasing, and how an update reaches people
+
+The client checks for a newer release, says so, and installs when somebody asks
+it to. It never installs on its own: a workspace that can replace its own binary
+without being asked is a thing people are right to distrust.
+
+**Updates are signed, and the app verifies them against a key compiled into it.**
+Without that, an update endpoint is a remote code execution feature with a
+friendly name. The keypair is not in this repository and is not created by it —
+whoever holds the private key can ship code to every install, so making one is a
+deliberate act:
+
+```bash
+cd desktop && pnpm tauri signer generate -w ~/.workroom/updater.key
+```
+
+The public half goes in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
+The private half goes in the repository's Actions secrets as
+`TAURI_SIGNING_PRIVATE_KEY` (and its password), and nowhere else.
+
+Then a release is a tag:
+
+```bash
+git tag desktop-v0.2.0 && git push --tags
+```
+
+which builds the bundles for each platform and publishes `latest.json` beside
+them — the manifest the client reads.
+
+### When the client and the workspace disagree
+
+They ship together and drift apart. A client a version behind its workspace does
+not fail loudly; it quietly does nothing where a feature used to be, which is the
+most expensive kind of failure. So each says what it is, and the client says
+plainly when they no longer match — while ignoring a patch-level difference,
+because saying it every launch teaches people to ignore the one that matters.

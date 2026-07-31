@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, mcpServersFor, orAfter, permissionAsked, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -651,5 +651,57 @@ describe("a step somebody will read", () => {
     expect(translateAcp({ method: "session/update", params: { update: {
       sessionUpdate: "tool_call_update", toolCallId: "call_1", title: "Read the entry" } } }))
       .toEqual({ kind: "tool", label: "Read the entry" });
+  });
+});
+
+describe("staying current", () => {
+  test("a newer release is worth telling somebody about", () => {
+    expect(updateNotice({ current: "0.1.0", available: "0.2.0" }))
+      .toBe("WorkRoom 0.2.0 is available. You have 0.1.0.");
+  });
+
+  test("the same version is not news", () => {
+    expect(updateNotice({ current: "0.2.0", available: "0.2.0" })).toBeNull();
+  });
+
+  test("an older release is not an update", () => {
+    // A rollback is a decision somebody makes deliberately, not one an endpoint
+    // makes for them by serving an old manifest.
+    expect(updateNotice({ current: "0.3.0", available: "0.2.0" })).toBeNull();
+  });
+
+  test("versions are compared as numbers, not as text", () => {
+    expect(updateNotice({ current: "0.9.0", available: "0.10.0" }))
+      .toBe("WorkRoom 0.10.0 is available. You have 0.9.0.");
+    expect(updateNotice({ current: "0.10.0", available: "0.9.0" })).toBeNull();
+  });
+
+  test("a version nobody can parse is not an update", () => {
+    expect(updateNotice({ current: "0.1.0", available: "nightly" })).toBeNull();
+  });
+});
+
+describe("a client and a workspace that have drifted apart", () => {
+  test("a client older than its workspace is worth saying out loud", () => {
+    // The failure is not an error. It is a feature that quietly does nothing,
+    // which is the most expensive kind.
+    expect(driftNotice("0.1.0", "0.3.0"))
+      .toBe("This workspace is running 0.3.0 and this app is 0.1.0. Some things here may not work.");
+  });
+
+  test("a client newer than its workspace is the same problem the other way", () => {
+    expect(driftNotice("0.3.0", "0.1.0"))
+      .toBe("This app is 0.3.0 and the workspace is running 0.1.0. Some things here may not work.");
+  });
+
+  test("agreement is silence", () => {
+    expect(driftNotice("0.2.0", "0.2.0")).toBeNull();
+    expect(driftNotice("0.2.0", undefined)).toBeNull();
+  });
+
+  test("a patch apart is not drift", () => {
+    // Client and server ship together and will always be a few commits apart.
+    // Saying so on every launch teaches people to ignore the one that matters.
+    expect(driftNotice("0.2.1", "0.2.4")).toBeNull();
   });
 });

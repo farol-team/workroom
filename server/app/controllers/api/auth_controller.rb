@@ -9,7 +9,11 @@ module Api
     # a provider.
     def methods_available
       render json: { development: Rails.configuration.x.dev_signin,
-                     provider: ENV["OIDC_ISSUER"].present? }
+                     provider: ENV["OIDC_ISSUER"].present?,
+                     # So a client can say plainly that it has drifted from the
+                     # workspace, rather than presenting a feature that will not
+                     # work as though it were broken.
+                     version: Workroom::VERSION }
     end
 
     # Who the token in hand belongs to. A client that signed in through the

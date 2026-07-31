@@ -36,7 +36,7 @@ export class Api {
   /// How this workspace lets people in. Asked before anything is offered, so a
   /// workspace with a provider never shows a box that takes any address.
   methods() {
-    return this.call<{ development: boolean; provider: boolean }>("/auth/methods");
+    return this.call<{ development: boolean; provider: boolean; version?: string }>("/auth/methods");
   }
 
   /// A token obtained through the browser is the same token development
