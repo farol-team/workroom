@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, closingInstruction, contentTypeFor, defaultAgent, formatHistory, normalizeAgents, parseAddress, presenceState, selectable, sessionKey, transcriptName, translateAcp, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, closingInstruction, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -73,35 +73,6 @@ describe("step ledger", () => {
     const ledger = new StepLedger();
     expect(ledger.admit()).toBe(true);
     expect(ledger.admit()).toBe(true);
-  });
-});
-
-describe("presence", () => {
-  test("a running run means somebody is working", () => {
-    expect(presenceState([{ id: 1, status: "running", user: "Bob" }]).get(1)).toBe("Bob");
-  });
-
-  test("a finished run clears it", () => {
-    const state = presenceState([
-      { id: 1, status: "running", user: "Bob" },
-      { id: 1, status: "succeeded", user: "Bob" },
-    ]);
-    expect(state.has(1)).toBe(false);
-  });
-
-  test("two people working are both shown", () => {
-    const state = presenceState([
-      { id: 1, status: "running", user: "Bob" },
-      { id: 2, status: "running", user: "Dana" },
-    ]);
-    expect([...state.values()].sort()).toEqual(["Bob", "Dana"]);
-  });
-
-  test("a failed run stops being presence", () => {
-    expect(presenceState([
-      { id: 1, status: "running", user: "Bob" },
-      { id: 1, status: "failed", user: "Bob" },
-    ]).size).toBe(0);
   });
 });
 
@@ -365,5 +336,75 @@ describe("the turn carries the question", () => {
     const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
 
     expect(source).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
+  });
+});
+
+describe("what is happening in the room", () => {
+  test("a colleague's agent working is one signal, whatever produced it", () => {
+    // The pain this product exists for is not knowing what is going on. A
+    // signal computed per surface disagrees with itself.
+    const w = new WorkingSignal();
+    w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
+
+    expect(w.inChannel("meetings")).toEqual([{ who: "Bob", since: 1000 }]);
+    expect(w.inChannel("marketing")).toEqual([]);
+    expect(w.anywhere()).toEqual([{ who: "Bob", since: 1000, channel: "meetings" }]);
+  });
+
+  test("a run that ended stops the signal", () => {
+    const w = new WorkingSignal();
+    w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
+    w.ended(1);
+
+    expect(w.inChannel("meetings")).toEqual([]);
+  });
+
+  test("the same person working twice in a room is one line, not two", () => {
+    const w = new WorkingSignal();
+    w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
+    w.observed({ runId: 2, channel: "meetings", who: "Bob", at: 2000 });
+
+    expect(w.inChannel("meetings")).toEqual([{ who: "Bob", since: 1000 }],
+      "since the earliest, so the elapsed time does not reset mid-work");
+  });
+
+  test("one ending run does not silence the other", () => {
+    const w = new WorkingSignal();
+    w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
+    w.observed({ runId: 2, channel: "meetings", who: "Bob", at: 2000 });
+    w.ended(1);
+
+    expect(w.inChannel("meetings")).toEqual([{ who: "Bob", since: 2000 }]);
+  });
+
+  test("what it says, for a room and for the sidebar", () => {
+    const w = new WorkingSignal();
+    expect(w.label("meetings")).toBeNull();
+
+    w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
+    expect(w.label("meetings")).toBe("Bob's agent is working");
+
+    w.observed({ runId: 2, channel: "meetings", who: "Dana", at: 1100 });
+    expect(w.label("meetings")).toBe("2 agents are working");
+  });
+});
+
+describe("a day at a time", () => {
+  test("a divider is dated, and the recent days are named", () => {
+    const today = new Date("2026-07-31T12:00:00Z");
+
+    expect(dayLabel("2026-07-31T09:00:00Z", today)).toBe("Today");
+    expect(dayLabel("2026-07-30T09:00:00Z", today)).toBe("Yesterday");
+    expect(dayLabel("2026-07-24T09:00:00Z", today)).toMatch(/24/);
+  });
+});
+
+describe("unread", () => {
+  test("what arrived since you last looked", () => {
+    expect(unreadCount(7, 5)).toBe(2);
+    expect(unreadCount(6, 6)).toBe(0);
+    expect(unreadCount(5, undefined)).toBe(0,
+      "a channel you have never opened is not a channel full of unread");
+    expect(unreadCount(3, 5)).toBe(0, "a room cannot owe you a negative number of messages");
   });
 });

@@ -86,3 +86,27 @@ aside#memory header.sub { border-top: 1px solid var(--line); margin-top: 8px; }
   background: var(--bg); color: inherit; border: 1px solid var(--line);
   border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 13px; resize: vertical;
 }
+
+/* A day at a time. */
+.day { text-align: center; color: var(--muted); font-size: 12px; margin: 14px 0 6px;
+  position: relative; }
+.day::before { content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--line); z-index: 0; }
+.day { }
+.day::after { content: attr(data-day); display: none; }
+
+/* An empty room says what it is for. */
+.intro { color: var(--muted); padding: 24px 16px; white-space: pre-wrap; max-width: 56ch; }
+
+/* Activity lives in a reserved rail: it fades in without moving the timeline. */
+.activity { height: 0; overflow: hidden; color: var(--agent); font-size: 12px;
+  padding: 0 16px; transition: height .15s ease; }
+.activity.on { height: 22px; line-height: 22px; }
+
+/* The sidebar carries unread and work-in-progress, from the same signal. */
+#channels button { display: flex; align-items: center; gap: 6px; }
+#channels button.unread { font-weight: 600; }
+#channels .pill { margin-left: auto; background: var(--accent); color: #14161a;
+  border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 600; }
+#channels .working-dot { width: 6px; height: 6px; border-radius: 50%;
+  background: var(--agent); flex: none; }
