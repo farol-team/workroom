@@ -183,6 +183,51 @@ module Memory
       assert_nil @store.fetch(entry.uri), "what the room used to know is not what it knows"
     end
 
+    # --- skills ---------------------------------------------------------------
+
+    def test_a_skill_is_kept_apart_from_what_the_room_knows
+      # "Acme wants monthly reporting" will one day be wrong. "Recap decisions
+      # before the call ends" will not. Mixing them is how a rules file rots.
+      @store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
+      @store.write_skill(@channel, title: "Running a client call",
+                         body: "Agenda out the day before. Recap decisions before it ends.")
+
+      assert_equal [ "Running a client call" ], @store.skills(@channel).map(&:title)
+      assert_equal [ "Reporting cadence" ], @store.all(@channel).map(&:title),
+                   "a procedure is not something the room learned"
+    end
+
+    def test_a_skill_sits_under_the_channel_that_owns_it
+      skill = @store.write_skill(@channel, title: "Running a client call", body: "Agenda first.")
+
+      assert skill.uri.start_with?(@channel.skills_uri),
+             "#{skill.uri} must sit under #{@channel.skills_uri} — the uri is the permission"
+    end
+
+    def test_a_skill_never_crosses_into_another_channel
+      @store.write_skill(@other, title: "Elsewhere", body: "Not ours.")
+      @store.write_skill(@channel, title: "Here", body: "Ours.")
+
+      assert_equal [ "Here" ], @store.skills(@channel).map(&:title)
+    end
+
+    def test_a_skill_can_be_read_in_full_by_its_uri
+      skill = @store.write_skill(@channel, title: "Running a client call",
+                                 body: "Agenda out the day before. Recap decisions before it ends.")
+
+      found = @store.fetch(skill.uri)
+
+      refute_nil found, "the rail executes a skill by uri, the same as anything else"
+      assert_includes found.detail, "Recap decisions"
+    end
+
+    def test_the_room_knowing_nothing_is_not_the_room_having_no_skills
+      @store.write_skill(@channel, title: "Running a client call", body: "Agenda first.")
+
+      assert_nil @store.context_for(@channel),
+                 "a skill is not pushed into a session; it is found when it is wanted"
+    end
+
     # --- search --------------------------------------------------------------
 
     def test_search_finds_an_entry_by_its_content

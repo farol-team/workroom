@@ -77,3 +77,12 @@ h2 { margin: 0 0 4px; font-size: 16px; }
   font-size: 12px;
 }
 #agent-pick[hidden] { display: none; }
+
+/* A procedure reads differently from a fact, and the panel should say so. */
+aside#memory header.sub { border-top: 1px solid var(--line); margin-top: 8px; }
+.entry.skill .mark { color: var(--accent); }
+#skill-form { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px; }
+#skill-form input, #skill-form textarea {
+  background: var(--bg); color: inherit; border: 1px solid var(--line);
+  border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 13px; resize: vertical;
+}

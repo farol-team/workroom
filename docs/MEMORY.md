@@ -194,3 +194,25 @@ looking.
 That asymmetry is a property of the store, not an implementation detail, so the
 contract every store must satisfy says the entry becomes findable rather than
 that it is findable at once. `Memory::Local` satisfies it on the first attempt.
+
+## A skill is not a memory
+
+`Acme wants monthly reporting` will one day be wrong. `Recap decisions in the last five
+minutes and write them down before the call ends` will not. One is a fact the room learned;
+the other is how the work is done.
+
+They live apart:
+
+```
+viking://resources/channels/meetings/acme-reporting-cadence.md    what the room knows
+viking://resources/channels/meetings/skills/running-a-client-call.md   how it is done
+```
+
+There is no skills table — the uri is the distinction, exactly as it is for access. The local
+store excludes the skills prefix from what it lists as memory; the context store excludes it
+by not recursing. What the room knows is pushed into every session; a skill is found when it
+is wanted.
+
+Skills are written by people. Whether an agent should write one is a different question from
+whether it should record a fact — a procedure nobody agreed to is not a convention — and it
+is deliberately left open.

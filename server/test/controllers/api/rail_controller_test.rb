@@ -76,6 +76,31 @@ class Api::RailControllerTest < ActionDispatch::IntegrationTest
     assert_nil run.reload.distilled_at, "silence is an outcome, not a missing record"
   end
 
+  test "a procedure and a fact are not offered as the same kind of thing" do
+    # An agent that cannot tell them apart cites a convention as evidence, or
+    # follows a stale fact as if it were the way things are done.
+    Memory::Store.current.write_skill(@channel, title: "Running a client call",
+      body: "Agenda out the day before. Recap decisions before it ends.")
+
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "running a client call" } })
+      .dig("result", "content", 0, "text"))
+
+    skill = found.find { |c| c["title"] == "Running a client call" }
+    refute_nil skill, "a skill is discovered through the same rail as everything else"
+    assert_equal "skill", skill["kind"], "a procedure is not knowledge"
+  end
+
+  test "a skill is read in full through the rail, like anything else" do
+    skill = Memory::Store.current.write_skill(@channel, title: "Running a client call",
+      body: "Agenda out the day before. Recap decisions before it ends.")
+
+    text = rpc("tools/call", { name: "execute_capability", arguments: { uri: skill.uri } })
+           .dig("result", "content", 0, "text")
+
+    assert_includes text, "Recap decisions"
+  end
+
   test "an agent asking in a sentence still finds the action it needs" do
     found = JSON.parse(rpc("tools/call",
       { name: "search_capabilities", arguments: { query: "I should remember this conclusion" } })

@@ -87,6 +87,22 @@ async function renderMemory() {
   }
 }
 
+/// Procedures, alongside what the room knows but never mixed into it. A fact
+/// goes stale and a procedure does not, and a reader has to be able to tell.
+async function renderSkills() {
+  if (!current) return;
+  const skills = await api.skills(current.slug);
+  $("skill-list").innerHTML = "";
+  for (const s of skills) {
+    const el = document.createElement("div");
+    el.className = "entry skill";
+    el.innerHTML = `<div class="t"><span class="mark">▸</span></div><div class="o"></div>`;
+    el.querySelector(".t")!.append(s.title);
+    el.querySelector<HTMLElement>(".o")!.textContent = s.overview ?? "";
+    $("skill-list").append(el);
+  }
+}
+
 /// The latest revision replaces the one on screen; the record keeps them all.
 const PLAN_MARK: Record<string, string> = {
   completed: "\u2713", in_progress: "\u2192", pending: "\u00b7",
@@ -262,7 +278,7 @@ async function open(slug: string) {
   $("channel-purpose").textContent = full.purpose ?? "";
   $("messages").innerHTML = "";
   full.messages.forEach(addMessage);
-  if (!$("memory").hidden) renderMemory();
+  if (!$("memory").hidden) { renderMemory(); renderSkills(); }
   renderOptions();
 
   socket?.close();
@@ -431,7 +447,20 @@ $("show-steps").addEventListener("change", (e) => {
 $("memory-toggle").addEventListener("click", () => {
   const panel = $("memory");
   panel.hidden = !panel.hidden;
-  if (!panel.hidden) renderMemory();
+  if (!panel.hidden) { renderMemory(); renderSkills(); }
+});
+
+$("skill-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $<HTMLInputElement>("skill-title").value.trim();
+  const body = $<HTMLTextAreaElement>("skill-body").value.trim();
+  if (!current || !title || !body) return;
+  try {
+    await api.writeSkill(current.slug, title, body);
+    $<HTMLInputElement>("skill-title").value = "";
+    $<HTMLTextAreaElement>("skill-body").value = "";
+    renderSkills();
+  } catch (err) { alert(String(err)); }
 });
 
 async function boot() {
