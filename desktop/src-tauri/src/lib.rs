@@ -182,6 +182,27 @@ async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String>
     Ok(state.names().await)
 }
 
+/// Pick up a session the agent still has. Its failure is not an error: a session
+/// the agent has forgotten, or an agent that cannot load one, simply means a new
+/// session — which is what happened before this existed.
+#[tauri::command]
+async fn agent_load_session(
+    state: State<'_, AgentState>,
+    name: Option<String>,
+    session_id: String,
+    cwd: String,
+    mcp_servers: Option<Value>,
+) -> Result<Value, String> {
+    let agent = running(&state, name).await?;
+    agent
+        .request(
+            "session/load",
+            json!({ "sessionId": session_id, "cwd": cwd,
+                    "mcpServers": mcp_servers.unwrap_or(json!([])) }),
+        )
+        .await
+}
+
 #[tauri::command]
 async fn agent_new_session(
     state: State<'_, AgentState>,
@@ -332,6 +353,7 @@ pub fn run() {
             agent_produced,
             agent_read,
             agent_new_session,
+            agent_load_session,
             agent_prompt,
             agent_set_config,
             agent_export_session,

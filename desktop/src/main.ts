@@ -506,6 +506,8 @@ async function send(text: string) {
   const stopAsking = await agents.onAsk((asked) => askPermission(name, asked));
   const stop = await agents.onUpdate((u: Update) => {
     if (u.kind === "text") reply += u.text;
+    // Process: recorded against the run, never pushed at the room.
+    else if (u.kind === "thought") api.step(run.id, "thought", u.text.slice(0, 200)).catch(() => {});
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
     else if (u.kind === "usage") api.reportUsage(run.id, u.used, u.size, u.cost).catch(() => {});
     else if (u.kind === "config") { agents.rememberConfig(name, current!.slug, u.options); renderOptions(); }

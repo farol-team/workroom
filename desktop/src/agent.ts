@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { mcpServersFor, permissionAsked, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, mcpServersFor, permissionAsked, recall, remember, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -13,6 +13,9 @@ export class Agents {
   private sessions = new Map<string, string>();        // agent+channel -> ACP session id
   private configs = new Map<string, ConfigOption[]>(); // agent+channel -> its options
   private live = new Set<string>();
+  private remembered: Record<string, string> = (() => {
+    try { return JSON.parse(localStorage.getItem("workroom.sessions") ?? "{}"); } catch { return {}; }
+  })();
 
   constructor(private defs: AgentDef[] = []) {}
 
@@ -77,11 +80,35 @@ export class Agents {
 
     const mcpServers = mcpServersFor(rail);
 
+    // A session this person had before the app was closed. Picking it up is
+    // attempted, never required: an agent that has forgotten it, or one that
+    // cannot load a session at all, means a new session — which is what
+    // happened before any of this existed.
+    const known = recall(this.remembered, name, slug);
+    if (known) {
+      try {
+        const res = await invoke<{ configOptions?: ConfigOption[] }>(
+          "agent_load_session", { name, sessionId: known, cwd, mcpServers });
+        this.sessions.set(key, known);
+        this.configs.set(key, res?.configOptions ?? []);
+        return known;
+      } catch {
+        forget(this.remembered, name, slug);
+        this.persist();
+      }
+    }
+
     const res = await invoke<{ sessionId: string; configOptions?: ConfigOption[] }>(
       "agent_new_session", { name, cwd, mcpServers });
     this.sessions.set(key, res.sessionId);
     this.configs.set(key, res.configOptions ?? []);
+    remember(this.remembered, name, slug, res.sessionId);
+    this.persist();
     return res.sessionId;
+  }
+
+  private persist() {
+    try { localStorage.setItem("workroom.sessions", JSON.stringify(this.remembered)); } catch { /* a preference, not the record */ }
   }
 
   /// Options are per session and therefore per agent and channel: a cheap model

@@ -117,6 +117,13 @@ for a cheap question is a per-task decision rather than a configuration change.
 - Rehydration is what happens at session start
 - A run belongs to a session, so cost and history roll up per person per domain
 
+A session outlives the window that opened it. When the client starts, it picks up
+the session it had for that (agent, channel) if the agent still has it —
+`session/load`, which agents advertise as `loadSession` in the handshake. The
+attempt is never required: an agent that has forgotten the session, or one that
+cannot load a session at all, gets a new one, which is what happened before this
+existed.
+
 A session is `idle`, `running`, or `dead`. The client owns the process; the server owns the
 record of what that process did.
 
