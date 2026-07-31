@@ -188,6 +188,18 @@ still the person's decision — the same shape as the transcript offer, for the 
 This is what makes a channel a complete record rather than a discussion of work that
 happened elsewhere.
 
+## Threads
+
+A reply opens a **panel beside the room**, not a nest inside it. One level is enough when the
+conversation has somewhere of its own to happen; nesting a second level inside the timeline is
+what makes people stop replying at all.
+
+An agent's answer is a reply — it carries the message that asked as its parent — and it still
+appears in the room. It is the work, not a side conversation, and a room full of questions
+with the answers hidden in panels is worse than no threads. So the room shows every message
+that is not a person's reply, and a thread summary counts people only: an agent's answer is
+already visible, and counting it would advertise a conversation that never happened.
+
 ## Attribution
 
 A message written by an agent is attributed to the **run**, not to the person.

@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, contentTypeFor, dayLabel, inTimeline, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import * as settings from "./settings";
 
@@ -18,6 +18,8 @@ let me = "";   // who is signed in, so a workspace belongs to a person
 /// What each channel has that you have not seen, and whether anyone's agent is
 /// at work in it. Both read from state, never recomputed per surface.
 const seenCount = new Map<string, number>();
+let held: Message[] = [];      // every message of the open channel
+let openThread: number | null = null;
 
 function renderChannels() {
   $("channels").innerHTML = "";
@@ -56,11 +58,58 @@ function messageEl(m: Message) {
   el.dataset.id = String(m.id);
   const who = m.author.kind === "agent" ? `${m.author.name}'s agent` : m.author.name;
   el.innerHTML = `<div class="from">${escape(who)}</div><div class="body"></div>`;
-  el.querySelector<HTMLElement>(".body")!.textContent = m.body;
+  const body = el.querySelector<HTMLElement>(".body")!;
+  body.textContent = m.body;
+
+  const root = m.parent_id ?? m.id;
+  const reply = document.createElement("button");
+  reply.className = "reply-action";
+  reply.textContent = "Reply";
+  reply.onclick = () => showThread(root);
+  body.append(document.createElement("br"), reply);
   return el;
 }
 
+/// What the room is told about a conversation happening beside it.
+function refreshSummaries() {
+  for (const el of document.querySelectorAll<HTMLElement>("#messages .msg")) {
+    el.querySelector(".thread-summary")?.remove();
+    const id = Number(el.dataset.id);
+    const summary = threadSummary(held.filter((m) => m.parent_id === id));
+    if (!summary) continue;
+
+    const button = document.createElement("button");
+    button.className = "thread-summary";
+    button.textContent = summary;
+    button.onclick = () => showThread(id);
+    el.querySelector(".body")!.append(button);
+  }
+}
+
+/// One level, in a panel of its own. Nesting a second level inside the room is
+/// what makes people stop replying at all.
+function showThread(rootId: number) {
+  openThread = rootId;
+  $("thread").hidden = false;
+  const box = $("thread-messages");
+  box.innerHTML = "";
+  for (const m of threadOf(held, rootId)) box.append(messageEl(m));
+  box.scrollTop = box.scrollHeight;
+}
+
+function closeThread() {
+  openThread = null;
+  $("thread").hidden = true;
+}
+
 function addMessage(m: Message) {
+  if (!held.some((h) => h.id === m.id)) held.push(m);
+
+  if (openThread !== null && (m.id === openThread || m.parent_id === openThread)) {
+    showThread(openThread);
+  }
+  if (!inTimeline(m)) { refreshSummaries(); return; }
+
   const box = $("messages");
   if (box.querySelector(`[data-id="${m.id}"]`)) return;
   box.querySelector(".intro")?.remove();
@@ -78,6 +127,7 @@ function addMessage(m: Message) {
   box.scrollTop = box.scrollHeight;
 
   if (current) seenCount.set(current.slug, (seenCount.get(current.slug) ?? 0) + 1);
+  refreshSummaries();
 }
 
 /// A new room is not a blank page. It says what it is for and what to try.
@@ -323,6 +373,8 @@ async function open(slug: string) {
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
   $("messages").innerHTML = "";
+  held = [ ...full.messages ];
+  closeThread();
   seenCount.set(slug, full.messages.length);
   if (full.messages.length) full.messages.forEach(addMessage);
   else showIntro(full);
@@ -497,6 +549,19 @@ $("memory-toggle").addEventListener("click", () => {
   const panel = $("memory");
   panel.hidden = !panel.hidden;
   if (!panel.hidden) { renderMemory(); renderSkills(); }
+});
+
+$("thread-close").addEventListener("click", closeThread);
+
+$("thread-composer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $<HTMLInputElement>("thread-input");
+  const text = input.value.trim();
+  if (!current || !text || openThread === null) return;
+  input.value = "";
+  try {
+    await api.post(current.slug, text, openThread);
+  } catch (err) { alert(String(err)); }
 });
 
 $("skill-form").addEventListener("submit", async (e) => {

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, closingInstruction, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, closingInstruction, inTimeline, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -406,5 +406,50 @@ describe("unread", () => {
     expect(unreadCount(5, undefined)).toBe(0,
       "a channel you have never opened is not a channel full of unread");
     expect(unreadCount(3, 5)).toBe(0, "a room cannot owe you a negative number of messages");
+  });
+});
+
+describe("threads", () => {
+  const room = { id: 1, parent_id: null, author: { kind: "user", name: "Alice" } };
+  const asked = { id: 2, parent_id: null, author: { kind: "user", name: "Alice" } };
+  const answered = { id: 3, parent_id: 2, author: { kind: "agent", name: "Alice" } };
+  const replied = { id: 4, parent_id: 2, author: { kind: "user", name: "Bob" } };
+  const alsoReplied = { id: 5, parent_id: 2, author: { kind: "user", name: "Dana" } };
+
+  test("an agent's answer belongs to the room, even though it is a reply", () => {
+    // The answer is the work, not a side conversation. Hiding it in a panel
+    // leaves the room full of questions and no answers.
+    expect(inTimeline(answered)).toBe(true);
+  });
+
+  test("a person replying is starting a side conversation", () => {
+    expect(inTimeline(replied)).toBe(false);
+    expect(inTimeline(room)).toBe(true);
+  });
+
+  test("a thread is its root and everything hanging off it, in order", () => {
+    const all = [ room, asked, answered, replied, alsoReplied ];
+
+    expect(threadOf(all, 2).map((m) => m.id)).toEqual([ 2, 3, 4, 5 ]);
+    expect(threadOf(all, 1).map((m) => m.id)).toEqual([ 1 ], "a message nobody answered is a thread of one");
+  });
+
+  test("the summary says how many replied, and who", () => {
+    expect(threadSummary([])).toBeNull();
+    expect(threadSummary([ replied ])).toBe("1 reply · Bob");
+    expect(threadSummary([ replied, alsoReplied ])).toBe("2 replies · Bob, Dana");
+  });
+
+  test("the summary counts a person twice as one voice", () => {
+    const again = { id: 6, parent_id: 2, author: { kind: "user", name: "Bob" } };
+
+    expect(threadSummary([ replied, again ])).toBe("2 replies · Bob");
+  });
+
+  test("an agent's answer is not counted as somebody replying", () => {
+    // It is already in the room. Counting it would advertise a conversation
+    // that never happened.
+    expect(threadSummary([ answered ])).toBeNull();
+    expect(threadSummary([ answered, replied ])).toBe("1 reply · Bob");
   });
 });

@@ -80,9 +80,11 @@ export class Api {
     });
   }
 
-  post(slug: string, body: string) {
+  /// `parentId` makes it a reply: the room shows a summary, the conversation
+  /// happens in the panel.
+  post(slug: string, body: string, parentId?: number) {
     return this.call<Message>(`/channels/${slug}/messages`, {
-      method: "POST", body: JSON.stringify({ body }),
+      method: "POST", body: JSON.stringify({ body, parent_id: parentId }),
     });
   }
 
