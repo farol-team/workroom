@@ -1,5 +1,7 @@
 module Api
   class ChannelsController < BaseController
+    before_action :require_channel_access!, only: %i[show context]
+
     def index
       render json: Channel.order(:name).map { |c| serialize(c) }
     end
@@ -15,10 +17,6 @@ module Api
     end
 
     def show
-      channel!
-      authorize_channel!
-      return if performed?
-
       channel!.memberships.find_or_create_by!(user: current_user)
       render json: serialize(channel!).merge(
         messages: channel!.messages.includes(:author).order(:created_at).last(200).map { |m| MessageSerializer.call(m) }
@@ -27,10 +25,6 @@ module Api
 
     # What the room knows, ready to be injected into an agent session.
     def context
-      channel!
-      authorize_channel!
-      return if performed?
-
       render json: {
         channel: channel!.slug,
         memory_uri: channel!.memory_uri,

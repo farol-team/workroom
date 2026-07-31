@@ -51,11 +51,5 @@ module Api
     end
 
     def rpc_error(id, code, message) = { jsonrpc: "2.0", id: id, error: { code: code, message: message } }
-
-    # A filter, so a refusal halts rather than relying on the action to return.
-    def require_channel_access!
-      channel!
-      authorize_channel!
-    end
   end
 end

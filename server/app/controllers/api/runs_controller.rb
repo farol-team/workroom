@@ -3,11 +3,9 @@ module Api
   # record of what it did — including token counts, which are reporting,
   # never billing: the model credentials stay on the user's machine.
   class RunsController < BaseController
-    def create
-      channel!
-      authorize_channel!
-      return if performed?
+    before_action :require_channel_access!, only: :create
 
+    def create
       session = AgentSession.live_for(current_user, channel!).first ||
                 AgentSession.create!(user: current_user, channel: channel!,
                                      agent_kind: params[:agent_kind] || "opencode",

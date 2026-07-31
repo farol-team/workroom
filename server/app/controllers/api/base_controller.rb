@@ -12,14 +12,17 @@ module Api
       render_error("unauthorized", :unauthorized) unless @current_user
     end
 
-    def channel!
-      @channel ||= Channel.find_by!(slug: params[:channel_slug] || params[:slug])
-    end
-
-    def authorize_channel!
+    # A filter, so a refusal halts the action. The previous shape rendered and
+    # returned, which left every action to remember `return if performed?` —
+    # and #4 proved it would not be remembered.
+    def require_channel_access!
+      @channel = Channel.find_by!(slug: params[:channel_slug] || params[:slug])
       return if @channel.visibility == "open" || current_user.member_of?(@channel)
+
       render_error("not a member of this channel", :forbidden)
     end
+
+    def channel! = @channel
 
     def render_error(message, status) = render(json: { error: message }, status:)
 
