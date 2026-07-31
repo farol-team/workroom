@@ -15,15 +15,7 @@ export interface Channel {
   message_count: number; memory_count: number;
 }
 
-/// An agent answers only when its owner addresses it. Everything else is for
-/// the people in the room. Parsed before posting, so the marker never reaches
-/// the channel body.
-export const ADDRESS = /^\s*@agent\b[:,]?\s*/i;
-
-export function parseAddress(text: string): { addressed: boolean; body: string } {
-  const m = text.match(ADDRESS);
-  return m ? { addressed: true, body: text.slice(m[0].length) } : { addressed: false, body: text };
-}
+export { ADDRESS, parseAddress } from "./rules";
 
 export class Api {
   constructor(public base = "http://127.0.0.1:3000", public token = "") {}
