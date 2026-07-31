@@ -28,6 +28,8 @@ jobs:
           cache-dependency-path: desktop/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - name: Test
+        run: pnpm test
       - name: Typecheck
         run: pnpm exec tsc --noEmit
       - name: Build frontend

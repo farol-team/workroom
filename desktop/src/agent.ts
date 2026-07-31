@@ -4,10 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type Update =
-  | { kind: "text"; text: string }
-  | { kind: "tool"; label: string }
-  | { kind: "other"; label: string };
+import { translateAcp, type Update } from "./rules";
+export type { Update };
 
 export class Agent {
   private sessions = new Map<string, string>();   // channel slug -> ACP session id
@@ -42,19 +40,8 @@ export class Agent {
   /// Translate ACP notifications into something the room can display.
   onUpdate(handler: (u: Update) => void) {
     return listen<any>("acp://notify", (ev) => {
-      const msg = ev.payload;
-      if (msg?.method !== "session/update") return;
-      const u = msg.params?.update ?? {};
-      const t = u.sessionUpdate;
-
-      if (t === "agent_message_chunk") {
-        const text = u.content?.text ?? "";
-        if (text) handler({ kind: "text", text });
-      } else if (t === "tool_call" || t === "tool_call_update") {
-        handler({ kind: "tool", label: u.title ?? u.kind ?? u.toolCallId ?? "tool" });
-      } else if (t) {
-        handler({ kind: "other", label: String(t) });
-      }
+      const update = translateAcp(ev.payload);
+      if (update) handler(update);
     });
   }
 }

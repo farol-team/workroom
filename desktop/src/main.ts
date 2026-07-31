@@ -1,4 +1,5 @@
-import { Api, parseAddress, type Channel, type Message } from "./api";
+import { Api, type Channel, type Message } from "./api";
+import { StepLedger, formatHistory, parseAddress, presenceState, type RunSignal } from "./rules";
 import { Agent, type Update } from "./agent";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -40,16 +41,14 @@ function addMessage(m: Message) {
   box.scrollTop = box.scrollHeight;
 }
 
-const seenSteps = new Set<number>();
+const stepLedger = new StepLedger();
+const runSignals: RunSignal[] = [];
 
 /// Steps are why a minutes-long turn is legible instead of silent. Under the
 /// default level only the owner receives them, so a colleague sees the run line
 /// and not the forty tool calls behind it.
 function addStep(runId: number, label: string, id?: number) {
-  if (id !== undefined) {
-    if (seenSteps.has(id)) return;    // may arrive on both streams
-    seenSteps.add(id);
-  }
+  if (!stepLedger.admit(id)) return;   // may arrive on both streams
   addStepLine(runId, label);
 }
 
@@ -92,20 +91,19 @@ const escape = (s: string) =>
 
 /// A colleague at work must be distinguishable from a colleague who is absent —
 /// otherwise `private` turns translucent into invisible.
-function showPresence(run: { id: number; status: string; user: string }) {
+function showPresence(run: RunSignal) {
+  runSignals.push(run);
+  const working = presenceState(runSignals);
   const box = $("messages");
-  const id = `presence-${run.id}`;
-  const done = run.status !== "running";
-  const existing = document.getElementById(id);
 
-  if (done) { existing?.remove(); return; }
-  if (existing) return;
-
-  const el = document.createElement("div");
-  el.id = id;
-  el.className = "presence";
-  el.textContent = `${run.user} is working with their agent…`;
-  box.append(el);
+  box.querySelectorAll(".presence").forEach((el) => el.remove());
+  for (const [ id, who ] of working) {
+    const el = document.createElement("div");
+    el.id = `presence-${id}`;
+    el.className = "presence";
+    el.textContent = `${who} is working with their agent…`;
+    box.append(el);
+  }
   box.scrollTop = box.scrollHeight;
 }
 
@@ -171,14 +169,11 @@ async function send(text: string) {
 
 /// The last few turns of the room, as the agent would read them.
 function recentHistory(limit = 20): string | null {
-  const rows = [...document.querySelectorAll<HTMLElement>("#messages .msg")].slice(-limit);
-  if (!rows.length) return null;
-  const lines = rows.map((el) => {
-    const who = el.querySelector(".from")?.textContent?.trim() ?? "?";
-    const what = el.querySelector(".body")?.textContent?.trim() ?? "";
-    return `${who}: ${what}`;
-  });
-  return `Recently in this channel:\n\n${lines.join("\n")}`;
+  const rows = [...document.querySelectorAll<HTMLElement>("#messages .msg")].map((el) => ({
+    who: el.querySelector(".from")?.textContent?.trim() ?? "?",
+    what: el.querySelector(".body")?.textContent?.trim() ?? "",
+  }));
+  return formatHistory(rows, limit);
 }
 
 // ---------- wiring ----------
