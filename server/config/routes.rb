@@ -1,6 +1,11 @@
 Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # OmniAuth mounts /auth/:provider itself; these are where it comes back to.
+  get  "auth/:provider/callback", to: "sessions#create"
+  post "auth/:provider/callback", to: "sessions#create"
+  get  "auth/failure",            to: "sessions#failure"
+
   namespace :api do
     post "auth", to: "auth#create"
 
