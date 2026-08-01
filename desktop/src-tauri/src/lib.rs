@@ -22,7 +22,7 @@ mod workspace;
 
 use std::sync::Arc;
 
-use acp::{Agent, AgentState};
+use acp::{auth_hint, mounts_http_mcp, Agent, AgentState};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde_json::{json, Value};
@@ -203,6 +203,41 @@ async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String>
     Ok(state.names().await)
 }
 
+/// The rail is the only way what a room knows reaches an agent. An agent that
+/// cannot mount an HTTP MCP server accepts the session, ignores the entry it
+/// cannot use, and answers the turn from nothing — which reads as a bad model
+/// rather than as a client that never checked (#94).
+///
+/// Nothing to mount is nothing to check: a session opened without a rail is a
+/// session that was not promised one.
+async fn rail_would_reach(
+    agent: &Arc<Agent>,
+    name: &Option<String>,
+    mcp_servers: &Value,
+) -> Result<(), String> {
+    let nothing_to_mount = mcp_servers.as_array().is_none_or(|s| s.is_empty());
+    if nothing_to_mount || mounts_http_mcp(&agent.handshake().await) {
+        return Ok(());
+    }
+
+    let who = name.clone().unwrap_or_else(|| "this agent".into());
+    Err(format!(
+        "{who} does not report that it can mount an HTTP MCP server, so the capability rail \
+         would not reach it. A session opened anyway would answer from nothing rather than \
+         from what this room knows."
+    ))
+}
+
+/// Whatever went wrong, plus the one actionable thing the agent said at the
+/// handshake. A logged-out agent answers `session/new` with an internal error
+/// and puts the instruction in `authMethods`, where nobody was looking.
+async fn with_auth_hint(agent: &Arc<Agent>, error: String) -> String {
+    match auth_hint(&agent.handshake().await) {
+        Some(hint) => format!("{error} — this agent offers: {hint}"),
+        None => error,
+    }
+}
+
 /// Pick up a session the agent still has. Its failure is not an error: a session
 /// the agent has forgotten, or an agent that cannot load one, simply means a new
 /// session — which is what happened before this existed.
@@ -214,12 +249,14 @@ async fn agent_load_session(
     cwd: String,
     mcp_servers: Option<Value>,
 ) -> Result<Value, String> {
-    let agent = running(&state, name).await?;
+    let agent = running(&state, name.clone()).await?;
+    let mcp_servers = mcp_servers.unwrap_or(json!([]));
+    rail_would_reach(&agent, &name, &mcp_servers).await?;
+
     agent
         .request(
             "session/load",
-            json!({ "sessionId": session_id, "cwd": cwd,
-                    "mcpServers": mcp_servers.unwrap_or(json!([])) }),
+            json!({ "sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers }),
         )
         .await
 }
@@ -231,13 +268,20 @@ async fn agent_new_session(
     cwd: String,
     mcp_servers: Option<Value>,
 ) -> Result<Value, String> {
-    let agent = running(&state, name).await?;
-    agent
+    let agent = running(&state, name.clone()).await?;
+    let mcp_servers = mcp_servers.unwrap_or(json!([]));
+    rail_would_reach(&agent, &name, &mcp_servers).await?;
+
+    match agent
         .request(
             "session/new",
-            json!({ "cwd": cwd, "mcpServers": mcp_servers.unwrap_or(json!([])) }),
+            json!({ "cwd": cwd, "mcpServers": mcp_servers }),
         )
         .await
+    {
+        Ok(result) => Ok(result),
+        Err(error) => Err(with_auth_hint(&agent, error).await),
+    }
 }
 
 /// Send a turn. What the room knows, and what was just said in it, are prepended
