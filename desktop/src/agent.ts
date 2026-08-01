@@ -5,9 +5,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { profileFor, stateOf as stateOfProfile, type AgentState } from "./agents/catalog";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
+
+/// What an install did. `ok` is the whole answer when it worked; the rest is
+/// there for when it did not.
+export interface InstallResult {
+  ok: boolean;
+  code: number | null;
+  stdoutTail: string;
+  stderrTail: string;
+}
 
 export class Agents {
   private sessions = new Map<string, string>();        // agent+channel -> ACP session id
@@ -31,6 +41,32 @@ export class Agents {
     if (!def) throw new Error(`no agent named ${name}`);
     await invoke("agent_start", { name, command: def.command, args: def.args });
     this.live.add(name);
+  }
+
+  /// Where each of these commands is on this machine, as the bridge looks for
+  /// one: the bundle, our own prefix, and last the person's PATH. Kept, because
+  /// the panel asks on every render and a machine does not change under it —
+  /// what changes it is an install, and that re-probes.
+  private located = new Map<string, string | null>();
+
+  async probe(commands: string[]) {
+    const where = await invoke<Array<string | null>>("agent_probe", { commands });
+    commands.forEach((command, i) => this.located.set(command, where[i] ?? null));
+  }
+
+  /// Fetch one agent. The command is the catalog's, and the caller has already
+  /// put it in front of somebody — this only runs it.
+  install(command: string) {
+    return invoke<InstallResult>("agent_install", { command });
+  }
+
+  /// Whether an agent can be addressed. An agent nobody pinned is judged the
+  /// same way, minus the one thing a profile knows: whether it ships here.
+  stateOf(name: string): AgentState {
+    const command = this.defs.find((d) => d.name === name)?.command;
+    const where = (command && this.located.get(command)) || null;
+    const profile = profileFor(name);
+    return profile ? stateOfProfile(profile, where) : where ? "ready" : "missing";
   }
 
   /// Where this session works. Derived from who is working, with which agent,
