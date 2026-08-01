@@ -185,6 +185,13 @@ export class Agents {
       { name, sessionId, text, context, history });
   }
 
+  /// Ask the agent to give up the turn it is on. The turn ends as a failure with
+  /// its steps intact and the session stays open — the difference between this
+  /// and stopping the agent, which takes every other channel's turn with it.
+  cancel(name: string, sessionId: string) {
+    return invoke("agent_cancel", { name, sessionId });
+  }
+
   /// The agent asking to do something. It is blocked until somebody answers,
   /// so this is the one event that must not be dropped.
   onAsk(handler: (asked: Asked) => void) {

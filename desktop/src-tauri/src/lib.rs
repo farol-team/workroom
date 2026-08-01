@@ -221,6 +221,21 @@ async fn agent_close_session(
     Ok(true)
 }
 
+/// Ask the agent to give up the turn it is on. The person's to ask for: a run
+/// that stops without anybody asking is as surprising as one that never stops.
+///
+/// A notification, so there is nothing to wait for. The turn ends as a failure
+/// with its steps intact and the session stays open — the difference between
+/// this and stopping the agent, which takes every other channel's turn with it.
+#[tauri::command]
+async fn agent_cancel(
+    state: State<'_, AgentState>,
+    name: Option<String>,
+    session_id: String,
+) -> Result<(), String> {
+    running(&state, name).await?.cancel(&session_id).await
+}
+
 /// Which of this person's agents are running.
 #[tauri::command]
 async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String> {
@@ -447,6 +462,7 @@ pub fn run() {
             agent_set_config,
             agent_export_session,
             agent_close_session,
+            agent_cancel,
             agent_stop
         ])
         .run(tauri::generate_context!())
