@@ -11,13 +11,11 @@ class Message < ApplicationRecord
   validates :body, presence: true
   validate  :single_level_threading
 
-  scope :roots, -> { where(parent_id: nil) }
-
   def from_agent? = author.is_a?(AgentRun)
 
   private
 
-  # Треды на один уровень: ответ на ответ запрещён.
+  # Threads are one level deep: a reply to a reply is refused.
   def single_level_threading
     errors.add(:parent, "вложенность больше одного уровня") if parent&.parent_id.present?
   end

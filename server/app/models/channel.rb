@@ -18,8 +18,8 @@ class Channel < ApplicationRecord
 
   before_validation :default_memory_uri
 
-  # Права на skills и память выводятся из пути, а не из таблицы грантов.
-  # viking://resources/channels/<slug>/ is the room's own knowledge.
+  # Rights over skills and memory are derived from the path, not from a table
+  # of grants. viking://resources/channels/<slug>/ is the room's own knowledge.
   def skills_uri  = "#{memory_uri}skills/"
 
   private

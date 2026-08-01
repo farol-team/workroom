@@ -88,11 +88,11 @@ module Rail
       end
     end
 
+    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
+
     # The turn this call belongs to. The rail is reached by an agent holding its
     # owner's token, not by the client, so the run is inferred from what that
     # person currently has open in this channel — which is exactly one thing.
-    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
-
     def working_run
       AgentRun.joins(:agent_session)
               .where(agent_sessions: { user_id: @user.id, channel_id: @channel.id })

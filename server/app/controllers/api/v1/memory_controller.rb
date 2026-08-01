@@ -9,8 +9,9 @@ module Api
         render json: entries.map { |e| serialize(e) }
       end
 
-      # Direct write. Distillation proposes a Promotion instead; this path is
-      # for a person deliberately recording something the room should know.
+      # For a person deliberately recording something the room should know. An
+      # agent writes through the rail instead, which stamps the run it came
+      # from; here the author is whoever is holding the token.
       def create
         entry = Memory::Store.current.write(
           channel!, title: params.require(:title), detail: params.require(:detail),
