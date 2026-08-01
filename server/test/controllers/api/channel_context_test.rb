@@ -50,6 +50,30 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
     assert_equal "a-key", store["key"]
   end
 
+  # A room whose memory is away is still a room. It opens, and it is told which
+  # of the two it is looking at — a store that is down, or a room that has
+  # learned nothing. Before this, the first of those was a 500 (#146).
+  test "a room whose memory cannot be reached opens and says so" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    body = context_for
+
+    assert_response :success
+    assert_equal "unavailable", body["memory"]
+    assert_nil body["context"], "the sentinel stays inside the seam; the wire carries a fact instead"
+  end
+
+  test "a room whose memory answers says so, and carries what it knows" do
+    Memory::Store.current = Memory::Local.new
+    Memory::Store.current.write(@channel, title: "Reporting cadence", detail: "Monthly.", trust: "human")
+
+    body = context_for
+
+    assert_equal "ok", body["memory"]
+    assert_includes body["context"], "Reporting cadence"
+  end
+
   test "a room somebody is not in tells them nothing" do
     private_room = channel(name: "Salaries")
     private_room.update!(visibility: "private")

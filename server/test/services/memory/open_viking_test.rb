@@ -104,3 +104,43 @@ class Memory::OpenVikingArchiveTest < ActiveSupport::TestCase
     assert_raises(Memory::OpenViking::Error) { store.supersede("viking://resources/channels/") }
   end
 end
+
+# A store that cannot be reached. No live instance: the point is a store that is
+# not there, and a name in `.invalid` is guaranteed by RFC 2606 never to be.
+#
+# Connection refused and both timeouts already arrived as the adapter's own
+# error. A name that does not resolve did not — `Socket::ResolutionError` is a
+# `SocketError`, which is not a `SystemCallError` — so it travelled past every
+# `rescue Error` in the adapter and out of the controller as a 500 (#146).
+class Memory::OpenVikingUnreachableTest < ActiveSupport::TestCase
+  def store
+    Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid", api_key: "unused")
+  end
+
+  setup { @channel = channel(name: "Meetings") }
+
+  # Asserted on `write`, which is the one path that does not swallow: `read`,
+  # `list`, `mkdir` and `tag` each rescue Error by design.
+  test "a name that does not resolve arrives as the adapter's own error" do
+    assert_raises(Memory::OpenViking::Error) do
+      store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
+    end
+  end
+
+  # The half that matters more. Rescuing alone would make an unreachable store
+  # indistinguishable from a room that has learned nothing — which is #99, and
+  # reads as the product being empty rather than as something being down.
+  test "a store that cannot be reached says so rather than saying the room knows nothing" do
+    assert_same Memory::Store::UNAVAILABLE, store.context_for(@channel),
+                "unreachable is neither nil nor text, so no call site can read it as an empty room"
+  end
+
+  test "a store answers for its availability once it has failed to answer" do
+    unreachable = store
+    assert unreachable.available?, "a store nobody has asked about is taken at its word"
+
+    unreachable.context_for(@channel)
+
+    refute unreachable.available?
+  end
+end
