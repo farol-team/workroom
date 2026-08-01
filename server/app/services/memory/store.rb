@@ -20,6 +20,14 @@ module Memory
       @given = store
     end
 
+    # Whether the store answered everything it was asked during this request.
+    # Read right after a call, because that call is what learns it: a listing
+    # that came back empty is a room that knows nothing only if this is true,
+    # and a store that is down otherwise (#146). A store nobody has asked about
+    # is taken at its word; one backed by nothing that can be away never stops
+    # being available.
+    def available? = true
+
     def context_for(_channel, limit: 20)  = raise NotImplementedError
     def search(_channel, _query, limit: 10) = raise NotImplementedError
 

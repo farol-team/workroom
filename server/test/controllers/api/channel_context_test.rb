@@ -50,6 +50,30 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
     assert_equal "a-key", store["key"]
   end
 
+  # A room whose memory is away is still a room. It opens, and it is told which
+  # of the two it is looking at — a store that is down, or a room that has
+  # learned nothing. Before this, the first of those was a 500 (#146).
+  test "a room whose memory cannot be reached opens and says so" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    body = context_for
+
+    assert_response :success
+    assert_equal "unavailable", body["memory"]
+    assert_nil body["context"], "nothing to inject, and the fact beside it says why"
+  end
+
+  test "a room whose memory answers says so, and carries what it knows" do
+    Memory::Store.current = Memory::Local.new
+    Memory::Store.current.write(@channel, title: "Reporting cadence", detail: "Monthly.", trust: "human")
+
+    body = context_for
+
+    assert_equal "ok", body["memory"]
+    assert_includes body["context"], "Reporting cadence"
+  end
+
   test "a room somebody is not in tells them nothing" do
     private_room = channel(name: "Salaries")
     private_room.update!(visibility: "private")
@@ -57,5 +81,36 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
     get api_v1_channel_context_path(private_room.slug), headers: auth(user(name: "Bob"))
 
     assert_response :forbidden
+  end
+
+  # Opening a room is `show`, and the count it carries is read from the same
+  # store. Translating the transport failure without saying so here would turn a
+  # 500 into a room reporting that it knows nothing — the number people actually
+  # look at, and the failure #99 already cost once.
+  def opening(person = @alice)
+    get api_v1_channel_path(@channel.slug), headers: auth(person)
+    response.parsed_body
+  end
+
+  test "a room whose memory cannot be reached opens without claiming to know nothing" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    body = opening
+
+    assert_response :success
+    assert_equal "unavailable", body["memory"]
+    refute body.key?("memory_count"),
+           "zero is a number a person cannot tell from the truth; absent is honest"
+  end
+
+  test "a room whose memory answers opens with the count and says so" do
+    Memory::Store.current = Memory::Local.new
+    Memory::Store.current.write(@channel, title: "Reporting cadence", detail: "Monthly.", trust: "human")
+
+    body = opening
+
+    assert_equal "ok", body["memory"]
+    assert_equal 1, body["memory_count"]
   end
 end

@@ -8,6 +8,8 @@ class Api::V1::SkillsControllerTest < ActionDispatch::IntegrationTest
     @json = { "Content-Type" => "application/json" }
   end
 
+  teardown { Memory::Store.current = nil }
+
   test "a person writes how the work is done here" do
     post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Running a client call",
@@ -29,6 +31,19 @@ class Api::V1::SkillsControllerTest < ActionDispatch::IntegrationTest
 
     assert_empty response.parsed_body,
                  "a procedure is not a fact, and mixing them is how a rules file rots"
+  end
+
+  # The same door as the memory listing: a store that is away used to take this
+  # one down with it, and now hands back the array a channel with no
+  # conventions does (#146).
+  test "skills from a store that cannot be reached are a listing, not a 500" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    get api_v1_channel_skills_path(@channel.slug), headers: auth(@alice)
+
+    assert_response :success
+    assert_empty response.parsed_body
   end
 
   test "a channel's skills are its members'" do
