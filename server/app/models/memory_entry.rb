@@ -1,4 +1,7 @@
 class MemoryEntry < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :channel
+
   TRUST = %w[human agent].freeze
 
   belongs_to :channel
@@ -6,7 +9,9 @@ class MemoryEntry < ApplicationRecord
   belongs_to :source, polymorphic: true, optional: true
 
   validates :uri, :title, presence: true
-  validates :uri, uniqueness: true
+  # The uri gains a workspace segment in step 4 of #118. Until it does, the pair
+  # is what is actually unique.
+  validates :uri, uniqueness: { scope: :workspace_id }
   validates :trust, inclusion: { in: TRUST }
 
   scope :current, -> { where(superseded_at: nil) }

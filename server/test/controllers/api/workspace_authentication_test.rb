@@ -7,8 +7,8 @@ require "test_helper"
 class Api::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
   setup do
     @workspace = Workspace.create!(slug: "acme-#{SecureRandom.hex(3)}", name: "Acme")
-    @alice = user(name: "Alice")
-    @membership = WorkspaceMembership.create!(user: @alice, workspace: @workspace, role: "owner")
+    @alice = user(name: "Alice", workspace: @workspace)
+    @membership = @alice.workspace_memberships.sole
   end
 
   def me(token)

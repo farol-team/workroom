@@ -1,4 +1,7 @@
 class RunStep < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :agent_run
+
   KINDS = %w[tool_use tool_result thinking plan].freeze
 
   belongs_to :agent_run

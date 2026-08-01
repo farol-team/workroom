@@ -1,4 +1,6 @@
 class Channel < ApplicationRecord
+  include BelongsToWorkspace
+
   VISIBILITIES = %w[open private].freeze
 
   has_many :memberships, dependent: :destroy
@@ -9,7 +11,9 @@ class Channel < ApplicationRecord
   has_many :memory_entries, dependent: :destroy
 
   validates :slug, :name, :memory_uri, presence: true
-  validates :slug, uniqueness: true
+  # Two customers both want a room called general. Unique inside a workspace,
+  # not across the server.
+  validates :slug, uniqueness: { scope: :workspace_id }
   validates :visibility, inclusion: { in: VISIBILITIES }
 
   before_validation :default_memory_uri
