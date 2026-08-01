@@ -8,12 +8,21 @@ module Memory
   # production is a decision worth testing, and an initializer cannot be tested
   # without booting a second application.
   class Selection
-    def initialize(env = ENV)
+    # A workspace holds its own store, because the boundary between rooms has to
+    # be kept by whatever holds the data. PostgreSQL keeps its half through
+    # row-level security; this is the other half, and an account in the context
+    # store is what that store calls a workspace (docs/spikes/openviking-isolation.md).
+    #
+    # A workspace with none configured gets what the environment names — which
+    # is every workspace until somebody provisions accounts, and is what keeps
+    # the running server working.
+    def initialize(env = ENV, workspace = nil)
       @env = env
+      @workspace = workspace
     end
 
     def store
-      store_class == OpenViking ? OpenViking.new(base_url: url, api_key: @env["OPENVIKING_API_KEY"]) : Local.new
+      store_class == OpenViking ? OpenViking.new(base_url: url, api_key: key) : Local.new
     end
 
     def store_class
@@ -41,7 +50,8 @@ module Memory
 
     private
 
-    def url = @env["OPENVIKING_URL"].presence
+    def url = @workspace&.openviking_url.presence || @env["OPENVIKING_URL"].presence
+    def key = @workspace&.openviking_api_key.presence || @env["OPENVIKING_API_KEY"]
     def production? = @env["RAILS_ENV"] == "production"
   end
 end

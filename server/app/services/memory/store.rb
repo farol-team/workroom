@@ -4,10 +4,20 @@ module Memory
   # implementation can be swapped for an external context database
   # without changing a single call site.
   class Store
-    def self.current = @current ||= Local.new
+    # Resolved per request, not per process. One process serves every workspace,
+    # and a store chosen once at boot is a boundary that does not exist — the
+    # half of a room's content retrieved by meaning would be shared by everybody
+    # while the half in PostgreSQL is not (#140).
+    def self.current
+      @given || (Current.memory_store ||= Selection.new(ENV, Current.workspace).store)
+    end
 
+    # For a caller that has a store in hand and means it for every room: a
+    # contract test against a real instance, or a script. Assigning outranks
+    # resolving, and nothing in the application assigns — a room's store is a
+    # property of the room, not of the process.
     def self.current=(store)
-      @current = store
+      @given = store
     end
 
     def context_for(_channel, limit: 20)  = raise NotImplementedError

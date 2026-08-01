@@ -7,4 +7,8 @@ class Current < ActiveSupport::CurrentAttributes
   # with no workspace in scope is a bug rather than a default, and once
   # row-level security lands it is a row nobody can read back.
   attribute :workspace
+
+  # The store this room's knowledge lives in, resolved once per request rather
+  # than looked up on every call.
+  attribute :memory_store
 end
