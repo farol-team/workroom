@@ -23,8 +23,9 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     user = User.find_by!(email: "dana@farol.run")
     assert_equal "openid_connect", user.provider
     assert_equal "okta|0001", user.uid, "identity is the provider's subject, not the address"
-    assert user.api_token.present?
-    assert_includes response.body, user.api_token, "the client is handed the token it will carry"
+    token = user.workspace_memberships.sole.api_token
+    assert token.present?
+    assert_includes response.body, token, "the client is handed the token it will carry"
   end
 
   test "signing in again is the same person, not a second one" do
@@ -35,7 +36,9 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
       get "/auth/openid_connect/callback"
     end
     assert_equal first.id, User.find_by!(email: "dana@farol.run").id
-    assert_equal first.api_token, first.reload.api_token, "a token in use is not rotated on sign-in"
+    assert_equal first.workspace_memberships.sole.api_token,
+                 first.reload.workspace_memberships.sole.api_token,
+                 "a token in use is not rotated on sign-in"
   end
 
   test "the same address from a different provider subject is not the same account" do
@@ -61,7 +64,7 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     back = URI.parse(response.location)
     assert_equal [ "http", "127.0.0.1", 51_732 ], [ back.scheme, back.host, back.port ],
                  "the loopback interface, and the port the listener named"
-    assert_equal({ "token" => User.find_by!(email: "dana@farol.run").api_token,
+    assert_equal({ "token" => User.find_by!(email: "dana@farol.run").workspace_memberships.sole.api_token,
                    "state" => "abc123" }, Rack::Utils.parse_query(back.query))
   end
 
@@ -81,7 +84,7 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     get "/auth/openid_connect/callback"
 
     assert_response :success
-    assert_includes response.body, User.find_by!(email: "dana@farol.run").api_token
+    assert_includes response.body, User.find_by!(email: "dana@farol.run").workspace_memberships.sole.api_token
   end
 
   test "a provider that says no signs nobody in" do

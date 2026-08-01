@@ -34,14 +34,12 @@ class Api::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  # The room already on the deployed server holds tokens issued before any of
-  # this existed. A deploy that signs everybody out to gain a column is a deploy
-  # nobody forgives.
-  test "a token issued before workspaces existed still works" do
-    me(@alice.api_token)
-
-    assert_response :success
-    assert_equal @alice.name, response.parsed_body.dig("user", "name")
+  # The tokens issued before workspaces existed were copied onto memberships by
+  # #134's backfill, so the same string still works — through the membership.
+  # What is gone is the other place it could have come from.
+  test "a person has no token of their own any more" do
+    refute_respond_to User.new, :api_token,
+           "two places to hold a token is one place that does not name a room"
   end
 
   test "a membership issues its own token rather than borrowing one" do

@@ -30,18 +30,11 @@ module Api
       token = request.headers["Authorization"].to_s.delete_prefix("Bearer ").presence
       return render_error("unauthorized", :unauthorized) unless token
 
-      if (membership = WorkspaceMembership.find_by(api_token: token))
-        @current_user = membership.user
-        @current_workspace = membership.workspace
-      else
-        # The token somebody's client is already holding. Read for as long as
-        # `users.api_token` exists, so a deploy does not sign the room out
-        # mid-migration; #118 step 5 removes both this and the column.
-        @current_user = User.find_by(api_token: token)
-        @current_workspace = @current_user&.workspaces&.first
-      end
+      membership = WorkspaceMembership.find_by(api_token: token)
+      return render_error("unauthorized", :unauthorized) unless membership
 
-      return render_error("unauthorized", :unauthorized) unless @current_user
+      @current_user = membership.user
+      @current_workspace = membership.workspace
 
       enter_workspace
     end

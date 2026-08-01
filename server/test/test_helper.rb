@@ -45,8 +45,7 @@ module Build
   # a person the product cannot produce.
   def user(name: "Alice", email: nil, workspace: nil)
     email ||= "#{name.downcase}-#{SecureRandom.hex(3)}@example.test"
-    person = User.create!(name:, email:, provider: "test", uid: email,
-                          api_token: SecureRandom.hex(8))
+    person = User.create!(name:, email:, provider: "test", uid: email)
     WorkspaceMembership.create!(user: person, workspace: workspace || in_a_workspace)
     person
   end
@@ -97,5 +96,10 @@ class ActionDispatch::IntegrationTest
   include Build
   include ActiveJob::TestHelper
 
-  def auth(user) = { "Authorization" => "Bearer #{user.api_token}" }
+  # A person reaches a room with the token of their membership in it — there is
+  # no other kind.
+  def auth(user, workspace = Current.workspace)
+    membership = user.workspace_memberships.find_by(workspace:) || user.workspace_memberships.first!
+    { "Authorization" => "Bearer #{membership.api_token}" }
+  end
 end
