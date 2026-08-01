@@ -45,9 +45,6 @@ class Workspace < ApplicationRecord
   # A person's place in a room, made once. Signing in twice is not joining
   # twice, and after #134 a person without a membership cannot reach anything.
   def self.admit(user)
-    return unless (room = default)
-
-    WorkspaceMembership.find_or_create_by!(user:, workspace: room)
-    room
+    WorkspaceMembership.find_or_create_by!(user:, workspace: default)
   end
 end

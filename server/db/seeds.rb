@@ -15,10 +15,10 @@ end
 Current.workspace = Workspace.find_or_create_by!(slug: "workroom") { |w| w.name = "WorkRoom" }
 
 alice = User.find_or_create_by!(email: "alice@farol.run") { |u|
-  u.name = "Alice"; u.provider = "dev"; u.uid = "alice@farol.run"; u.api_token = "dev-alice"
+  u.name = "Alice"; u.provider = "dev"; u.uid = "alice@farol.run"
 }
 bob = User.find_or_create_by!(email: "bob@farol.run") { |u|
-  u.name = "Bob"; u.provider = "dev"; u.uid = "bob@farol.run"; u.api_token = "dev-bob"
+  u.name = "Bob"; u.provider = "dev"; u.uid = "bob@farol.run"
 }
 
 meetings = Channel.find_or_create_by!(slug: "meetings") { |c|
@@ -31,7 +31,11 @@ marketing = Channel.find_or_create_by!(slug: "marketing") { |c|
 [ alice, bob ].each do |u|
   # In the workspace before in its rooms: after #134 nobody reaches a channel
   # without belonging to the room it is in.
-  WorkspaceMembership.find_or_create_by!(user: u, workspace: Current.workspace)
+  # Fixed tokens, so the documented ones keep working — and refused in
+  # production a hundred lines above, which is why they may be fixed.
+  WorkspaceMembership.find_or_create_by!(user: u, workspace: Current.workspace) do |m|
+    m.api_token = "dev-#{u.name.downcase}"
+  end
   Channel.find_each { |c| c.memberships.find_or_create_by!(user: u) }
 end
 

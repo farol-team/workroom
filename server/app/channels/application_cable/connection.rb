@@ -3,11 +3,11 @@ module ApplicationCable
     identified_by :current_user, :current_workspace
 
     def connect
-      membership = find_membership
-      self.current_user = membership&.user || find_user || reject_unauthorized_connection
+      membership = find_membership || reject_unauthorized_connection
+      self.current_user = membership.user
       # A connection outlives every request, so the room it belongs to is
       # settled once, here, and re-entered around each lookup that needs it.
-      self.current_workspace = membership&.workspace || current_user.workspaces.first
+      self.current_workspace = membership.workspace
     end
 
     private
@@ -18,8 +18,5 @@ module ApplicationCable
     end
 
     def find_membership = token && WorkspaceMembership.find_by(api_token: token)
-
-    # The token a client was holding before #134. Removed with the column.
-    def find_user = token && User.find_by(api_token: token)
   end
 end

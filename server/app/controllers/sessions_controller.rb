@@ -30,25 +30,27 @@ class SessionsController < ActionController::Base
     user ||= User.new(email: email.downcase)
     user.assign_attributes(provider: "openid_connect", uid: uid,
                            name: auth.dig("info", "name").presence || user.name || email.split("@").first)
-    user.api_token = SecureRandom.hex(24) if user.api_token.blank?
     user.save!
 
     # Signing in happens outside any room and ends inside one, so the room is
     # entered around what is recorded in it. `users` is global and needs no
     # boundary; an activity belongs to a workspace and cannot be written
     # without being in it.
-    Workspace.entered(Workspace.admit(user)) do
+    # The token names the room, so it is the membership's — there is no other
+    # kind left to hand out.
+    membership = Workspace.admit(user)
+    Workspace.entered(membership.workspace) do
       Activity.log(actor: user, action: "session.signed_in", subject: user)
     end
 
     port = session.delete(:return_port)
     state = session.delete(:return_state)
-    return render(plain: handoff(user)) unless port
+    return render(plain: handoff(membership)) unless port
 
     # Only ever the loopback interface, and only ever a port this server itself
     # validated. An unvalidated return address is a way to have this server hand
     # somebody's token to a host of an attacker's choosing.
-    query = { token: user.api_token, state: state }.compact.to_query
+    query = { token: membership.api_token, state: state }.compact.to_query
     redirect_to "http://127.0.0.1:#{port}/?#{query}", allow_other_host: true
   end
 
@@ -68,11 +70,11 @@ class SessionsController < ActionController::Base
 
   # The desktop client reads the token from this page. It is deliberately plain:
   # a browser shows it, and a loopback listener can parse it.
-  def handoff(user)
+  def handoff(membership)
     <<~TEXT
-      Signed in as #{user.name} <#{user.email}>.
+      Signed in as #{membership.user.name} <#{membership.user.email}>.
 
-      #{user.api_token}
+      #{membership.api_token}
 
       You can close this window.
     TEXT
