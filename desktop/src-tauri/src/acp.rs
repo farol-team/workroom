@@ -7,6 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -16,6 +17,24 @@ use tokio::sync::{oneshot, Mutex};
 
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 type Diagnostics = Arc<Mutex<VecDeque<String>>>;
+/// When each session last showed a sign of life, and under `EVERYTHING` when the
+/// agent last said anything at all — for requests that name no session.
+type Activity = Arc<Mutex<HashMap<String, Instant>>>;
+
+/// The key for "the agent said something", regardless of which session. A slash
+/// cannot appear in an id we would otherwise collide with.
+const EVERYTHING: &str = "/any";
+
+/// A turn that is streaming is working, however long it takes. A turn that has
+/// said nothing for this long has stopped, whatever it believes. Idle rather
+/// than total, because total punishes the long turns this product is for.
+const IDLE_LIMIT: Duration = Duration::from_secs(620);
+
+/// And a wall clock, because an agent can be talkative and stuck at once.
+const HARD_LIMIT: Duration = Duration::from_secs(7200);
+
+/// How often the wait wakes up to ask whether it has been abandoned.
+const DEADLINE_TICK: Duration = Duration::from_secs(5);
 
 /// How much of the agent's stderr is worth keeping. Enough for a stack trace or
 /// a refusal, far short of a session's logging.
@@ -98,6 +117,14 @@ pub fn frame(id: u64, method: &str, params: Value) -> String {
     format!("{frame}\n")
 }
 
+/// A message with no id, which is what the protocol calls a notification and
+/// what makes it one: nothing is expected back. `session/cancel` is one, and
+/// every frame this bridge could produce carried an id, so it could not send it.
+pub fn notify_frame(method: &str, params: Value) -> String {
+    let frame = json!({ "jsonrpc": "2.0", "method": method, "params": params });
+    format!("{frame}\n")
+}
+
 /// An error from the agent is an error here; a reply with no result is nothing.
 pub fn result_of(msg: Value) -> Result<Value, String> {
     if let Some(err) = msg.get("error") {
@@ -118,6 +145,19 @@ pub struct Agent {
     /// The last thing it said on stderr. Not work product and not a step, so it
     /// belongs nowhere in the room — and everywhere a person asks why (#93).
     diagnostics: Diagnostics,
+    /// When each session last showed a sign of life. A turn with no deadline is
+    /// a run that says "working" forever to everybody watching (#92).
+    activity: Activity,
+}
+
+/// Which session a message is about, when it says. `session/update` carries it,
+/// and so does every request that belongs to one — so a turn is measured by its
+/// own silence rather than by another channel's chatter.
+fn session_of(msg: &Value) -> Option<String> {
+    msg.pointer("/params/sessionId")
+        .or_else(|| msg.get("sessionId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// Whether an agent says it can mount an HTTP MCP server — which is the only way
@@ -231,6 +271,7 @@ impl Agent {
         let stderr = child.stderr.take().ok_or("no stderr")?;
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: Diagnostics = Arc::new(Mutex::new(VecDeque::new()));
+        let activity: Activity = Arc::new(Mutex::new(HashMap::new()));
 
         // A tail, not a log: the last thing the agent said, for a person asking
         // why it is not answering.
@@ -254,10 +295,27 @@ impl Agent {
             let pending = pending.clone();
             let closing = diagnostics.clone();
             let closing_name = name.to_string();
+            let heard = activity.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    match classify(&line) {
+                    let inbound = classify(&line);
+
+                    // Any line is a sign of life; one that names a session is a
+                    // sign of life for that turn in particular, so a busy
+                    // channel cannot keep a stuck one looking alive.
+                    if let Inbound::Reply(_, msg) | Inbound::Ask(_, msg) | Inbound::Notify(msg) =
+                        &inbound
+                    {
+                        let now = Instant::now();
+                        let mut seen = heard.lock().await;
+                        seen.insert(EVERYTHING.to_string(), now);
+                        if let Some(session) = session_of(msg) {
+                            seen.insert(session, now);
+                        }
+                    }
+
+                    match inbound {
                         Inbound::Reply(id, msg) => {
                             if let Some(tx) = pending.lock().await.remove(&id_key(&id)) {
                                 let _ = tx.send(msg);
@@ -300,6 +358,7 @@ impl Agent {
             child: Mutex::new(child),
             handshake: Mutex::new(Value::Null),
             diagnostics: diagnostics.clone(),
+            activity: activity.clone(),
         });
 
         const PROTOCOL_VERSION: i64 = 1;
@@ -359,10 +418,15 @@ impl Agent {
             *n += 1;
             *n
         };
+        // Measured against this session's own silence where the request names
+        // one, and against the agent's where it does not.
+        let watching = session_of(&json!({ "params": &params })).unwrap_or(EVERYTHING.into());
+        let key = id_key(&json!(id));
+
         let (tx, rx) = oneshot::channel();
         // Filed under the same key the reply will be looked up by, whichever
         // way the agent chooses to spell the id back.
-        self.pending.lock().await.insert(id_key(&json!(id)), tx);
+        self.pending.lock().await.insert(key.clone(), tx);
 
         {
             let mut w = self.stdin.lock().await;
@@ -372,7 +436,75 @@ impl Agent {
             w.flush().await.map_err(|e| e.to_string())?;
         }
 
-        result_of(rx.await.map_err(|_| "agent closed".to_string())?)
+        // Sending is a sign of life too, or a first request would be judged
+        // against a clock that started when the agent last spoke.
+        let sent = Instant::now();
+        self.activity.lock().await.insert(watching.clone(), sent);
+
+        result_of(self.awaited(rx, &key, &watching, sent).await?)
+    }
+
+    /// Wait for a reply, and stop waiting when nothing is coming.
+    ///
+    /// Idle rather than total: a turn that is streaming is working however long
+    /// it takes, and a turn that has said nothing for ten minutes has stopped
+    /// whatever it believes. The wall clock is there because an agent can be
+    /// talkative and stuck at the same time.
+    ///
+    /// The waiting caller is unfiled on the way out, or a hung request leaks its
+    /// slot for the life of the process.
+    async fn awaited(
+        &self,
+        mut rx: oneshot::Receiver<Value>,
+        key: &str,
+        watching: &str,
+        sent: Instant,
+    ) -> Result<Value, String> {
+        loop {
+            match tokio::time::timeout(DEADLINE_TICK, &mut rx).await {
+                Ok(Ok(msg)) => return Ok(msg),
+                Ok(Err(_)) => {
+                    self.pending.lock().await.remove(key);
+                    return Err("agent closed".into());
+                }
+                Err(_) => {
+                    let idle = self
+                        .activity
+                        .lock()
+                        .await
+                        .get(watching)
+                        .map(Instant::elapsed)
+                        .unwrap_or_else(|| sent.elapsed());
+
+                    let why = if idle >= IDLE_LIMIT {
+                        format!("said nothing for {} seconds", idle.as_secs())
+                    } else if sent.elapsed() >= HARD_LIMIT {
+                        format!("has been at it for {} seconds", sent.elapsed().as_secs())
+                    } else {
+                        continue;
+                    };
+
+                    self.pending.lock().await.remove(key);
+                    return Err(format!(
+                        "the agent {why}, so this turn was given up on. Its session is still \
+                         open — ask it again, or stop the agent."
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Ask the agent to abandon the turn it is on. A notification, so nothing
+    /// comes back; the turn it aborts ends as a failure with its steps intact,
+    /// and the session survives — which is the whole difference from killing the
+    /// process.
+    pub async fn cancel(&self, session_id: &str) -> Result<(), String> {
+        let line = notify_frame("session/cancel", json!({ "sessionId": session_id }));
+        let mut w = self.stdin.lock().await;
+        w.write_all(line.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        w.flush().await.map_err(|e| e.to_string())
     }
 
     /// Answer something the agent asked. One line, quoting its id — the agent is
@@ -544,6 +676,38 @@ mod tests {
             })),
             "an agent that says no is not an agent that said nothing"
         );
+    }
+
+    #[test]
+    fn a_notification_carries_no_id_or_it_is_a_question() {
+        // `frame` always attaches an id, so every message this bridge could
+        // produce expected an answer — which is why `session/cancel`, a
+        // notification, could not be sent at all (#92).
+        let line = notify_frame("session/cancel", json!({ "sessionId": "s1" }));
+        let parsed: Value = serde_json::from_str(line.trim_end()).unwrap();
+
+        assert_eq!(parsed["method"], "session/cancel");
+        assert_eq!(parsed["params"]["sessionId"], "s1");
+        assert!(
+            parsed.get("id").is_none(),
+            "an id makes it a request, and nothing is coming back"
+        );
+        assert!(line.ends_with('\n'));
+    }
+
+    #[test]
+    fn a_turn_is_measured_by_its_own_silence() {
+        // Otherwise one busy channel keeps a stuck turn in another looking
+        // alive, on an agent that serves every room this person has open.
+        assert_eq!(
+            session_of(&json!({ "params": { "sessionId": "s1", "update": {} } })),
+            Some("s1".to_string())
+        );
+        assert_eq!(
+            session_of(&json!({ "sessionId": "s2" })),
+            Some("s2".to_string())
+        );
+        assert_eq!(session_of(&json!({ "params": { "cwd": "/tmp" } })), None);
     }
 
     #[test]

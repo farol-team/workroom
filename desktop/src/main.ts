@@ -514,6 +514,13 @@ async function send(text: string) {
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 
+  // A turn somebody can stop. Without it the only way out is quitting the app,
+  // and the only stop that existed killed the process — taking the session, the
+  // context window and every other channel's turn on that agent with it (#92).
+  const stopTurn = say(`${name} is working in #${current.slug}.`, "Stop", async () => {
+    await agents.cancel(name, sessionId);
+  });
+
   try {
     await agents.prompt(name, sessionId, withClosing(body), context, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
@@ -524,6 +531,7 @@ async function send(text: string) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
   } finally {
+    stopTurn();
     stop();
     stopAsking();
   }
@@ -755,7 +763,9 @@ function noticeDrift(client: string, server?: string) {
 }
 
 /// A line at the top of the room, and a way to act on it if there is one.
-function say(text: string, action?: string, run?: () => Promise<void>) {
+/// Returns a way to take it back down — most notices stay until the window is
+/// gone, and one that offers to stop a turn has to leave when the turn does.
+function say(text: string, action?: string, run?: () => Promise<void>): () => void {
   const el = document.createElement("div");
   el.className = "notice";
   el.append(document.createTextNode(`${text} `));
@@ -770,6 +780,7 @@ function say(text: string, action?: string, run?: () => Promise<void>) {
     el.append(button);
   }
   $("notices").append(el);
+  return () => el.remove();
 }
 
 async function boot() {
