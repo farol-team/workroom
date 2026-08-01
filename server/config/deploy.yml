@@ -9,15 +9,15 @@
 service: workroom
 
 # Yandex Container Registry addresses images as cr.yandex/<registry-id>/<name>.
-image: <%= ENV.fetch("WORKROOM_REGISTRY_ID", "REGISTRY_ID") %>/workroom
+image: crpgjk8bi1k5adp4g05l/workroom
 
 servers:
   web:
-    - <%= ENV.fetch("WORKROOM_HOST", "HOST_IP") %>
+    - 51.250.10.118
 
 proxy:
   ssl: true
-  host: <%= ENV.fetch("WORKROOM_DOMAIN", "workroom.example") %>
+  host: workroom.farol.team
   # The client holds a long-lived websocket per open channel. Without this the
   # proxy closes it after a minute and the room stops being live for anybody
   # who is reading rather than typing.
@@ -25,6 +25,15 @@ proxy:
     path: /up
     interval: 5
   app_port: 80
+
+# The image lives in the cloud's own registry, and the password is an IAM token
+# that expires — fetched at deploy time, never stored.
+#
+# Port 22 is unreachable from the environment this is deployed from, so the
+# server runs sshd on 2222 as well; the machine's first boot configures it.
+ssh:
+  user: yc-user
+  port: 2222
 
 registry:
   server: cr.yandex
@@ -35,9 +44,11 @@ registry:
 
 env:
   clear:
-    # Solid Queue runs inside Puma. One process, one machine, and a room that
-    # does not need a second box to distil a memory.
-    SOLID_QUEUE_IN_PUMA: true
+    # No SOLID_QUEUE_IN_PUMA. Since #55 the agent distils its own memory and
+    # nothing in this application enqueues anything, so starting a worker only
+    # gave Puma a supervisor that queries tables no schema defines — which took
+    # the whole server down on boot. When something needs a queue again, it
+    # arrives with its own database and schema; see test/config/queue_config_test.rb.
     RAILS_ENV: production
     STORAGE_REGION: ru-central1
   secret:
@@ -66,6 +77,23 @@ env:
 # The database is a managed cluster that already exists and is shared with other
 # applications. It is not an accessory here: nothing in this file may create,
 # migrate or destroy it, and `kamal setup` must not be able to take it down.
+#
+# The context database is the opposite case: nothing else uses it, it holds only
+# what this workspace put there, and it is rebuilt rather than recovered.
+accessories:
+  context:
+    image: cr.yandex/crpgjk8bi1k5adp4g05l/openviking:0.4.11
+    host: 51.250.10.118
+    # Deliberately no `port`. Publishing one would put a store that answers to a
+    # single API key on the open internet; on the container network it is
+    # reachable by the application and by nothing else.
+    files:
+      - config/ov.conf.erb:/config/ov.conf
+    directories:
+      - data:/data
+    env:
+      clear:
+        OPENVIKING_CONFIG_FILE: /config/ov.conf
 
 aliases:
   console: app exec --interactive --reuse "bin/rails console"
