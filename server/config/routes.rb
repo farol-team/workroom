@@ -18,6 +18,8 @@ Rails.application.routes.draw do
     # One MCP endpoint per channel — the channel in the url is the scope.
     post "rail/:slug", to: "rail#call", as: :rail
 
+    resources :workspaces, only: %i[index create]
+
     get "channel-templates", to: "channels#templates", as: :channel_templates
     resources :channels, only: %i[index create], param: :slug
     get "channels/:slug",         to: "channels#show",    as: :channel

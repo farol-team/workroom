@@ -6,8 +6,12 @@ module Api
       render json: Channel.order(:name).map { |c| serialize(c) }
     end
 
-    # The shape a workspace can start with. Offered, never created — a room
-    # nobody asked for is a room nobody opens.
+    # The shape a room can be added with. Offered, never created: a team with no
+    # legal department should not be handed an empty `# legal`.
+    #
+    # A brand new workspace is the one exception, and it opens with three rooms
+    # rather than none — an empty workspace is a screen with nothing on it to
+    # press. See Workspace::FIRST_ROOMS.
     def templates
       render json: ChannelTemplate.all.map { |t|
         { key: t.key, name: t.name, purpose: t.purpose, skills: t.skills.map { |s| s[:title] },
