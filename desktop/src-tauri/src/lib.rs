@@ -65,43 +65,55 @@ fn resolve(app: &AppHandle, command: &str) -> String {
     located(command, &places(app, command))
 }
 
-/// Everywhere a command might be, in the order this application trusts them:
-/// the bundle, then beside the source under `pnpm tauri dev`, then the prefix
-/// this application installs into, and last whatever is on the person's PATH —
-/// somebody naming their own agent means the one they already have, and this
-/// must not take that away from them.
-///
-/// A command given as a path is that path and nothing else. It is the one place
-/// somebody has said exactly what they mean.
+/// Everywhere a command might be, for the machine this is running on.
 fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
-    if command.contains(std::path::MAIN_SEPARATOR) {
-        return vec![std::path::PathBuf::from(command)];
-    }
+    candidates(
+        command,
+        directories(
+            app.path()
+                .resolve("agents/bin", tauri::path::BaseDirectory::Resource)
+                .ok(),
+            std::env::current_dir()
+                .ok()
+                .map(|dir| dir.join("../node_modules/.bin")),
+            app.path().app_data_dir().ok(),
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
+        ),
+    )
+}
 
-    let shipped = app
-        .path()
-        .resolve(
-            format!("agents/bin/{command}"),
-            tauri::path::BaseDirectory::Resource,
-        )
-        .ok();
-    let beside = std::env::current_dir()
-        .ok()
-        .map(|dir| dir.join("../node_modules/.bin").join(command));
-    let ours = app
-        .path()
-        .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("npm").join("bin").join(command));
-    let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|dir| dir.join(command))
-        .collect::<Vec<_>>();
+/// The directories a bare command is looked for in, in the order this
+/// application trusts them: the bundle, then beside the source under
+/// `pnpm tauri dev`, then the prefix `agent_install` fetches into — which is
+/// `npm/bin` under the app data directory, because that is where
+/// `npm install --prefix` leaves what it installed — and last whatever is on
+/// the person's own PATH. Somebody naming an agent they already have means
+/// that one, and this must not take it away from them.
+fn directories(
+    bundle: Option<std::path::PathBuf>,
+    beside: Option<std::path::PathBuf>,
+    app_data: Option<std::path::PathBuf>,
+    on_path: Vec<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    let ours = app_data.map(|dir| dir.join("npm").join("bin"));
 
-    [shipped, beside, ours]
+    [bundle, beside, ours]
         .into_iter()
         .flatten()
         .chain(on_path)
         .collect()
+}
+
+/// Where that command would be in each of them.
+///
+/// A command given as a path is that path and nothing else: it is the one place
+/// somebody has said exactly what they mean, and looking up its last segment
+/// would run something they did not name.
+fn candidates(command: &str, dirs: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    if command.contains(std::path::MAIN_SEPARATOR) {
+        return vec![std::path::PathBuf::from(command)];
+    }
+    dirs.into_iter().map(|dir| dir.join(command)).collect()
 }
 
 /// The first of those that is really there.
@@ -643,7 +655,12 @@ mod resolution {
     /// Everything below goes through the same chain the running application
     /// builds — a test that hands `found` a list it ordered itself asserts only
     /// that the list it wrote is in the order it wrote it.
-    fn chain(command: &str, bundle: Option<&Path>, data: Option<&Path>, on_path: Vec<PathBuf>) -> Vec<PathBuf> {
+    fn chain(
+        command: &str,
+        bundle: Option<&Path>,
+        data: Option<&Path>,
+        on_path: Vec<PathBuf>,
+    ) -> Vec<PathBuf> {
         candidates(
             command,
             directories(
