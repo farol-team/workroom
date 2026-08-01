@@ -4,6 +4,15 @@
 # and recreated between test runs. Don't rely on the data there!
 
 Rails.application.configure do
+  # The test database is migrated, not reloaded from schema.rb.
+  #
+  # `maintain_test_schema!` purges and re-loads it from the schema file whenever
+  # a migration looks pending — and schema.rb cannot describe a row-level
+  # security policy. Reloading therefore drops the boundary between workspaces
+  # and leaves a suite that passes against a database with no boundary at all,
+  # which is worse than no suite (#138).
+  config.active_record.maintain_test_schema = false
+
   # Settings specified here will take precedence over those in config/application.rb.
 
   # While tests run files are not watched, reloading is not necessary.

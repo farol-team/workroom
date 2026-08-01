@@ -71,6 +71,12 @@ jobs:
       - name: Prepare database
         run: bin/rails db:prepare
 
+      # schema.rb cannot describe a row-level security policy, and the boundary
+      # between workspaces is nothing but policies. Applied here so a database
+      # loaded from the schema has one (#138).
+      - name: Boundary
+        run: bin/rails db:boundary
+
       - name: Test
         run: bin/rails test
 

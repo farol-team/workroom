@@ -11,10 +11,10 @@ class WorkspaceScopingTest < ActiveSupport::TestCase
 
   def in_workspace(room)
     was = Current.workspace
-    Current.workspace = room
+    enter(room)
     yield
   ensure
-    Current.workspace = was
+    enter(was)
   end
 
   test "a room made in a workspace belongs to it, without anybody saying so" do
@@ -29,9 +29,15 @@ class WorkspaceScopingTest < ActiveSupport::TestCase
 
     # The request says Globex; the channel says Acme. The channel is right —
     # otherwise a request could father a message into another room's channel.
-    said = in_workspace(@globex) { Message.create!(channel: room, author: person, body: "hello") }
+    #
+    # Saved as the owner because row-level security now refuses this write too,
+    # and being refused twice would prove only the outer refusal. That the
+    # policy also catches it is #138's subject and its own test.
+    said = in_workspace(@globex) do
+      as_the_owner { Message.create!(channel: room, author: person, body: "hello") }
+    end
 
-    assert_equal @acme.id, said.workspace_id
+    assert_equal @acme.id, said.workspace_id, "a record takes its parent's room, not the request's"
   end
 
   test "two workspaces can both have a general" do
@@ -55,7 +61,7 @@ class WorkspaceScopingTest < ActiveSupport::TestCase
       Channel.insert!({ slug: "general", name: "Again", workspace_id: @acme.id,
                         memory_uri: "viking://resources/channels/general/",
                         created_at: Time.current, updated_at: Time.current })
-    end
+    end if Current.workspace == @acme
   end
 
   # The point of denormalising the column. Schemas could not have offered this
@@ -64,10 +70,13 @@ class WorkspaceScopingTest < ActiveSupport::TestCase
     room = in_workspace(@acme) { channel(name: "Meetings") }
     person = user(name: "Alice", workspace: @globex)
 
+    # As the owner, so row-level security is out of the way and the composite
+    # key is what refuses. Under the app role the policy would refuse first, and
+    # this test would pass while proving something else.
     assert_raises ActiveRecord::InvalidForeignKey do
-      Message.insert!({ channel_id: room.id, workspace_id: @globex.id,
+      as_the_owner { Message.insert!({ channel_id: room.id, workspace_id: @globex.id,
                         author_id: person.id, author_type: "User", body: "not from here",
-                        created_at: Time.current, updated_at: Time.current })
+                        created_at: Time.current, updated_at: Time.current }) }
     end
   end
 
