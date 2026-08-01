@@ -1,0 +1,49 @@
+<%#
+  The context database, as WorkRoom runs it.
+
+  OpenAI refuses this server outright — `unsupported_country_region_territory`,
+  403 on every embedding — so the base is the workspace's own egress rather
+  than api.openai.com. It is configuration, not a fork in the code: the store
+  speaks the same protocol either way. Rendered by Kamal from the
+  deployer's environment — the keys are never in this repository.
+
+  It is reachable only on the container network: no port is published to the
+  host, so the store is addressable by the application and by nothing on the
+  internet.
+
+  This comment is ERB, not JSON. The store validates its configuration with
+  extra fields forbidden, so a "_comment" key is not ignored — it refuses to
+  start, and restarts forever.
+%>{
+  "storage": {
+    "workspace": "/data"
+  },
+
+  <%# 0.4.11 splits retrieval into dense and sparse halves; the model and its
+      credential live under `dense`, not directly under `embedding`. The store
+      validates with extra fields forbidden and restarts forever if this is
+      wrong, so the shape here is read from the running image, not assumed. %>
+  "embedding": {
+    "dense": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "api_base": "<%= ENV.fetch("OPENVIKING_OPENAI_BASE", "https://api.openai.com/v1") %>",
+      "api_key": "<%= ENV.fetch("OPENVIKING_OPENAI_KEY") %>",
+      "dimension": 1536,
+      "input": "text"
+    }
+  },
+
+  "vlm": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "api_base": "<%= ENV.fetch("OPENVIKING_OPENAI_BASE", "https://api.openai.com/v1") %>",
+    "api_key": "<%= ENV.fetch("OPENVIKING_OPENAI_KEY") %>"
+  },
+
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "root_api_key": "<%= ENV.fetch("OPENVIKING_ROOT_KEY") %>"
+  }
+}

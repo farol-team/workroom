@@ -27,14 +27,19 @@ Rails.application.configure do
   # keep artifacts somewhere a deploy will delete.
   config.active_storage.service = ENV["STORAGE_BUCKET"].present? ? :object_store : :local
 
-  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # TLS terminates at the proxy in front of this, so Rails is told rather than
   # left to guess — otherwise it builds http:// urls and treats the connection as
   # insecure.
-  config.assume_ssl = true
-
-  # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true
+  #
+  # Both are on unless the deployment says otherwise, because a server reachable
+  # from a browser without TLS hands out its session cookie in clear text. The
+  # one situation that earns the exception is a server that has no certificate
+  # yet — reached by address, before its name resolves. Turning this off with a
+  # certificate in front would silently downgrade every visitor, so it is opt-in
+  # and named for what it costs.
+  insecure = ENV["WORKROOM_INSECURE_HTTP"] == "true"
+  config.assume_ssl = !insecure
+  config.force_ssl = !insecure
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
