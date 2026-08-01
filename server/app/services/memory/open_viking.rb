@@ -37,6 +37,14 @@ module Memory
       read(uri)
     end
 
+    # One `ls`, not a read per entry. `list` already drops directories and the
+    # store's own bookkeeping, so this counts what `all` would list rather than
+    # what the directory happens to contain — skills live in a subdirectory and
+    # `ls` does not recurse.
+    def count(channel)
+      list(root_of(channel)).size
+    end
+
     # `ls` does not recurse, so a channel's skills sit in plain sight of the
     # store and out of the way of what the room learned.
     def skills(channel, limit: 50)

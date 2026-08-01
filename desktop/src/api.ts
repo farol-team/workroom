@@ -12,7 +12,10 @@ export interface Message {
 export interface Channel {
   id: number; slug: string; name: string; purpose: string | null;
   visibility: string; memory_uri: string;
-  message_count: number; memory_count: number;
+  message_count: number;
+  /// Only when a room is opened. The listing cannot carry it without asking the
+  /// context store once per channel, and nothing in the sidebar renders it.
+  memory_count?: number;
 }
 
 export { ADDRESS, parseAddress } from "./rules";

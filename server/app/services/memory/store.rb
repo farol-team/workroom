@@ -18,6 +18,12 @@ module Memory
     # "everything", and listing must not rest on one backend's accident.
     def all(_channel, limit: 200)         = raise NotImplementedError
 
+    # How many things the room currently knows, counting the same set `all`
+    # lists. Deliberately not `all(...).size`: that reads every entry to arrive
+    # at a number, and the caller wanting the number usually wants nothing else.
+    # A store answers this however it can do so cheaply.
+    def count(_channel)                   = raise NotImplementedError
+
     # How work is done here, as opposed to what the room learned. A fact goes
     # stale; a procedure does not, and keeping them in one place is how a
     # hand-written rules file rots in the half that changes.

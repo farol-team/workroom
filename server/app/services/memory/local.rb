@@ -38,6 +38,11 @@ module Memory
       knowledge(channel).by_trust.limit(limit)
     end
 
+    # The same scope `all` lists, without the ordering or the limit. Counting
+    # `memory_entries` directly is what #99 was: it includes skills, which the
+    # listing beside it excludes.
+    def count(channel) = knowledge(channel).count
+
     def skills(channel, limit: 50)
       channel.memory_entries.current
              .where("uri LIKE ?", "#{channel.skills_uri}%")
