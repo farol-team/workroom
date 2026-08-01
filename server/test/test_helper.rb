@@ -5,9 +5,24 @@ require "rails/test_help"
 module Build
   module_function
 
-  def user(name: "Alice", email: nil)
+  # Every room belongs to one, and a record created with none in scope is a bug
+  # rather than a default. A test that does not care which workspace it is in
+  # gets this one; a test about workspaces makes its own.
+  def workspace(slug: nil, name: "WorkRoom")
+    Workspace.create!(slug: slug || "ws-#{SecureRandom.hex(3)}", name:)
+  end
+
+  def in_a_workspace = Current.workspace ||= workspace
+
+  # A person, and their place in the room the test is in. After #134 nobody
+  # reaches a workspace without a membership in it, so a fixture without one is
+  # a person the product cannot produce.
+  def user(name: "Alice", email: nil, workspace: nil)
     email ||= "#{name.downcase}-#{SecureRandom.hex(3)}@example.test"
-    User.create!(name:, email:, provider: "test", uid: email, api_token: SecureRandom.hex(8))
+    person = User.create!(name:, email:, provider: "test", uid: email,
+                          api_token: SecureRandom.hex(8))
+    WorkspaceMembership.create!(user: person, workspace: workspace || in_a_workspace)
+    person
   end
 
   def channel(slug: nil, name: "Meetings")
@@ -43,6 +58,13 @@ class ActiveSupport::TestCase
   ensure
     ActionCable.server.singleton_class.send(:remove_method, :broadcast)
   end
+end
+
+class ActiveSupport::TestCase
+  include Build
+
+  setup { in_a_workspace }
+  teardown { Current.reset }
 end
 
 class ActionDispatch::IntegrationTest

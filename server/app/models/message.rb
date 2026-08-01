@@ -1,4 +1,7 @@
 class Message < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :channel
+
   belongs_to :channel
   belongs_to :author, polymorphic: true          # User | AgentRun
   belongs_to :parent, class_name: "Message", optional: true

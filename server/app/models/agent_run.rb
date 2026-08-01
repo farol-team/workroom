@@ -1,4 +1,7 @@
 class AgentRun < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :agent_session
+
   STATUSES = %w[queued running succeeded failed interrupted].freeze
 
   belongs_to :agent_session

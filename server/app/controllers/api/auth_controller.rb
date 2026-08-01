@@ -30,6 +30,7 @@ module Api
         u.name = params[:name].presence || email.split("@").first.titleize
       end
       user.update!(api_token: SecureRandom.hex(24)) if user.api_token.blank?
+      Workspace.admit(user)
       render json: { token: user.api_token, user: user.slice(:id, :email, :name) }
     end
   end

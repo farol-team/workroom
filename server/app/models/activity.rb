@@ -1,4 +1,6 @@
 class Activity < ApplicationRecord
+  include BelongsToWorkspace
+
   belongs_to :actor,   polymorphic: true
   belongs_to :subject, polymorphic: true, optional: true
 

@@ -9,6 +9,11 @@ if Rails.env.production? && ENV["WORKROOM_SEED_ANYWAY"].blank?
   exit
 end
 
+# The room these rooms are in. A workspace is created by a migration on a
+# database that has content; one built from the schema — a fresh install, or
+# CI — has never run that migration and has none, so the seed makes it.
+Current.workspace = Workspace.find_or_create_by!(slug: "workroom") { |w| w.name = "WorkRoom" }
+
 alice = User.find_or_create_by!(email: "alice@farol.run") { |u|
   u.name = "Alice"; u.provider = "dev"; u.uid = "alice@farol.run"; u.api_token = "dev-alice"
 }
@@ -23,7 +28,12 @@ marketing = Channel.find_or_create_by!(slug: "marketing") { |c|
   c.name = "Marketing"; c.purpose = "Positioning, campaigns, and what has been tried"
 }
 
-[ alice, bob ].each { |u| Channel.find_each { |c| c.memberships.find_or_create_by!(user: u) } }
+[ alice, bob ].each do |u|
+  # In the workspace before in its rooms: after #134 nobody reaches a channel
+  # without belonging to the room it is in.
+  WorkspaceMembership.find_or_create_by!(user: u, workspace: Current.workspace)
+  Channel.find_each { |c| c.memberships.find_or_create_by!(user: u) }
+end
 
 store = Memory::Store.current
 

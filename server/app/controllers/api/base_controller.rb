@@ -24,7 +24,12 @@ module Api
         @current_workspace = @current_user&.workspaces&.first
       end
 
-      render_error("unauthorized", :unauthorized) unless @current_user
+      return render_error("unauthorized", :unauthorized) unless @current_user
+
+      # What a record created during this request belongs to. Set here because
+      # this is where the room is named, and named here because a token that
+      # belongs to a membership names it.
+      Current.workspace = @current_workspace
     end
 
     # A filter, so a refusal halts the action. The previous shape rendered and

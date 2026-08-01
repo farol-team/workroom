@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_130001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -50,9 +50,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.jsonb "metadata", default: {}, null: false
     t.bigint "subject_id"
     t.string "subject_type"
+    t.bigint "workspace_id", null: false
     t.index ["actor_type", "actor_id"], name: "index_activities_on_actor"
     t.index ["created_at"], name: "index_activities_on_created_at"
     t.index ["subject_type", "subject_id"], name: "index_activities_on_subject"
+    t.index ["workspace_id"], name: "index_activities_on_workspace_id"
   end
 
   create_table "agent_runs", force: :cascade do |t|
@@ -68,9 +70,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "status", default: "queued", null: false
     t.bigint "trigger_message_id"
     t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
     t.index ["agent_session_id", "created_at"], name: "index_agent_runs_on_agent_session_id_and_created_at"
     t.index ["agent_session_id"], name: "index_agent_runs_on_agent_session_id"
+    t.index ["id", "workspace_id"], name: "index_agent_runs_on_id_and_workspace_id", unique: true
     t.index ["trigger_message_id"], name: "index_agent_runs_on_trigger_message_id"
+    t.index ["workspace_id"], name: "index_agent_runs_on_workspace_id"
   end
 
   create_table "agent_sessions", force: :cascade do |t|
@@ -83,9 +88,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "status", default: "idle", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.bigint "workspace_id", null: false
     t.index ["channel_id"], name: "index_agent_sessions_on_channel_id"
+    t.index ["id", "workspace_id"], name: "index_agent_sessions_on_id_and_workspace_id", unique: true
     t.index ["user_id", "channel_id"], name: "index_agent_sessions_on_user_id_and_channel_id"
     t.index ["user_id"], name: "index_agent_sessions_on_user_id"
+    t.index ["workspace_id"], name: "index_agent_sessions_on_workspace_id"
   end
 
   create_table "artifacts", force: :cascade do |t|
@@ -95,8 +103,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "kind"
     t.string "name", null: false
     t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
     t.index ["agent_run_id"], name: "index_artifacts_on_agent_run_id"
     t.index ["channel_id"], name: "index_artifacts_on_channel_id"
+    t.index ["workspace_id"], name: "index_artifacts_on_workspace_id"
   end
 
   create_table "channels", force: :cascade do |t|
@@ -107,7 +117,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "slug", null: false
     t.datetime "updated_at", null: false
     t.string "visibility", default: "open", null: false
-    t.index ["slug"], name: "index_channels_on_slug", unique: true
+    t.bigint "workspace_id", null: false
+    t.index ["id", "workspace_id"], name: "index_channels_on_id_and_workspace_id", unique: true
+    t.index ["workspace_id", "slug"], name: "index_channels_on_workspace_id_and_slug", unique: true
+    t.index ["workspace_id"], name: "index_channels_on_workspace_id"
   end
 
   create_table "memberships", force: :cascade do |t|
@@ -116,9 +129,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "role", default: "member", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.bigint "workspace_id", null: false
     t.index ["channel_id"], name: "index_memberships_on_channel_id"
     t.index ["user_id", "channel_id"], name: "index_memberships_on_user_id_and_channel_id", unique: true
     t.index ["user_id"], name: "index_memberships_on_user_id"
+    t.index ["workspace_id"], name: "index_memberships_on_workspace_id"
   end
 
   create_table "memory_entries", force: :cascade do |t|
@@ -136,11 +151,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "trust", default: "agent", null: false
     t.datetime "updated_at", null: false
     t.string "uri", null: false
+    t.bigint "workspace_id", null: false
     t.index ["author_type", "author_id"], name: "index_memory_entries_on_author"
     t.index ["channel_id", "superseded_at"], name: "index_memory_entries_on_channel_id_and_superseded_at"
     t.index ["channel_id"], name: "index_memory_entries_on_channel_id"
     t.index ["source_type", "source_id"], name: "index_memory_entries_on_source"
-    t.index ["uri"], name: "index_memory_entries_on_uri", unique: true
+    t.index ["workspace_id", "uri"], name: "index_memory_entries_on_workspace_id_and_uri", unique: true
+    t.index ["workspace_id"], name: "index_memory_entries_on_workspace_id"
   end
 
   create_table "messages", force: :cascade do |t|
@@ -151,10 +168,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.datetime "created_at", null: false
     t.bigint "parent_id"
     t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
     t.index ["author_type", "author_id"], name: "index_messages_on_author"
     t.index ["channel_id", "created_at"], name: "index_messages_on_channel_id_and_created_at"
     t.index ["channel_id"], name: "index_messages_on_channel_id"
     t.index ["parent_id"], name: "index_messages_on_parent_id"
+    t.index ["workspace_id"], name: "index_messages_on_workspace_id"
   end
 
   create_table "run_steps", force: :cascade do |t|
@@ -163,8 +182,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
     t.string "kind", null: false
     t.string "label"
     t.jsonb "payload", default: {}, null: false
+    t.bigint "workspace_id", null: false
     t.index ["agent_run_id", "created_at"], name: "index_run_steps_on_agent_run_id_and_created_at"
     t.index ["agent_run_id"], name: "index_run_steps_on_agent_run_id"
+    t.index ["workspace_id"], name: "index_run_steps_on_workspace_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -204,18 +225,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "activities", "workspaces"
   add_foreign_key "agent_runs", "agent_sessions"
+  add_foreign_key "agent_runs", "agent_sessions", column: ["agent_session_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "agent_runs", "messages", column: "trigger_message_id"
+  add_foreign_key "agent_runs", "workspaces"
   add_foreign_key "agent_sessions", "channels"
+  add_foreign_key "agent_sessions", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "agent_sessions", "users"
+  add_foreign_key "agent_sessions", "workspaces"
   add_foreign_key "artifacts", "agent_runs"
   add_foreign_key "artifacts", "channels"
+  add_foreign_key "artifacts", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
+  add_foreign_key "artifacts", "workspaces"
+  add_foreign_key "channels", "workspaces"
   add_foreign_key "memberships", "channels"
+  add_foreign_key "memberships", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "memberships", "users"
+  add_foreign_key "memberships", "workspaces"
   add_foreign_key "memory_entries", "channels"
+  add_foreign_key "memory_entries", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
+  add_foreign_key "memory_entries", "workspaces"
   add_foreign_key "messages", "channels"
+  add_foreign_key "messages", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "messages", "messages", column: "parent_id"
+  add_foreign_key "messages", "workspaces"
   add_foreign_key "run_steps", "agent_runs"
+  add_foreign_key "run_steps", "agent_runs", column: ["agent_run_id", "workspace_id"], primary_key: ["id", "workspace_id"]
+  add_foreign_key "run_steps", "workspaces"
   add_foreign_key "workspace_memberships", "users"
   add_foreign_key "workspace_memberships", "workspaces"
 end

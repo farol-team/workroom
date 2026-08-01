@@ -32,6 +32,7 @@ class SessionsController < ActionController::Base
                            name: auth.dig("info", "name").presence || user.name || email.split("@").first)
     user.api_token = SecureRandom.hex(24) if user.api_token.blank?
     user.save!
+    Current.workspace = Workspace.admit(user)
 
     Activity.log(actor: user, action: "session.signed_in", subject: user)
 

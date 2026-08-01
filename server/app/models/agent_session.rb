@@ -1,4 +1,7 @@
 class AgentSession < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :channel
+
   STATUSES = %w[idle running dead].freeze
 
 

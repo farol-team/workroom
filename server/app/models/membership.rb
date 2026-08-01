@@ -1,4 +1,7 @@
 class Membership < ApplicationRecord
+  include BelongsToWorkspace
+  workspace_through :channel
+
   ROLES = %w[member owner].freeze
 
   belongs_to :user
