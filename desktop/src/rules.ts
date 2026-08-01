@@ -1,6 +1,8 @@
 // The client's decision logic, kept out of main.ts so it can be exercised
 // without a window. Everything here decides something; nothing here draws.
 
+import { BASELINE } from "./agents/catalog";
+
 /// An agent answers only when its owner addresses it. Parsed before the message
 /// is posted, so the marker never reaches the channel body.
 export const ADDRESS = /^\s*@agent\b[:,]?\s*/i;
@@ -53,6 +55,12 @@ export const FALLBACK_AGENT: AgentDef = {
 
 /// Definitions come from a file a person edits, so they arrive malformed. Two
 /// defaults is a coin toss over who answers `@agent`; none is a dead `@agent`.
+///
+/// Whatever survives, the agents this project supports are named beside it.
+/// An agent you did not guess the name of is one you do not have: without this
+/// the two that are not bundled exist only for somebody who already knew to
+/// write them down. Naming one installs nothing — it is listed, with the state
+/// it is really in.
 export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   const seen = new Set<string>();
   const clean: AgentDef[] = [];
@@ -66,7 +74,13 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
     clean.push({ name, command, args: d.args ?? [], ...(d.default ? { default: true } : {}) });
   }
 
-  if (!clean.length) return [{ ...FALLBACK_AGENT }];
+  // Appended, never imposed: a person running opencode from a checkout keeps
+  // their own command for it, and keeps `@agent` pointing where they put it.
+  for (const profile of BASELINE) {
+    if (seen.has(profile.name)) continue;
+    seen.add(profile.name);
+    clean.push({ name: profile.name, command: profile.command, args: [ ...profile.args ] });
+  }
 
   const first = clean.findIndex((d) => d.default);
   return clean.map((d, i) => {
