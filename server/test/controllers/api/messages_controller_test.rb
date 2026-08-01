@@ -19,6 +19,28 @@ class Api::V1::MessagesControllerTest < ActionDispatch::IntegrationTest
                  "persisting without broadcasting leaves the room blind"
   end
 
+  # The journal is written by the same request that writes the message, and it
+  # says what the room was told — not a summary of it. A record that drifts from
+  # what people saw is worse than none, because it will be believed.
+  test "posting a message writes one journal entry saying what the room was told" do
+    post api_v1_channel_messages_path(@channel.slug),
+         params: { body: "hello" }.to_json,
+         headers: auth(@alice).merge("Content-Type" => "application/json")
+
+    assert_response :created
+    assert_equal 1, @channel.channel_records.count
+
+    message = @channel.messages.last
+    entry = @channel.channel_records.order(:seq).last
+
+    assert_equal 1, entry.seq
+    assert_equal "message.created", entry.kind
+    assert_equal [ "Message", message.id ], [ entry.subject_type, entry.subject_id ]
+
+    envelope = JSON.parse(RecordStore::Objects.get(entry.entry_hash))
+    assert_equal MessageSerializer.call(message).as_json, envelope["payload"]
+  end
+
   test "an unauthenticated request is refused" do
     post api_v1_channel_messages_path(@channel.slug),
          params: { body: "hello" }.to_json,
