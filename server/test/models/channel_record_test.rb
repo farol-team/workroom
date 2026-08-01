@@ -41,8 +41,21 @@ class ChannelRecordTest < ActiveSupport::TestCase
     assert_not_includes ChannelRecord.column_names, "updated_at"
   end
 
-  test "the entry belongs to the room's workspace without anybody saying so" do
-    assert_equal @channel.workspace_id, entry.workspace_id
+  # The channel is the source, not the request. Written from inside another
+  # workspace on purpose: with the two agreeing — which is the usual case —
+  # this assertion would hold even if the value came from Current.
+  #
+  # Saved as the owner because row-level security refuses a write into a room
+  # the request is not in, and being refused there would prove only that.
+  test "the entry takes its workspace from the room, not from the request" do
+    mine = Current.workspace
+    written = nil
+
+    enter(workspace(name: "Globex"))
+    as_the_owner { written = entry }
+
+    assert_equal mine.id, written.workspace_id
+    assert_equal @channel.workspace_id, written.workspace_id
   end
 
   # The journal joins the boundary like every other table holding a room's

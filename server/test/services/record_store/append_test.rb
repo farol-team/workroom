@@ -15,8 +15,12 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
   end
 
   def envelope_of(record)
-    JSON.parse(RecordStore::Objects.get(record.entry_hash))
+    JSON.parse(RecordStore::Objects.current.get(record.entry_hash))
   end
+
+  # JSON.parse keeps the document's order, so re-generating from it shows the
+  # order the bytes were written in.
+  def payload_bytes(record) = JSON.generate(envelope_of(record)["payload"])
 
   test "the first entry in a room starts the chain" do
     entry = append
@@ -55,7 +59,7 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
   test "the entry's envelope is retrievable from the object store by its own hash" do
     entry = append
 
-    bytes = RecordStore::Objects.get(entry.entry_hash)
+    bytes = RecordStore::Objects.current.get(entry.entry_hash)
 
     assert_not_nil bytes, "the envelope was never stored under the hash the row carries"
     assert_equal entry.entry_hash, Digest::SHA256.hexdigest(bytes)
@@ -90,18 +94,23 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
   end
 
   # The reason canonical form is worth the code: two writers holding the same
-  # facts in a differently ordered hash must produce the same bytes, or the
-  # hash chain records the order of somebody's ruby literal.
+  # facts in a differently ordered hash must hash the same, or the chain
+  # records the order of somebody's ruby literal.
   #
-  # JSON.parse keeps the document's order, so re-generating from it shows the
-  # order the bytes were written in.
-  test "how the payload was ordered on the way in does not change the bytes on the way out" do
+  # Two rooms, because an entry_hash also covers channel_id, seq and prev_hash
+  # — no two entries in one chain can hash alike, by design. The payload
+  # rendering is where a canonicaliser that respected insertion order would be
+  # caught, and the digest follows the bytes: the spec above pins entry_hash to
+  # the SHA-256 of exactly what was stored, so identical bytes cannot hash
+  # differently.
+  test "the same facts hash the same, however the input was ordered" do
     scrambled = append(payload: { "z" => 1, "a" => { "d" => 4, "b" => 2 } })
     ordered = append(channel: channel(name: "Marketing"),
                      payload: { "a" => { "b" => 2, "d" => 4 }, "z" => 1 })
 
-    assert_equal JSON.generate(envelope_of(scrambled)["payload"]),
-                 JSON.generate(envelope_of(ordered)["payload"])
+    assert_equal payload_bytes(scrambled), payload_bytes(ordered)
+    assert_equal Digest::SHA256.hexdigest(payload_bytes(scrambled)),
+                 Digest::SHA256.hexdigest(payload_bytes(ordered))
   end
 
   # The lock serializes writers; this index is what catches the case where it
@@ -124,8 +133,11 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
     end
   end
 
-  # The journal is part of the write, not a report about it. A message that
-  # never survived its transaction must leave nothing behind saying it did.
+  # The journal is part of the write, not a report about it: the entry must
+  # live in the caller's transaction and go down with it, rather than reaching
+  # the table by some path of its own — a second connection, a commit inside.
+  # That the message write is *in* that transaction is the controller's
+  # guarantee, and has its own spec there.
   test "a rolled back write leaves no entry behind" do
     ActiveRecord::Base.transaction(requires_new: true) do
       message = @channel.messages.create!(author: @alice, body: "never happened")
