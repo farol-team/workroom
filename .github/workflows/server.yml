@@ -1,19 +1,37 @@
 name: server
 
+# The trigger is deliberately unfiltered while the work below is not. A path
+# filter here means a pull request that touches only `desktop/**` never starts
+# this workflow, and a required check that never starts is a pull request that
+# can never merge.
 on:
   push:
     branches: [main]
-    paths: ["server/**", ".github/workflows/server.yml"]
   pull_request:
-    paths: ["server/**", ".github/workflows/server.yml"]
-
-defaults:
-  run:
-    working-directory: server
 
 jobs:
-  test:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            server:
+              - 'server/**'
+              - '.github/workflows/server.yml'
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: server
 
     services:
       postgres:
@@ -55,3 +73,19 @@ jobs:
 
       - name: Test
         run: bin/rails test
+
+  # This is the job branch protection requires, and the only one that runs
+  # unconditionally. `skipped` passes: a pull request that leaves the server
+  # alone has nothing to prove here. `failure` and `cancelled` do not.
+  server-ci:
+    needs: [changes, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        run: |
+          echo "test: ${{ needs.test.result }}"
+          case "${{ needs.test.result }}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
