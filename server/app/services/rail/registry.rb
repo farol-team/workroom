@@ -110,8 +110,14 @@ module Rail
         working_run&.update(distilled_at: Time.current)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
-        entry = store.supersede(args[:uri], reason: args[:reason])
-        entry ? [ :ok, "Superseded #{entry.uri}" ] : [ :error, "nothing current at #{args[:uri]}" ]
+        # The same question the read branch asks, for the same reason: this rail
+        # is one channel's, and an entry it cannot read is not one it may
+        # withdraw (Article P5).
+        target = args[:uri].to_s
+        return [ :error, "no capability at #{target}" ] unless target.start_with?(@channel.memory_uri)
+
+        entry = store.supersede(target, reason: args[:reason])
+        entry ? [ :ok, "Superseded #{entry.uri}" ] : [ :error, "nothing current at #{target}" ]
       end
     end
   end

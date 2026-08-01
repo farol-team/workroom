@@ -141,6 +141,21 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert stale.reload.superseded_at
   end
 
+  # Reading another room is already refused. Unwriting one was not, and it is
+  # the worse of the two: the entry is gone from the room that relied on it and
+  # nobody in that room did anything (Article P5).
+  test "an agent cannot supersede what another room knows" do
+    other = channel(name: "Marketing")
+    theirs = @store.write(other, title: "Campaign brief", detail: "Elsewhere.")
+
+    out = rpc("tools/call", { name: "execute_capability", arguments: {
+      uri: "workroom://memory/supersede",
+      args: { uri: theirs.uri, reason: "not mine to correct" } } })
+
+    assert out.dig("result", "isError"), "a uri outside this channel is no capability of this rail"
+    assert_nil theirs.reload.superseded_at, "nothing was moved (Article P5)"
+  end
+
   test "a rail url cannot reach another room" do
     other = channel(name: "Marketing")
     @store.write(other, title: "Campaign brief", detail: "Elsewhere.")

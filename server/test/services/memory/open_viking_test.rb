@@ -86,3 +86,21 @@ class Memory::OpenVikingTest < ActiveSupport::TestCase
     assert @store.send(:read, archived), "the record moved rather than vanished (Article P6)"
   end
 end
+
+# Where an entry goes when it is superseded is a fact about the layout, and a
+# layout that does not explain a uri cannot be guessed at. No live store: the
+# derivation happens before anything is read, which is the whole point — a
+# store that is asked to move an entry nowhere must not be asked at all.
+class Memory::OpenVikingArchiveTest < ActiveSupport::TestCase
+  def store
+    Memory::OpenViking.new(base_url: "http://127.0.0.1:1", api_key: "unused")
+  end
+
+  test "an entry the channels root does not explain has no archive to move to" do
+    assert_raises(Memory::OpenViking::Error) { store.supersede("viking://user/alice/note.md") }
+  end
+
+  test "a uri that is the channels root and nothing more is not an entry" do
+    assert_raises(Memory::OpenViking::Error) { store.supersede("viking://resources/channels/") }
+  end
+end
