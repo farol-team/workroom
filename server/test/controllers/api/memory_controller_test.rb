@@ -48,6 +48,30 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     assert_equal [ "Held somewhere else" ], response.parsed_body.map { |e| e["title"] }
   end
 
+  # A listing is a bare array, so a store that could not be reached hands back
+  # the same empty list as a room that has learned nothing — the failure #99
+  # cost once, arriving through a second door now that every transport error is
+  # translated (#146). The list stays a list; the fact travels beside it.
+  test "a listing from a store that cannot be reached says so" do
+    with_store(Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                      api_key: "unused")) do
+      get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
+    end
+
+    assert_response :success
+    assert_empty response.parsed_body
+    assert_equal "unavailable", response.headers["X-Memory"],
+                 "an empty list from a store that is away is not a room that knows nothing"
+  end
+
+  test "a listing from a store that answers says so too" do
+    with_store(Elsewhere.new) do
+      get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
+    end
+
+    assert_equal "ok", response.headers["X-Memory"]
+  end
+
   test "what a person records is what the room lists" do
     post api_v1_channel_memory_path(@channel.slug),
          params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,

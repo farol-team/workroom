@@ -8,6 +8,8 @@ class Api::V1::SkillsControllerTest < ActionDispatch::IntegrationTest
     @json = { "Content-Type" => "application/json" }
   end
 
+  teardown { Memory::Store.current = nil }
+
   test "a person writes how the work is done here" do
     post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Running a client call",
@@ -29,6 +31,29 @@ class Api::V1::SkillsControllerTest < ActionDispatch::IntegrationTest
 
     assert_empty response.parsed_body,
                  "a procedure is not a fact, and mixing them is how a rules file rots"
+  end
+
+  # The same door as the memory listing: skills come back as a bare array, and a
+  # store that is away produces the array a channel with no conventions does
+  # (#146).
+  test "skills from a store that cannot be reached say so" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    get api_v1_channel_skills_path(@channel.slug), headers: auth(@alice)
+
+    assert_response :success
+    assert_empty response.parsed_body
+    assert_equal "unavailable", response.headers["X-Memory"],
+                 "no skills and no store are different answers"
+  end
+
+  test "skills from a store that answers say so too" do
+    Memory::Store.current = Memory::Local.new
+
+    get api_v1_channel_skills_path(@channel.slug), headers: auth(@alice)
+
+    assert_equal "ok", response.headers["X-Memory"]
   end
 
   test "a channel's skills are its members'" do
