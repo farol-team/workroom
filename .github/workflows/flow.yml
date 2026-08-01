@@ -1,0 +1,69 @@
+# The workflow this repository is developed with, checked by the repository.
+#
+# Everything else in .claude/ applies to a worker that /flow-run started. Work
+# done in a worktree somebody made by hand — which is most of this repository —
+# never meets those guards. These checks run on the pull request, which is the
+# one place that cannot be skipped by not running a command.
+name: flow
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  kit-intact:
+    name: the workflow kit is the revision it says it is
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kit matches .claude/KIT_REVISION
+        run: bin/kit-verify
+      - name: and the check can fail
+        # A green check that cannot go red says nothing. This proves it can,
+        # every run, rather than on the day somebody thinks to try it.
+        run: bin/kit-verify --selftest
+
+  branch-has-card:
+    name: the change belongs to a card
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: the branch names the card it implements
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$BRANCH" | grep -qE '^flow/i[0-9]+-'; then
+            echo "Branch '$BRANCH' does not name a card." >&2
+            echo "The flow expects flow/i<card>-<slug>, e.g. flow/i89-kit-required." >&2
+            echo "A branch that answers to nothing is how scope discipline stops being checkable." >&2
+            exit 1
+          fi
+          printf 'card=%s\n' "$(printf '%s' "$BRANCH" | sed -E 's|^flow/i([0-9]+)-.*|\1|')" >> "$GITHUB_ENV"
+      - name: and that card exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh issue view "$card" --repo "$GITHUB_REPOSITORY" --json number,title \
+            || { echo "Card #$card does not exist in this repository." >&2; exit 1; }
+
+  pr-carries-evidence:
+    name: the pull request shows its gates
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: the body reports what was run
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # Article II — evidence before claims. Every merged pull request in
+          # this repository has carried this section by convention; nothing has
+          # ever checked that it does.
+          if ! printf '%s' "$BODY" | grep -qiE '^#{1,3}[[:space:]]*gates[[:space:]]*$'; then
+            echo "The pull request body has no '## Gates' section." >&2
+            echo "Article II asks for the evidence, not the claim: say what was run and what it said." >&2
+            exit 1
+          fi

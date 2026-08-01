@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Print a digest of the kit-owned trees under .claude/.
+
+The kit is synced with `rsync --delete`, so anything edited here is deleted by
+the next update with no diff to notice it by. The digest makes that edit visible
+before the deletion instead of after it.
+
+It lives in bin/ rather than .claude/bin/ deliberately: .claude/bin is one of the
+trees the sync wipes, and a check that the sync can delete is not a check.
+"""
+
+import hashlib
+import pathlib
+import sys
+
+# Exactly the trees `workflow-kit-sync` overwrites. Adding one here without
+# adding it there — or the reverse — is the drift this file exists to catch.
+KIT_OWNED = ("commands", "prompts", "hooks", "bin", "providers")
+
+# The kit ships this as a per-project file and excludes it from the sync, so it
+# is ours to edit and must not count as tampering.
+NOT_KIT = {"prompts/ui-design.md"}
+
+
+def digest(root: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    for tree in KIT_OWNED:
+        base = root / ".claude" / tree
+        if not base.is_dir():
+            continue
+        # Sorted, so the digest is a property of the content and not of the
+        # order a filesystem happens to hand back.
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root / ".claude").as_posix()
+            if rel in NOT_KIT:
+                continue
+            h.update(rel.encode())
+            h.update(b"\0")
+            # Whether a hook is executable changes whether it runs at all.
+            h.update(b"x" if path.stat().st_mode & 0o111 else b"-")
+            h.update(path.read_bytes())
+            h.update(b"\0")
+    return h.hexdigest()
+
+
+if __name__ == "__main__":
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    print(digest(root))
