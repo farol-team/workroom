@@ -72,7 +72,13 @@ export class Api {
 
   /// What the room knows, ready to prepend to an agent turn.
   context(slug: string) {
-    return this.call<{ context: string | null; memory_uri: string }>(`/channels/${slug}/context`);
+    return this.call<{
+      context: string | null; memory_uri: string; boundary: string;
+      /// Where this room's context store is, and the key for it. Null until the
+      /// workspace has an account of its own — and then the agent reaches no
+      /// store rather than somebody else's (#115).
+      store: { url: string; key: string } | null;
+    }>(`/channels/${slug}/context`);
   }
 
   /// How work is done in this channel — procedure, not what the room learned.

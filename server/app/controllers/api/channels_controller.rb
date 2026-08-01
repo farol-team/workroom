@@ -45,16 +45,32 @@ module Api
       )
     end
 
-    # What the room knows, ready to be injected into an agent session.
+    # What the room knows, ready to be injected into an agent session — and how
+    # the agent reaches the rest of it for itself (#114).
     def context
       render json: {
         channel: channel!.slug,
         memory_uri: channel!.memory_uri,
-        context: Memory::Store.current.context_for(channel!)
+        context: Memory::Store.current.context_for(channel!),
+        # Stated separately from `context`, which is nil for a room that has
+        # learned nothing — and a new channel is exactly where an agent has
+        # least to go on and most room to wander (#114).
+        boundary: Memory::Boundary.for(channel!),
+        store: store_for(current_workspace)
       }
     end
 
     private
+
+    # Where this room's context lives and the key that reaches it. Null while a
+    # workspace has no account of its own, which is every workspace until one is
+    # provisioned — and then the agent gets no store, rather than somebody
+    # else's.
+    def store_for(room)
+      return nil if room&.openviking_url.blank? || room.openviking_api_key.blank?
+
+      { url: "#{room.openviking_url.chomp("/")}/mcp", key: room.openviking_api_key }
+    end
 
     # No memory count here. It was read straight off `memory_entries`, which is
     # empty for every channel once a context database is configured — so the

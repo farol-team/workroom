@@ -152,12 +152,28 @@ export function driftNotice(client: string, server?: string): string | null {
 /// format we got wrong.
 export interface Rail { url: string; token: string }
 
-export function mcpServersFor(rail?: Rail): unknown[] {
-  if (!rail) return [];
-  return [ {
-    name: "workroom", type: "http", url: rail.url,
-    headers: [ { name: "Authorization", value: `Bearer ${rail.token}` } ],
-  } ];
+/// The context store, reached directly. Permitted by the amendment to P1 dated
+/// 2026-08-01: its own surface for agents is MCP, so this speaks the seam's
+/// protocol rather than around it. What it does not give is a channel boundary
+/// — the store isolates accounts and knows nothing of channels, which is why
+/// the boundary is stated in the prompt and called a convention there.
+export interface ContextStore { url: string; key: string }
+
+export function mcpServersFor(rail?: Rail, store?: ContextStore | null): unknown[] {
+  const servers: unknown[] = [];
+  if (rail) {
+    servers.push({
+      name: "workroom", type: "http", url: rail.url,
+      headers: [ { name: "Authorization", value: `Bearer ${rail.token}` } ],
+    });
+  }
+  if (store) {
+    servers.push({
+      name: "context", type: "http", url: store.url,
+      headers: [ { name: "Authorization", value: `Bearer ${store.key}` } ],
+    });
+  }
+  return servers;
 }
 
 /// The agent asking to do something, and waiting.

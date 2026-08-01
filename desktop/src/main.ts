@@ -493,11 +493,15 @@ async function send(text: string) {
   // What the room knows, plus what was just said in it — both belong to the
   // channel, so a colleague's message is context even though only the owner
   // may give the instruction.
-  const { context } = await api.context(current.slug);
+  // The boundary is stated even when the room has learned nothing — `context`
+  // is null there, and a new channel is where an agent has least to go on and
+  // most room to wander (#114).
+  const { context, boundary, store } = await api.context(current.slug);
   const history = recentHistory();
   const workspace = boundFolder(current.slug, bindings)
     ?? await agents.workspace(me, name, current.slug);
-  const sessionId = await agents.sessionFor(name, current.slug, workspace, api.rail(current.slug));
+  const sessionId = await agents.sessionFor(name, current.slug, workspace,
+                                            api.rail(current.slug), store);
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
   renderOptions();
@@ -522,7 +526,8 @@ async function send(text: string) {
   });
 
   try {
-    await agents.prompt(name, sessionId, withClosing(body), context, history);
+    await agents.prompt(name, sessionId, withClosing(body),
+                        [ boundary, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
     offerTranscript(run.id, name, sessionId);

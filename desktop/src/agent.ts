@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -108,12 +108,13 @@ export class Agents {
   /// are the same thing, and two agents in one room must not share a session id.
   /// The rail is mounted per channel too, so an agent cannot reach another room
   /// even if it tries.
-  async sessionFor(name: string, slug: string, cwd: string, rail?: RailConfig): Promise<string> {
+  async sessionFor(name: string, slug: string, cwd: string, rail?: RailConfig,
+                   store?: ContextStore | null): Promise<string> {
     const key = sessionKey(name, slug);
     const existing = this.sessions.get(key);
     if (existing) return existing;
 
-    const mcpServers = mcpServersFor(rail);
+    const mcpServers = mcpServersFor(rail, store);
 
     // A session this person had before the app was closed. Picking it up is
     // attempted, never required: an agent that has forgotten it, or one that
