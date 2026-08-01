@@ -980,6 +980,7 @@ mod against_a_real_agent {
 mod when_the_agent_dies {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::process::ChildStdout;
 
     /// A child that holds a pipe open and answers nothing of its own accord.
     /// `cat` echoes what it is given, which is how a test says a line "came
@@ -994,13 +995,17 @@ mod when_the_agent_dies {
     }
 
     /// Everything `launch` builds around a child except the handshake and the
-    /// reader task, with deadlines a test can wait out. The production ones are
-    /// ten idle minutes and a two-hour wall clock — a test that waited those
-    /// out would be the failure it is measuring.
-    async fn agent_with(idle: Duration, hard: Duration) -> Agent {
+    /// reader task, with deadlines a test can set. The production ones are ten
+    /// idle minutes and a two-hour wall clock — a test that waited those out
+    /// would be the failure it is measuring.
+    ///
+    /// The child's stdout comes back rather than being dropped: a test that
+    /// wants the reader in the picture is the one that starts it.
+    async fn agent_with(idle: Duration, hard: Duration) -> (Agent, ChildStdout) {
         let mut child = child_process();
         let stdin = child.stdin.take().unwrap();
-        Agent {
+        let stdout = child.stdout.take().unwrap();
+        let agent = Agent {
             stdin: Mutex::new(stdin),
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: Mutex::new(0),
@@ -1012,13 +1017,104 @@ mod when_the_agent_dies {
             idle_limit: idle,
             hard_limit: hard,
             tick: Duration::from_millis(5),
+        };
+        (agent, stdout)
+    }
+
+    /// What the reader emitted, and what the map of people waiting looked like
+    /// at that moment: `Some(true)` they had already been let go, `Some(false)`
+    /// they were still filed, `None` the map was locked and the order cannot be
+    /// read from here.
+    type Emitted = Arc<std::sync::Mutex<Vec<(String, Value, Option<bool>)>>>;
+
+    fn recorder(events: Emitted, pending: Pending) -> impl Fn(&str, Value) + Send + 'static {
+        move |event: &str, payload: Value| {
+            let drained = pending.try_lock().map(|p| p.is_empty()).ok();
+            events
+                .lock()
+                .unwrap()
+                .push((event.to_string(), payload, drained))
         }
     }
 
-    type Emitted = Arc<std::sync::Mutex<Vec<(String, Value)>>>;
+    /// Waits for something to become true rather than for a duration somebody
+    /// guessed, and gives up rather than hanging the suite.
+    async fn until(what: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if ready() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("{what}");
+    }
 
     #[tokio::test]
-    async fn a_turn_waiting_on_an_agent_that_died_ends_at_once() {
+    async fn a_turn_waiting_on_an_agent_that_died_is_told_the_agent_closed() {
+        // Both deadlines an hour out, so whatever ends this wait it is not the
+        // clock. That is the whole defect: today a crash is indistinguishable
+        // from a long think until ten idle minutes have gone by, and the room
+        // says "working" for every one of them.
+        let hour = Duration::from_secs(3600);
+        let (agent, stdout) = agent_with(hour, hour).await;
+        let agent = Arc::new(agent);
+
+        let events: Emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+        tokio::spawn(read_stdout(
+            stdout,
+            agent.pending.clone(),
+            agent.activity.clone(),
+            agent.diagnostics.clone(),
+            "claude".to_string(),
+            agent.alive.clone(),
+            recorder(events.clone(), agent.pending.clone()),
+        ));
+
+        let started = Instant::now();
+        let asking = tokio::spawn({
+            let agent = agent.clone();
+            async move {
+                agent
+                    .request("session/prompt", json!({ "sessionId": "s1" }))
+                    .await
+            }
+        });
+
+        // `cat` echoes, so our own frame coming back is the proof that the
+        // request was written and is now in flight. Killing before that would
+        // measure a broken pipe instead of a turn already waiting.
+        until(
+            "the request must reach the agent before it is killed",
+            || !events.lock().unwrap().is_empty(),
+        )
+        .await;
+        agent.child.lock().await.kill().await.unwrap();
+
+        let error = tokio::time::timeout(Duration::from_secs(5), asking)
+            .await
+            .expect("the wait ends when the process does, not an hour later")
+            .unwrap()
+            .expect_err("a turn whose agent died did not succeed");
+
+        assert_eq!(
+            error, "agent closed",
+            "the turn is told what happened, in the words the interface already shows"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "and told at once: the hour this agent was given cannot be what ended it, and \
+             neither can the ten minutes compiled in ({:?})",
+            started.elapsed()
+        );
+        assert!(
+            agent.pending.lock().await.is_empty(),
+            "a turn that ended is unfiled, whichever way it ended"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_reader_lets_everyone_go_before_it_says_the_agent_closed() {
         let mut child = child_process();
         let stdout = child.stdout.take().unwrap();
 
@@ -1028,8 +1124,6 @@ mod when_the_agent_dies {
 
         let alive = Arc::new(AtomicBool::new(true));
         let events: Emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let emitted = events.clone();
-
         let reader = tokio::spawn(read_stdout(
             stdout,
             pending.clone(),
@@ -1039,9 +1133,7 @@ mod when_the_agent_dies {
             ]))),
             "claude".to_string(),
             alive.clone(),
-            move |event: &str, payload: Value| {
-                emitted.lock().unwrap().push((event.to_string(), payload))
-            },
+            recorder(events.clone(), pending.clone()),
         ));
 
         // The agent dies mid-turn — killed, crashed, out of memory. Nothing
@@ -1051,7 +1143,7 @@ mod when_the_agent_dies {
         let ended = tokio::time::timeout(Duration::from_secs(5), rx).await;
         assert!(
             matches!(ended, Ok(Err(_))),
-            "a turn waiting on an agent that is gone is ended now, not after ten idle minutes"
+            "the reader drops whoever is waiting when the pipe ends"
         );
 
         reader.await.unwrap();
@@ -1072,6 +1164,12 @@ mod when_the_agent_dies {
             events[0].1["diagnostics"][0], "fatal: out of memory",
             "the last thing it said is the only thing that explains why it is gone"
         );
+        assert_ne!(
+            events[0].2,
+            Some(false),
+            "the turns were let go before the interface was told the agent stopped — the other \
+             order shows a room a stopped agent with a turn still spinning in it"
+        );
     }
 
     #[tokio::test]
@@ -1088,7 +1186,6 @@ mod when_the_agent_dies {
         let activity: Activity = Arc::new(Mutex::new(HashMap::new()));
 
         let events: Emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let emitted = events.clone();
         tokio::spawn(read_stdout(
             stdout,
             pending.clone(),
@@ -1096,21 +1193,18 @@ mod when_the_agent_dies {
             Arc::new(Mutex::new(VecDeque::new())),
             "claude".to_string(),
             Arc::new(AtomicBool::new(true)),
-            move |event: &str, payload: Value| {
-                emitted.lock().unwrap().push((event.to_string(), payload))
-            },
+            recorder(events.clone(), pending.clone()),
         ));
 
         // `cat` echoes, so what goes in is what the agent said. The
         // notification goes first: one loop, in order, so by the time the reply
         // arrives the notification has already been dealt with.
         let said = format!(
-            "{}{}",
+            "{}{}\n",
             notify_frame("session/update", json!({ "sessionId": "s1" })),
             json!({ "jsonrpc": "2.0", "id": 1, "result": { "ok": true } })
         );
         agent_says.write_all(said.as_bytes()).await.unwrap();
-        agent_says.write_all(b"\n").await.unwrap();
         agent_says.flush().await.unwrap();
 
         let reply = tokio::time::timeout(Duration::from_secs(5), rx)
@@ -1132,7 +1226,7 @@ mod when_the_agent_dies {
         let events = events.lock().unwrap();
         assert_eq!(events[0].0, "acp://notify");
         assert!(
-            !events.iter().any(|(event, _)| event == "acp://closed"),
+            !events.iter().any(|(event, _, _)| event == "acp://closed"),
             "an agent that is still reading has not closed"
         );
     }
@@ -1141,11 +1235,12 @@ mod when_the_agent_dies {
     async fn an_agent_whose_reader_has_exited_is_not_listed_as_running() {
         let minute = Duration::from_secs(60);
         let running: AgentState = Registry::default();
-        let live = Arc::new(agent_with(minute, minute).await);
-        let dead = Arc::new(agent_with(minute, minute).await);
+        let (live, _) = agent_with(minute, minute).await;
+        let (dead, _) = agent_with(minute, minute).await;
+        let dead = Arc::new(dead);
         dead.alive.store(false, Ordering::SeqCst);
 
-        running.insert("claude", live).await;
+        running.insert("claude", Arc::new(live)).await;
         running.insert("opencode", dead).await;
 
         assert_eq!(
@@ -1163,9 +1258,37 @@ mod when_the_agent_dies {
         );
     }
 
+    #[test]
+    fn the_names_a_person_is_shown_are_the_pruned_ones() {
+        // `agent_list` takes a Tauri `State`, which exists only inside a
+        // running application, so what is pinned from here is the wiring rather
+        // than the call. A registry that knows how to forget the dead and a
+        // command that still asks for every name it holds leaves the panel
+        // offering a process that is gone, with every other spec here green.
+        let lib = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .unwrap();
+        let from = lib
+            .find("async fn agent_list")
+            .expect("the command the agents panel calls");
+        let body = &lib[from..];
+        let body = &body[..body.find("\n}").expect("a command has a body")];
+
+        assert!(
+            body.contains("names_still_running"),
+            "agent_list must ask for the agents still running: {body}"
+        );
+        assert!(
+            !body.contains(".names()"),
+            "and not for every name the registry still holds: {body}"
+        );
+    }
+
     #[tokio::test]
     async fn a_request_that_cannot_be_written_forgets_it_was_ever_filed() {
-        let agent = agent_with(Duration::from_secs(60), Duration::from_secs(60)).await;
+        let minute = Duration::from_secs(60);
+        let (agent, _stdout) = agent_with(minute, minute).await;
         // The process is gone before the frame is written: the pipe has nobody
         // on the other end of it, and the write is where that is found out.
         agent.child.lock().await.kill().await.unwrap();
@@ -1188,7 +1311,8 @@ mod when_the_agent_dies {
 
     #[tokio::test]
     async fn a_turn_that_hears_nothing_is_given_up_on_at_its_idle_deadline() {
-        let agent = agent_with(Duration::from_millis(50), Duration::from_secs(3600)).await;
+        let idle = Duration::from_millis(50);
+        let (agent, _stdout) = agent_with(idle, Duration::from_secs(3600)).await;
         let started = Instant::now();
 
         let error = agent
@@ -1202,9 +1326,9 @@ mod when_the_agent_dies {
             "the person is told what is still theirs to do: {error}"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the deadline this agent was given is the one that fired, not the ten minutes \
-             compiled in: {:?}",
+            (idle..Duration::from_secs(1)).contains(&started.elapsed()),
+            "the deadline this agent was given is the one that fired — not earlier, and not the \
+             ten minutes and five-second tick compiled in ({:?})",
             started.elapsed()
         );
         assert!(
@@ -1217,8 +1341,9 @@ mod when_the_agent_dies {
     async fn a_turn_with_room_on_its_idle_clock_still_meets_the_wall_clock() {
         // An agent can be talkative and stuck at the same time, so the idle
         // limit is given all the room in the world here and the wall clock
-        // none: whichever one fires, it is not the idle one.
-        let agent = agent_with(Duration::from_secs(3600), Duration::from_millis(50)).await;
+        // none: whichever fires, it is not the idle one.
+        let hard = Duration::from_millis(50);
+        let (agent, _stdout) = agent_with(Duration::from_secs(3600), hard).await;
         let started = Instant::now();
 
         let error = agent
@@ -1228,8 +1353,8 @@ mod when_the_agent_dies {
 
         assert!(error.contains("has been at it for"), "{error}");
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the wall clock this agent was given is the one that fired: {:?}",
+            (hard..Duration::from_secs(1)).contains(&started.elapsed()),
+            "the wall clock this agent was given is the one that fired ({:?})",
             started.elapsed()
         );
     }
