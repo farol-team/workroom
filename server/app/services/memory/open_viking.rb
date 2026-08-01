@@ -139,10 +139,10 @@ module Memory
     # Nothing is destroyed: the entry moves out of what the room currently knows
     # and into what it used to (Article P6).
     def supersede(uri, reason: nil)
+      archive = archive_uri(uri)
       entry = read(uri)
       return nil unless entry
 
-      archive = uri.sub("#{prefix}resources/channels/", "#{prefix}resources/superseded/")
       mkdir(archive.rpartition("/").first + "/")
       post("/api/v1/fs/mv", from_uri: uri, to_uri: archive)
       entry
@@ -151,6 +151,17 @@ module Memory
     private
 
     def prefix = "viking://"
+
+    # Where an entry goes when it stops being current: the same path, under the
+    # other scope. Substituting into the uri would have returned it unchanged
+    # the day the layout moved, and `fs/mv` from an entry to itself succeeds —
+    # so a uri this layout cannot explain is an error rather than a guess.
+    def archive_uri(uri)
+      rest = uri.to_s.delete_prefix("#{prefix}resources/channels/")
+      raise Error, "no archive path for #{uri}" if rest == uri.to_s || !rest.include?("/")
+
+      "#{prefix}resources/superseded/#{rest}"
+    end
 
     def root_of(channel)
       # The channel's uri is ours; the scope segment is OpenViking's. Only four
