@@ -19,6 +19,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Until somebody configures where this deploys to, it deploys nowhere. The
+    # alternative is a red run on every merge for as long as that takes.
+    if: vars.WORKROOM_REGISTRY_ID != ''
+
     # Add required reviewers to this environment to turn every deploy into
     # something a person approves first. Without them it ships on merge.
     environment:
