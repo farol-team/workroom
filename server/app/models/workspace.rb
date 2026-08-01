@@ -30,12 +30,42 @@ class Workspace < ApplicationRecord
   # per transaction — see the migration. Nothing set means nothing visible, so a
   # caller that forgets gets an empty world rather than everybody's.
   def self.entered(workspace)
+    was = Current.workspace
     ActiveRecord::Base.transaction do
       Workspace.confine(ActiveRecord::Base.connection, workspace)
       Current.workspace = workspace
       yield
     end
+  ensure
+    # Put back what was here. `SET LOCAL` in a subtransaction outlives it once
+    # that subtransaction commits, so without this a request that entered
+    # another room would keep looking at it for the rest of the action.
+    Workspace.confine(ActiveRecord::Base.connection, was)
+    Current.workspace = was
   end
+
+  # What a new room opens with. `ChannelTemplate` is offered rather than
+  # created, on the grounds that a room nobody asked for is a room nobody
+  # opens — and that is right for a legal channel and wrong for a workspace
+  # with none at all, which is a screen with nothing on it to press.
+  FIRST_ROOMS = {
+    "general" => { name: "General", purpose: "Everything that does not have a room of its own yet" },
+    "random" => { name: "Random", purpose: "The things worth saying that are not work" },
+    "meetings" => { name: "Meetings", purpose: "Conversations, and what came out of them" }
+  }.freeze
+
+  def open_first_rooms(owner:)
+    entered do
+      FIRST_ROOMS.map do |slug, attrs|
+        room = Channel.create!(slug:, **attrs)
+        room.memberships.create!(user: owner, role: "owner")
+        room
+      end
+    end
+  end
+
+  # Entered as itself, so a caller does not have to name it twice.
+  def entered(&) = self.class.entered(self, &)
 
   # Where somebody signing in ends up. With one room that is the room; with
   # several it is the wrong question, and the answer becomes an invitation —
