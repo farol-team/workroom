@@ -239,17 +239,20 @@ describe("agent definitions", () => {
       { name: "", command: "x", args: [] },
       { name: "y", command: "  ", args: [] },
       { name: "opencode", command: "opencode", args: ["acp"] },
-    ])).toEqual([{ name: "opencode", command: "opencode", args: ["acp"], default: true }]);
+    ]).map((d) => d.name)).toEqual([ "opencode", "claude", "codex" ]);
   });
 
   test("a name that cannot be typed as an address is not an agent", () => {
     // The name is the summons. One that @ cannot reach configures an agent
     // nobody can call, and makes the session key ambiguous besides.
-    expect(normalizeAgents([
+    const out = normalizeAgents([
       { name: "my agent", command: "x", args: [] },
       { name: "-lead", command: "x", args: [] },
       { name: "gpt-5.1_local", command: "x", args: [] },
-    ])).toEqual([{ name: "gpt-5.1_local", command: "x", args: [], default: true }]);
+    ]);
+    expect(out[0]).toEqual({ name: "gpt-5.1_local", command: "x", args: [], default: true });
+    expect(out.map((d) => d.name)).not.toContain("my agent");
+    expect(out.map((d) => d.name)).not.toContain("-lead");
   });
 
   test("one name, one agent — the first definition wins", () => {
@@ -257,7 +260,7 @@ describe("agent definitions", () => {
       { name: "claude", command: "first", args: [] },
       { name: "Claude", command: "second", args: [] },
     ]);
-    expect(out).toHaveLength(1);
+    expect(out.filter((d) => d.name.toLowerCase() === "claude")).toHaveLength(1);
     expect(out[0].command).toBe("first");
   });
 
@@ -274,12 +277,38 @@ describe("agent definitions", () => {
     expect(none[0].default).toBe(true);
   });
 
-  test("nothing configured is not an error — it is the agent that ships here", () => {
-    // Not one the person is assumed to have installed, and not one fetched from
-    // the registry when they open a channel (#120).
+  test("nothing configured is the agent that ships, and the two it can offer", () => {
+    // The shipped one is default and certainly there (#120). The other two are
+    // named so somebody can see they exist and what state they are in — naming
+    // one installs nothing.
     expect(normalizeAgents([])).toEqual([
       { name: "claude", command: "claude-agent-acp", args: [], default: true },
+      { name: "codex", command: "codex-acp", args: [] },
+      { name: "opencode", command: "opencode", args: [ "acp" ] },
     ]);
+  });
+
+  test("a person's own definition of a seeded name is theirs, not ours", () => {
+    // Somebody running opencode from a checkout must not have it replaced by
+    // the catalog's idea of where opencode is.
+    const out = normalizeAgents([{ name: "opencode", command: "/opt/opencode", args: [] }]);
+
+    expect(out.filter((d) => d.name === "opencode")).toEqual([
+      { name: "opencode", command: "/opt/opencode", args: [], default: true },
+    ]);
+  });
+
+  test("an agent nobody pinned is kept, and answers @agent when it is first", () => {
+    const out = normalizeAgents([{ name: "kimi", command: "kimi-acp", args: [] }]);
+
+    expect(out.map((d) => d.name)).toEqual([ "kimi", "claude", "codex", "opencode" ]);
+    expect(defaultAgent(out)).toBe("kimi");
+  });
+
+  test("seeding does not hand out a second default", () => {
+    expect(normalizeAgents([]).filter((d) => d.default)).toHaveLength(1);
+    expect(normalizeAgents([{ name: "kimi", command: "k", args: [] }])
+      .filter((d) => d.default)).toHaveLength(1);
   });
 });
 

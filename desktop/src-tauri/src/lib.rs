@@ -510,6 +510,90 @@ pub fn run() {
 }
 
 #[cfg(test)]
+mod resolution {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-resolve-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn binary(dir: &PathBuf, command: &str) -> PathBuf {
+        let path = dir.join(command);
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        path
+    }
+
+    #[test]
+    fn the_adapter_in_the_bundle_wins_over_one_somebody_installed() {
+        // It ships with this application and is the version this client was
+        // tested against. An install into our own prefix is a fallback, not a
+        // replacement for what came in the bundle.
+        let bundle = temp("bundle");
+        let prefix = temp("prefix");
+        let shipped = binary(&bundle, "claude-agent-acp");
+        binary(&prefix, "claude-agent-acp");
+
+        assert_eq!(
+            found(
+                &[
+                    bundle.join("claude-agent-acp"),
+                    prefix.join("claude-agent-acp")
+                ]
+            ),
+            Some(shipped.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn an_agent_in_our_own_prefix_is_found_though_it_is_not_on_path() {
+        // What `agent_install` fetches goes into a directory this application
+        // owns and nothing else knows about. Not looking there means an agent
+        // somebody just installed still reads as missing.
+        let bundle = temp("empty-bundle");
+        let prefix = temp("own-prefix");
+        let installed = binary(&prefix, "opencode");
+
+        assert_eq!(
+            found(&[bundle.join("opencode"), prefix.join("opencode")]),
+            Some(installed.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn a_command_nobody_has_is_left_as_it_was_typed() {
+        // A person naming their own agent means the one on their PATH, and this
+        // must not take that away from them.
+        let nowhere = temp("nowhere");
+
+        assert_eq!(found(&[nowhere.join("kimi-acp")]), None);
+        assert_eq!(located("kimi-acp", &[nowhere.join("kimi-acp")]), "kimi-acp");
+    }
+
+    #[test]
+    fn a_failed_install_is_reported_with_the_end_of_what_it_said() {
+        // npm's output runs to hundreds of lines and the reason is at the end
+        // of it. Keeping the start reports the banner and drops the cause.
+        let noise = "x".repeat(TAIL * 2);
+        let said = format!("{noise}\nE404 Not Found - GET https://registry.npmjs.org/nope\n");
+
+        let end = tail(said.as_bytes());
+        assert!(end.ends_with("E404 Not Found - GET https://registry.npmjs.org/nope"));
+        assert!(end.chars().count() <= TAIL);
+    }
+
+    #[test]
+    fn what_an_install_said_is_not_cut_through_a_character() {
+        let said = "é".repeat(TAIL * 2);
+
+        assert!(tail(said.as_bytes()).ends_with('é'));
+    }
+}
+
+#[cfg(test)]
 mod capabilities {
     /// What this application is allowed to do, and why each one is here.
     ///
