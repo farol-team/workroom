@@ -13,14 +13,14 @@
 │  WorkRoom server (Rails)     │   │  Local agent        │
 │  identity · channels         │   │  runs on the user's │
 │  messages · artifacts        │   │  own machine        │
-│  permissions                 │   └──────────┬──────────┘
-│  capability rail ◄───────────┼──── MCP ─────┘
-│                              │
-└──────────────┬───────────────┘
-               │ HTTP
-               ▼
-┌──────────────────────────────┐
-│  Context database            │
+│  permissions                 │   └────┬───────────┬────┘
+│  capability rail ◄───────────┼── MCP ─┘           │
+│                              │                    │
+└──────────────┬───────────────┘                    │ MCP
+               │ HTTP                               │
+               ▼                                    │
+┌──────────────────────────────┐                    │
+│  Context database            │◄───────────────────┘
 │  memory · skills · artifacts │
 │  addressed by URI            │
 └──────────────────────────────┘
@@ -33,13 +33,22 @@ Three protocols hold the system together. Nothing crosses a seam except through 
 | Protocol | Between | Carries |
 |---|---|---|
 | **ACP** | desktop ↔ local agent | control — who does the work |
-| **MCP** | agent ↔ capability rail | capability — what can be done |
+| **MCP** | agent ↔ capability rail, agent ↔ context database | capability — what can be done |
 | **HTTP / WebSocket** | client ↔ server | record — what happened |
 
 This is the one architectural rule worth defending strictly. As long as the boundaries speak
-only these three, any layer can be replaced without touching the others. The first direct
-call that bypasses a seam — the agent reaching the context database over its own HTTP client,
-say — is the moment the system stops being replaceable.
+only these three, any layer can be replaced without touching the others.
+
+The agent reaching the context database is the one crossing that was argued about and then
+allowed, on 2026-08-01, for as long as there is one workspace. It speaks MCP, so the seam's
+vocabulary survives; what does not is replaceability, because that store's tool names are now
+part of what agents are written against. Two things follow, and both are load-bearing:
+
+- the store isolates **accounts**, not channels, so an agent's key reaches every channel of
+  its workspace. `docs/spikes/openviking-isolation.md` is the measurement.
+- an agent is **asked** in its prompt to stay inside its channel's subtree. That is a
+  convention. Nothing enforces it, and nothing in the server may be written as though
+  something did.
 
 ## Flow of a turn
 
