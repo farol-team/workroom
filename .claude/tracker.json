@@ -55,7 +55,7 @@
   "card_prefix": "WR",
   "branch_prefix": "flow/",
   "default_target": "server",
-  "repo_label_prefix": "repo:",
+  "repo_label_prefix": "target:",
   "targets": {
     "server": {
       "repo_root": "server",
