@@ -27,6 +27,7 @@ module Api
       # and what an external store would hand back.
       def serialize(e)
         e.slice(:uri, :title, :abstract, :overview, :detail, :trust, :created_at)
+         .merge(author: Memory::Provenance.of(e))
       end
     end
   end

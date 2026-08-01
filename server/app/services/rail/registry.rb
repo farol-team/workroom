@@ -106,8 +106,13 @@ module Rail
       when "workroom://memory/remember"
         return [ :error, "title and detail are required" ] if args[:title].blank? || args[:detail].blank?
 
-        entry = store.write(@channel, title: args[:title], detail: args[:detail], trust: "agent")
-        working_run&.update(distilled_at: Time.current)
+        # The token belongs to a person and the turn belongs to their agent, so
+        # the entry can say both. Without them it says "agent" and stops there,
+        # which is the entry Article P4 calls a defect.
+        run = working_run
+        entry = store.write(@channel, title: args[:title], detail: args[:detail],
+                            trust: "agent", author: @user, source: run)
+        run&.update(distilled_at: Time.current)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
