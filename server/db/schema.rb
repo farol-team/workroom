@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_31_160001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_120001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -181,6 +181,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_160001) do
     t.index ["provider", "uid"], name: "index_users_on_provider_and_uid", unique: true
   end
 
+  create_table "workspace_memberships", force: :cascade do |t|
+    t.string "api_token"
+    t.datetime "created_at", null: false
+    t.string "role", default: "member", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["api_token"], name: "index_workspace_memberships_on_api_token", unique: true
+    t.index ["user_id", "workspace_id"], name: "index_workspace_memberships_on_user_id_and_workspace_id", unique: true
+    t.index ["user_id"], name: "index_workspace_memberships_on_user_id"
+    t.index ["workspace_id"], name: "index_workspace_memberships_on_workspace_id"
+  end
+
+  create_table "workspaces", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.datetime "updated_at", null: false
+    t.index ["slug"], name: "index_workspaces_on_slug", unique: true
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "agent_runs", "agent_sessions"
@@ -195,4 +216,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_160001) do
   add_foreign_key "messages", "channels"
   add_foreign_key "messages", "messages", column: "parent_id"
   add_foreign_key "run_steps", "agent_runs"
+  add_foreign_key "workspace_memberships", "users"
+  add_foreign_key "workspace_memberships", "workspaces"
 end
