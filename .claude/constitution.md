@@ -46,11 +46,18 @@ services, the clock.
 
 ### Article P1 — The three seams are the only crossings
 *(Rationale: docs/ARCHITECTURE.md — the moment a layer bypasses a seam the stack
-stops being replaceable, which is the entire reason it is layered.)*
+stops being replaceable, which is the entire reason it is layered. Amended
+2026-08-01: the context store's own surface for agents is MCP, so an agent
+reaching it speaks the seam's protocol rather than around it. What is given up
+is replaceability — the store's tool vocabulary becomes part of the agent's
+contract — and that is accepted while WorkRoom serves one workspace and a team
+that trusts each other. docs/spikes/openviking-isolation.md is the measurement
+this rests on.)*
 
 Control crosses as **ACP**, capability as **MCP**, record as **HTTP/WebSocket**.
-No component reaches past a boundary by another route — no direct HTTP client
-from the agent to the context store, no SQL from the desktop.
+No component reaches past a boundary by another route — no SQL from the desktop,
+and nothing from the agent to the context store except that store's MCP
+endpoint.
 
 ### Article P2 — Agent inference is paid for by the person
 *(Rationale: a central credential for agent work would recreate the shared bill
@@ -115,11 +122,21 @@ the distinction — never flatten the two into one undifferentiated list.
 ### Article P5 — The channel is the scope
 *(Rationale: one concept serves as memory scope, permission boundary, retrieval
 scope, and unit of conversation; splitting them means reconciling four models of
-who can see what.)*
+who can see what. Amended 2026-08-01: an agent reaching the context store
+directly retrieves across every channel of the workspace, because that store
+isolates accounts and knows nothing of channels — measured, not assumed. For
+people the channel is still the scope; for agents it is not. This holds only
+while one workspace and one trusted team make "every channel" and "the channels
+we are all in" the same set, and it is the first thing to revisit when they stop
+being the same.)*
 
 Memory, permissions, retrieval, and agent sessions are scoped by channel.
 Cross-channel reads and any write to `viking://org/` are separate, explicit
 operations — never a side effect of working in a channel.
+
+For an agent holding a context-store key this article describes an intention the
+store cannot enforce. Nothing in the server may rely on it to keep one channel
+from another.
 
 ### Article P6 — Append-only tables are never updated
 *(Rationale: `activities` and `run_steps` are the audit surface; a mutable audit
