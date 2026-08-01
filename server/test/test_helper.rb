@@ -2,6 +2,11 @@ ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
 
+# However this database was built — migrated, or loaded from a schema that
+# cannot describe a policy — the boundary is applied before anything is measured.
+# A suite that passes against a database with no boundary is worse than no suite.
+Workspace::Boundary.apply(ActiveRecord::Base.connection)
+
 module Build
   module_function
 
@@ -12,7 +17,28 @@ module Build
     Workspace.create!(slug: slug || "ws-#{SecureRandom.hex(3)}", name:)
   end
 
-  def in_a_workspace = Current.workspace ||= workspace
+  # Tests already run inside a transaction, which is exactly what SET LOCAL
+  # needs — so entering a room in setup holds for the whole test.
+  def in_a_workspace
+    return Current.workspace if Current.workspace
+
+    room = workspace
+    enter(room)
+    room
+  end
+
+  def enter(room)
+    Workspace.confine(ActiveRecord::Base.connection, room)
+    Current.workspace = room
+  end
+
+  # Setting up a test is not being inside the room being tested. Creating the
+  # fixtures under the app role would put them behind the policy that is about
+  # to be measured.
+  def as_the_owner
+    ActiveRecord::Base.connection.execute("RESET ROLE")
+    yield
+  end
 
   # A person, and their place in the room the test is in. After #134 nobody
   # reaches a workspace without a membership in it, so a fixture without one is

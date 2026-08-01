@@ -32,9 +32,14 @@ class SessionsController < ActionController::Base
                            name: auth.dig("info", "name").presence || user.name || email.split("@").first)
     user.api_token = SecureRandom.hex(24) if user.api_token.blank?
     user.save!
-    Current.workspace = Workspace.admit(user)
 
-    Activity.log(actor: user, action: "session.signed_in", subject: user)
+    # Signing in happens outside any room and ends inside one, so the room is
+    # entered around what is recorded in it. `users` is global and needs no
+    # boundary; an activity belongs to a workspace and cannot be written
+    # without being in it.
+    Workspace.entered(Workspace.admit(user)) do
+      Activity.log(actor: user, action: "session.signed_in", subject: user)
+    end
 
     port = session.delete(:return_port)
     state = session.delete(:return_state)

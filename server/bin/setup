@@ -22,6 +22,8 @@ FileUtils.chdir APP_ROOT do
 
   puts "\n== Preparing database =="
   system! "bin/rails db:prepare"
+  # The boundary a schema file cannot carry (#138).
+  system! "bin/rails db:boundary"
   system! "bin/rails db:reset" if ARGV.include?("--reset")
 
   puts "\n== Removing old logs and tempfiles =="
