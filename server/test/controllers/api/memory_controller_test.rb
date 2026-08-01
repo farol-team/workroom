@@ -9,15 +9,16 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
 
   # A store that answers, so following the seam is observable rather than assumed.
   class Elsewhere < Memory::Store
-    Entry = Struct.new(:uri, :title, :abstract, :overview, :detail, :trust, :created_at,
-                       keyword_init: true) do
+    Entry = Struct.new(:uri, :title, :abstract, :overview, :detail, :trust, :author_name,
+                       :created_at, keyword_init: true) do
       def slice(*keys) = keys.index_with { |k| public_send(k) }
+      def source = nil
     end
 
     def all(_channel, limit: 200)
       [ Entry.new(uri: "viking://elsewhere/1", title: "Held somewhere else",
                   abstract: "a", overview: "o", detail: "d", trust: "agent",
-                  created_at: Time.current) ].first(limit)
+                  author_name: "Alice", created_at: Time.current) ].first(limit)
     end
 
     def search(_channel, query, limit: 10)
@@ -57,6 +58,31 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
     assert_equal [ "Monthly rollups" ], response.parsed_body.map { |e| e["title"] }
     assert_equal "human", response.parsed_body.first["trust"]
+  end
+
+  test "the listing says whose agent recorded an entry" do
+    run = agent_run(user: @alice, channel: @channel)
+    run.update!(model: "ChatGPT 5.5")
+    Memory::Store.current.write(@channel, title: "Pricing objection", detail: "Setup cost.",
+                                trust: "agent", author: @alice, source: run)
+
+    get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
+
+    author = response.parsed_body.first["author"]
+    assert_equal "agent", author["kind"]
+    assert_equal "Alice", author["name"]
+    assert_equal "opencode", author["agent_kind"]
+    assert_equal "ChatGPT 5.5", author["model"]
+    assert_equal run.id, author["run_id"], "an entry a colleague cannot follow back is a defect (Article P4)"
+  end
+
+  test "what a person records is attributed to them and to no run" do
+    post api_v1_channel_memory_path(@channel.slug),
+         params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+         headers: auth(@alice).merge(@json)
+
+    assert_equal({ "kind" => "human", "name" => "Alice" }, response.parsed_body["author"],
+                 "they were not a turn")
   end
 
   private

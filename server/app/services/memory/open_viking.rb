@@ -12,9 +12,14 @@ module Memory
     # readers as an ActiveRecord row, so no call site can tell which store it is
     # talking to (Article S1).
     Entry = Struct.new(:uri, :title, :abstract, :overview, :detail, :trust,
-                       :author_name, :created_at, :score, keyword_init: true) do
+                       :author_name, :agent_kind, :model, :run_id, :created_at, :score,
+                       keyword_init: true) do
       def slice(*keys) = keys.index_with { |k| public_send(k) }
       def author = nil
+
+      # This store points at nothing — an entry carries whose agent wrote it and
+      # which run it came from as facts of its own, not as a row it can follow.
+      def source = nil
     end
 
     # OpenViking's own directory summaries live alongside the entries. They are
@@ -118,11 +123,16 @@ module Memory
       # replacing it — the store has no overwrite, which suits Article P6.
       uri = "#{root_of(channel)}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
 
+      # Provenance is resolved at write time, in the keys the document will
+      # carry: the run can be asked now and never again from a record that
+      # points at nothing (Article P4).
+      front = Provenance.front_matter(author: author, source: source, trust: trust)
       entry = Entry.new(
         uri: uri, title: title, detail: detail, trust: trust,
         overview: overview.presence || detail.to_s.truncate(400),
         abstract: abstract.presence || title,
-        author_name: author.respond_to?(:name) ? author.name : author,
+        author_name: front["author"], agent_kind: front["agent"],
+        model: front["model"], run_id: front["run"],
         created_at: Time.current
       )
 
@@ -214,7 +224,9 @@ module Memory
     def serialize(entry)
       front = {
         "title" => entry.title, "trust" => entry.trust,
-        "author" => entry.author_name, "overview" => entry.overview,
+        "author" => entry.author_name, "agent" => entry.agent_kind,
+        "model" => entry.model, "run" => entry.run_id,
+        "overview" => entry.overview,
         "recorded" => entry.created_at.utc.iso8601
       }.compact
 
@@ -231,7 +243,8 @@ module Memory
         trust: front["trust"].presence || "agent",
         overview: front["overview"].presence || detail.truncate(400),
         abstract: title,
-        author_name: front["author"],
+        author_name: front["author"], agent_kind: front["agent"],
+        model: front["model"], run_id: front["run"],
         created_at: (Time.zone.parse(front["recorded"].to_s) if front["recorded"])
       )
     end

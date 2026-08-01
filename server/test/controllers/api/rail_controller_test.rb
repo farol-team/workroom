@@ -67,6 +67,23 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert run.reload.distilled_at, "the run that produced the entry is the run that records it"
   end
 
+  test "what an agent kept says whose agent kept it" do
+    # The rail is reached by an agent holding its owner's token. An entry that
+    # arrives marked "agent" and nothing else cannot be traced to anyone, which
+    # Article P4 calls a defect rather than a gap.
+    message = @channel.messages.create!(author: @alice, body: "@agent what did we agree?")
+    run = agent_run(user: @alice, channel: @channel, trigger: message)
+    run.update!(model: "ChatGPT 5.5")
+
+    rpc("tools/call", { name: "execute_capability", arguments: {
+      uri: "workroom://memory/remember",
+      args: { title: "Monthly rollups", detail: "First Tuesday, agreed with Acme." } } })
+
+    entry = MemoryEntry.current.find_by(title: "Monthly rollups")
+    assert_equal @alice, entry.author, "the person whose agent wrote it"
+    assert_equal run, entry.source, "the turn it came from"
+  end
+
   test "a run that kept nothing says so by staying unmarked" do
     message = @channel.messages.create!(author: @alice, body: "@agent what did we agree?")
     run = agent_run(user: @alice, channel: @channel, trigger: message)
