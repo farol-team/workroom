@@ -17,6 +17,11 @@
 )]
 
 mod acp;
+// Declared with a path because the module lives in `agents/` and carries its
+// own specs; without the declaration `cargo test` never compiles them, and a
+// spec nothing runs is worse than none.
+#[path = "agents/resolve.rs"]
+mod resolve;
 mod signin;
 mod workspace;
 

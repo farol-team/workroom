@@ -295,6 +295,10 @@ describe("agent definitions", () => {
 
     expect(named(out)).toEqual(seeded);
     expect(out.filter((d) => d.default)).toHaveLength(1);
+    // Who answers a bare `@agent` on a machine nobody configured. It was
+    // opencode before seeding existed, and seeding must not move it to
+    // whichever profile happens to lead the catalog.
+    expect(defaultAgent(out)).toBe("opencode");
 
     for (const profile of BASELINE) {
       const def = out.find((d) => d.name === profile.name)!;
