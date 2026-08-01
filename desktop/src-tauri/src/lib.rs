@@ -45,7 +45,7 @@ async fn agent_start(
     let command = command.unwrap_or_else(|| "opencode".into());
     let args = args.unwrap_or_else(|| vec!["acp".into()]);
 
-    let agent = Agent::launch(app, &command, &args).await?;
+    let agent = Agent::launch(app, &name, &command, &args).await?;
     // Starting again under the same name is a restart. The process it replaces
     // is shut down here, or it lingers unaddressable with the user's session open.
     if let Some(previous) = state.insert(&name, agent).await {

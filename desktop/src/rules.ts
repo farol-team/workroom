@@ -93,6 +93,15 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// Which cached keys belong to one agent. Sessions and their options are filed
+/// under agent and channel, so forgetting an agent means forgetting those — and
+/// not those of an agent whose name merely begins the same way, which is what
+/// matching on the bare name would do.
+export function keysOf(agent: string, keys: Iterable<string>): string[] {
+  const prefix = sessionKey(agent, "");
+  return [ ...keys ].filter((key) => key.startsWith(prefix));
+}
+
 /// Versions, as numbers. `0.10.0` is newer than `0.9.0`, and comparing the two
 /// as text says the opposite.
 function parts(version?: string): number[] | null {
