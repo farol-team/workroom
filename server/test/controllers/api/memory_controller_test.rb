@@ -1,6 +1,6 @@
 require "test_helper"
 
-class Api::MemoryControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel
     @alice = user(name: "Alice")
@@ -33,7 +33,7 @@ class Api::MemoryControllerTest < ActionDispatch::IntegrationTest
                                     abstract: "a", overview: "o", detail: "d", trust: "human")
 
     with_store(Elsewhere.new) do
-      get api_channel_memory_path(@channel.slug), headers: auth(@alice)
+      get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
     end
 
     assert_response :success
@@ -42,19 +42,19 @@ class Api::MemoryControllerTest < ActionDispatch::IntegrationTest
 
   test "searching comes from the store too" do
     with_store(Elsewhere.new) do
-      get api_channel_memory_path(@channel.slug), params: { q: "somewhere" }, headers: auth(@alice)
+      get api_v1_channel_memory_path(@channel.slug), params: { q: "somewhere" }, headers: auth(@alice)
     end
 
     assert_equal [ "Held somewhere else" ], response.parsed_body.map { |e| e["title"] }
   end
 
   test "what a person records is what the room lists" do
-    post api_channel_memory_path(@channel.slug),
+    post api_v1_channel_memory_path(@channel.slug),
          params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
          headers: auth(@alice).merge(@json)
     assert_response :created
 
-    get api_channel_memory_path(@channel.slug), headers: auth(@alice)
+    get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
     assert_equal [ "Monthly rollups" ], response.parsed_body.map { |e| e["title"] }
     assert_equal "human", response.parsed_body.first["trust"]
   end

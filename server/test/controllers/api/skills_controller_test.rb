@@ -1,6 +1,6 @@
 require "test_helper"
 
-class Api::SkillsControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::SkillsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel(name: "Meetings")
     @alice = user(name: "Alice")
@@ -9,7 +9,7 @@ class Api::SkillsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a person writes how the work is done here" do
-    post api_channel_skills_path(@channel.slug),
+    post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Running a client call",
                    body: "Agenda out the day before. Recap decisions before it ends." }.to_json,
          headers: auth(@alice).merge(@json)
@@ -21,11 +21,11 @@ class Api::SkillsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a skill does not become something the room learned" do
-    post api_channel_skills_path(@channel.slug),
+    post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Running a client call", body: "Agenda first." }.to_json,
          headers: auth(@alice).merge(@json)
 
-    get api_channel_memory_path(@channel.slug), headers: auth(@alice)
+    get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
 
     assert_empty response.parsed_body,
                  "a procedure is not a fact, and mixing them is how a rules file rots"
@@ -35,17 +35,17 @@ class Api::SkillsControllerTest < ActionDispatch::IntegrationTest
     outsider = user(name: "Dana")
     @channel.update!(visibility: "private")
 
-    get api_channel_skills_path(@channel.slug), headers: auth(outsider)
+    get api_v1_channel_skills_path(@channel.slug), headers: auth(outsider)
     assert_response :forbidden
 
-    post api_channel_skills_path(@channel.slug),
+    post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Sneaking in", body: "…" }.to_json,
          headers: auth(outsider).merge(@json)
     assert_response :forbidden
   end
 
   test "writing without a body is refused rather than stored empty" do
-    post api_channel_skills_path(@channel.slug),
+    post api_v1_channel_skills_path(@channel.slug),
          params: { title: "Half a skill" }.to_json,
          headers: auth(@alice).merge(@json)
 

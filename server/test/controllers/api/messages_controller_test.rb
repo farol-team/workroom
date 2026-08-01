@@ -1,6 +1,6 @@
 require "test_helper"
 
-class Api::MessagesControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::MessagesControllerTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel
     @alice = user(name: "Alice")
@@ -8,7 +8,7 @@ class Api::MessagesControllerTest < ActionDispatch::IntegrationTest
 
   test "a message is stored and announced to the room in the same request" do
     payloads = broadcasts(@channel) do
-      post api_channel_messages_path(@channel.slug),
+      post api_v1_channel_messages_path(@channel.slug),
            params: { body: "hello" }.to_json,
            headers: auth(@alice).merge("Content-Type" => "application/json")
     end
@@ -20,7 +20,7 @@ class Api::MessagesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "an unauthenticated request is refused" do
-    post api_channel_messages_path(@channel.slug),
+    post api_v1_channel_messages_path(@channel.slug),
          params: { body: "hello" }.to_json,
          headers: { "Content-Type" => "application/json" }
 
@@ -32,7 +32,7 @@ class Api::MessagesControllerTest < ActionDispatch::IntegrationTest
     private_channel = Channel.create!(slug: "secret-#{SecureRandom.hex(3)}",
                                       name: "Secret", visibility: "private")
 
-    post api_channel_messages_path(private_channel.slug),
+    post api_v1_channel_messages_path(private_channel.slug),
          params: { body: "hello" }.to_json,
          headers: auth(@alice).merge("Content-Type" => "application/json")
 

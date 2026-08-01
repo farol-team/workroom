@@ -642,10 +642,10 @@ describe("the rail, as the protocol describes it", () => {
   test("a header is a name and a value, not a key on an object", () => {
     // Sent as an object the agent reaches the rail unauthenticated, every call
     // comes back 401, and it answers from nothing.
-    const [ server ] = mcpServersFor({ url: "http://127.0.0.1:3000/api/rail/meetings", token: "tok" }) as any[];
+    const [ server ] = mcpServersFor({ url: "http://127.0.0.1:3000/api/v1/rail/meetings", token: "tok" }) as any[];
 
     expect(server.type).toBe("http");
-    expect(server.url).toBe("http://127.0.0.1:3000/api/rail/meetings");
+    expect(server.url).toBe("http://127.0.0.1:3000/api/v1/rail/meetings");
     expect(server.headers).toEqual([ { name: "Authorization", value: "Bearer tok" } ]);
     expect(Array.isArray(server.headers)).toBe(true);
   });

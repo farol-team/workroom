@@ -8,7 +8,7 @@
 // What it exercises, which tier 1 cannot: a prompt that provokes a permission
 // request, the rail actually being called, a usage_update, and a transcript.
 //
-//   pnpm bench:turn --rail http://127.0.0.1:3000/api/rail/general --token dev-alice
+//   pnpm bench:turn --rail http://127.0.0.1:3000/api/v1/rail/general --token dev-alice
 //
 // Paste what it prints into the card. That is the point of it.
 import { spawn } from "node:child_process";

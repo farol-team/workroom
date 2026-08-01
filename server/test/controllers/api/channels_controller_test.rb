@@ -1,13 +1,13 @@
 require "test_helper"
 
-class Api::ChannelsControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::ChannelsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @alice = user(name: "Alice")
     @json = { "Content-Type" => "application/json" }
   end
 
   test "a workspace is offered a shape rather than a blank page" do
-    get api_channel_templates_path, headers: auth(@alice)
+    get api_v1_channel_templates_path, headers: auth(@alice)
 
     assert_response :success
     keys = response.parsed_body.map { |t| t["key"] }
@@ -18,14 +18,14 @@ class Api::ChannelsControllerTest < ActionDispatch::IntegrationTest
   test "a template says which rooms already exist, so none is offered twice" do
     channel(slug: "strategy", name: "Strategy")
 
-    get api_channel_templates_path, headers: auth(@alice)
+    get api_v1_channel_templates_path, headers: auth(@alice)
 
     taken = response.parsed_body.find { |t| t["key"] == "strategy" }
     assert_equal true, taken["taken"]
   end
 
   test "creating from a template gives the room and its skills" do
-    post api_channels_path, params: { template: "engineering" }.to_json,
+    post api_v1_channels_path, params: { template: "engineering" }.to_json,
          headers: auth(@alice).merge(@json)
 
     assert_response :created
@@ -39,7 +39,7 @@ class Api::ChannelsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a template nobody defined is refused rather than made empty" do
-    post api_channels_path, params: { template: "astrology" }.to_json,
+    post api_v1_channels_path, params: { template: "astrology" }.to_json,
          headers: auth(@alice).merge(@json)
 
     assert_response :not_found
@@ -47,7 +47,7 @@ class Api::ChannelsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a room can still be made without a template" do
-    post api_channels_path, params: { slug: "nordwind", name: "Nordwind" }.to_json,
+    post api_v1_channels_path, params: { slug: "nordwind", name: "Nordwind" }.to_json,
          headers: auth(@alice).merge(@json)
 
     assert_response :created

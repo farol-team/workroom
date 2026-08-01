@@ -3,7 +3,7 @@ require "test_helper"
 # What a session is opened with. Two things travel here that the room's own
 # knowledge does not: how to reach the context store, and the sentence asking
 # the agent to stay inside its channel — which the store cannot enforce (#115).
-class Api::ChannelContextTest < ActionDispatch::IntegrationTest
+class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel(name: "Meetings")
     @alice = user(name: "Alice")
@@ -12,7 +12,7 @@ class Api::ChannelContextTest < ActionDispatch::IntegrationTest
   teardown { Memory::Store.current = nil }
 
   def context_for(person = @alice)
-    get api_channel_context_path(@channel.slug), headers: auth(person)
+    get api_v1_channel_context_path(@channel.slug), headers: auth(person)
     response.parsed_body
   end
 
@@ -54,7 +54,7 @@ class Api::ChannelContextTest < ActionDispatch::IntegrationTest
     private_room = channel(name: "Salaries")
     private_room.update!(visibility: "private")
 
-    get api_channel_context_path(private_room.slug), headers: auth(user(name: "Bob"))
+    get api_v1_channel_context_path(private_room.slug), headers: auth(user(name: "Bob"))
 
     assert_response :forbidden
   end
