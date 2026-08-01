@@ -20,15 +20,12 @@ module Memory
       @given = store
     end
 
-    # What `context_for` answers when the store could not be reached. Neither
-    # nil nor a string, so no call site can read a store that is down as a room
-    # that has learned nothing — which is the more expensive of the two failures
-    # and the one #99 already cost once.
-    UNAVAILABLE = Object.new.freeze
-
-    # Whether the store answered the last time it was asked. A store nobody has
-    # asked about is taken at its word; one backed by nothing that can be away
-    # never stops being.
+    # Whether the store answered everything it was asked during this request.
+    # Read right after a call, because that call is what learns it: a listing
+    # that came back empty is a room that knows nothing only if this is true,
+    # and a store that is down otherwise (#146). A store nobody has asked about
+    # is taken at its word; one backed by nothing that can be away never stops
+    # being available.
     def available? = true
 
     def context_for(_channel, limit: 20)  = raise NotImplementedError

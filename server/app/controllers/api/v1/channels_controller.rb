@@ -41,31 +41,37 @@ module Api
 
       def show
         channel!.memberships.find_or_create_by!(user: current_user)
+        store = Memory::Store.current
         # One store call, for one room somebody just opened. The listing does
         # not carry this: a count per channel there is a fan-out across every
         # room in the sidebar, paid on every refresh (#99).
-        count = Memory::Store.current.count(channel!)
-        # Asked after the count, because that is the request that learns it. A
-        # store that could not be reached counts nothing, and a nothing rendered
-        # as 0 is the room claiming to know nothing — the same lie #99 told.
-        away = !Memory::Store.current.available?
+        count = store.count(channel!)
+        # Asked after the count, because that call is what learns it. A store
+        # that could not be reached counts nothing, and a nothing rendered as 0
+        # is the room claiming to know nothing — the same lie #99 told. So the
+        # number is left out rather than made up, and what took its place is
+        # said instead (#146).
+        away = !store.available?
 
-        render json: serialize(channel!).merge(
-          memory_count: away ? nil : count,
+        body = serialize(channel!).merge(
           memory: away ? "unavailable" : "ok",
           messages: channel!.messages.includes(:author).order(:created_at).last(200).map { |m| MessageSerializer.call(m) }
         )
+        body[:memory_count] = count unless away
+        render json: body
       end
 
       # What the room knows, ready to be injected into an agent session — and how
       # the agent reaches the rest of it for itself (#114).
       def context
-        knows = Memory::Store.current.context_for(channel!)
+        store = Memory::Store.current
+        knows = store.context_for(channel!)
         # A room whose memory is away is still a room: it opens, and it is told
         # which of the two it is looking at rather than being handed a 500 or,
         # worse, silence indistinguishable from a room that has learned
-        # nothing (#146).
-        away = knows.equal?(Memory::Store::UNAVAILABLE)
+        # nothing (#146). Asked after the call, as in `show`, and answered in
+        # the same two words.
+        away = !store.available?
 
         render json: {
           channel: channel!.slug,

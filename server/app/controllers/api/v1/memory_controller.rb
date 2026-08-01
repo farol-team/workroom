@@ -6,13 +6,6 @@ module Api
       def index
         store = Memory::Store.current
         entries = params[:q].present? ? store.search(channel!, params[:q]) : store.all(channel!, limit: 50)
-        # Asked after the listing, because that is the request that learns it. A
-        # store that could not be reached lists nothing, and nothing rendered as
-        # an empty array is the room claiming to know nothing — the lie #99 told
-        # and #146 exists to stop. A listing is a bare array with nowhere in the
-        # body to say so, so the fact travels beside it in the same two words
-        # `channels#show` renders in its own.
-        response.set_header("X-Memory", store.available? ? "ok" : "unavailable")
         render json: entries.map { |e| serialize(e) }
       end
 

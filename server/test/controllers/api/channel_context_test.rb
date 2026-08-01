@@ -61,7 +61,7 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_equal "unavailable", body["memory"]
-    assert_nil body["context"], "the sentinel stays inside the seam; the wire carries a fact instead"
+    assert_nil body["context"], "nothing to inject, and the fact beside it says why"
   end
 
   test "a room whose memory answers says so, and carries what it knows" do
@@ -100,8 +100,8 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_equal "unavailable", body["memory"]
-    assert_nil body["memory_count"],
-               "zero is a number a person cannot tell from the truth; absent is honest"
+    refute body.key?("memory_count"),
+           "zero is a number a person cannot tell from the truth; absent is honest"
   end
 
   test "a room whose memory answers opens with the count and says so" do
