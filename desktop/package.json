@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "bench:capabilities": "node bench/capabilities.mjs"
+    "bench:capabilities": "node bench/capabilities.mjs",
+    "bench:turn": "node bench/turn.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.64.0",

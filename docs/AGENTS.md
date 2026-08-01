@@ -76,6 +76,16 @@ claim about a version that has already moved.
 
 <!-- /capabilities -->
 
+### Running a real turn
+
+`pnpm bench:turn --rail <url> --token <token>` drives one: a prompt that provokes
+a permission request, the rail being called, a `usage_update`, and an answer. It
+is not in CI and never will be — it costs a model call, it needs a credential
+this project keeps on the person's own machine (Article P2), and it asks a
+question only a person may answer.
+
+What it prints is meant to be pasted into a card.
+
 ### What has been verified against a real agent
 
 Against opencode 1.18.10, with a real model, through a real rail:
