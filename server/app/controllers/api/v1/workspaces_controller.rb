@@ -16,7 +16,16 @@ module Api
         }
       end
 
-      def create
+    # Everybody in this room, for resolving a mention and for offering somebody
+    # to invite. A name and a handle: enough to recognise a colleague, nothing
+    # that identifies them elsewhere.
+    def members
+      render json: current_workspace.workspace_memberships.includes(:user).order("users.name").map { |m|
+        { id: m.user_id, name: m.user.name, handle: m.user.handle, role: m.role }
+      }
+    end
+
+    def create
         workspace = Workspace.new(slug: params.require(:slug).to_s.downcase,
                                   name: params.require(:name))
         return render_error(workspace.errors.full_messages.join(", "), :unprocessable_entity) \

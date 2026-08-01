@@ -25,6 +25,12 @@ Rails.application.routes.draw do
     post "rail/:slug", to: "rail#call", as: :rail
 
     resources :workspaces, only: %i[index create]
+    get "workspace/members", to: "workspaces#members", as: :workspace_members
+
+    # An invitation is how somebody reaches a room they are not in, so it is
+    # redeemed from outside the room it lets them into.
+    resources :invitations, only: %i[index create]
+    post "invitations/:code/accept", to: "invitations#accept", as: :accept_invitation
 
     get "channel-templates", to: "channels#templates", as: :channel_templates
     resources :channels, only: %i[index create], param: :slug
@@ -34,6 +40,7 @@ Rails.application.routes.draw do
     post "channels/:channel_slug/messages", to: "messages#create", as: :channel_messages
 
     get  "channels/:channel_slug/members", to: "members#index", as: :channel_members
+    post "channels/:channel_slug/members", to: "members#create"
 
     get  "channels/:channel_slug/skills", to: "skills#index",  as: :channel_skills
     post "channels/:channel_slug/skills", to: "skills#create"
