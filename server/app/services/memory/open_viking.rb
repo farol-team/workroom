@@ -24,7 +24,13 @@ module Memory
     def initialize(base_url: ENV["OPENVIKING_URL"], api_key: ENV["OPENVIKING_API_KEY"])
       @base = URI.parse(base_url.to_s.chomp("/"))
       @api_key = api_key
+      @reachable = true
     end
+
+    # The last thing the transport learned. Not a health check: a store is
+    # unavailable because a request to it did not arrive, which is the only
+    # moment anyone needs the answer.
+    def available? = @reachable
 
     # --- reading -------------------------------------------------------------
 
@@ -70,6 +76,9 @@ module Memory
 
     def context_for(channel, limit: 20)
       entries = all(channel, limit: limit)
+      # `all` swallows a transport failure and hands back nothing, which is the
+      # same shape as a room that has learned nothing and the opposite fact.
+      return Store::UNAVAILABLE unless available?
       return nil if entries.empty?
 
       lines = entries.map do |e|
@@ -265,15 +274,29 @@ module Memory
       request(req)
     end
 
+    # Every way the store can fail to answer arrives as this adapter's own
+    # error, so nothing above the seam has to know what HTTP is. A name that
+    # does not resolve raises Socket::ResolutionError, which is a SocketError
+    # and not a SystemCallError — it used to travel past every `rescue Error`
+    # here and out of the controller (#146). A refused connection and both
+    # timeouts already did not.
     def request(req)
       req["X-API-Key"] = @api_key
-      res = Net::HTTP.start(@base.host, @base.port, use_ssl: @base.scheme == "https",
-                            open_timeout: 5, read_timeout: 30) { |http| http.request(req) }
+      res = begin
+        Net::HTTP.start(@base.host, @base.port, use_ssl: @base.scheme == "https",
+                        open_timeout: 5, read_timeout: 30) { |http| http.request(req) }
+      rescue SocketError, SystemCallError, OpenSSL::SSL::SSLError,
+             Net::OpenTimeout, Net::ReadTimeout => e
+        @reachable = false
+        raise Error, e.message
+      end
+      @reachable = true
+
       body = JSON.parse(res.body.presence || "{}")
       raise Error, body.dig("error", "message") || res.code if body["status"] == "error"
 
       body
-    rescue JSON::ParserError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout => e
+    rescue JSON::ParserError => e
       raise Error, e.message
     end
   end

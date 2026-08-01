@@ -53,10 +53,18 @@ module Api
       # What the room knows, ready to be injected into an agent session — and how
       # the agent reaches the rest of it for itself (#114).
       def context
+        knows = Memory::Store.current.context_for(channel!)
+        # A room whose memory is away is still a room: it opens, and it is told
+        # which of the two it is looking at rather than being handed a 500 or,
+        # worse, silence indistinguishable from a room that has learned
+        # nothing (#146).
+        away = knows.equal?(Memory::Store::UNAVAILABLE)
+
         render json: {
           channel: channel!.slug,
           memory_uri: channel!.memory_uri,
-          context: Memory::Store.current.context_for(channel!),
+          context: away ? nil : knows,
+          memory: away ? "unavailable" : "ok",
           # Stated separately from `context`, which is nil for a room that has
           # learned nothing — and a new channel is exactly where an agent has
           # least to go on and most room to wander (#114).
