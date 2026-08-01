@@ -41,11 +41,18 @@ module Api
 
       def show
         channel!.memberships.find_or_create_by!(user: current_user)
+        # One store call, for one room somebody just opened. The listing does
+        # not carry this: a count per channel there is a fan-out across every
+        # room in the sidebar, paid on every refresh (#99).
+        count = Memory::Store.current.count(channel!)
+        # Asked after the count, because that is the request that learns it. A
+        # store that could not be reached counts nothing, and a nothing rendered
+        # as 0 is the room claiming to know nothing — the same lie #99 told.
+        away = !Memory::Store.current.available?
+
         render json: serialize(channel!).merge(
-          # One store call, for one room somebody just opened. The listing does
-          # not carry this: a count per channel there is a fan-out across every
-          # room in the sidebar, paid on every refresh (#99).
-          memory_count: Memory::Store.current.count(channel!),
+          memory_count: away ? nil : count,
+          memory: away ? "unavailable" : "ok",
           messages: channel!.messages.includes(:author).order(:created_at).last(200).map { |m| MessageSerializer.call(m) }
         )
       end
