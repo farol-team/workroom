@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("routing by session", () => {
   test("both inbound shapes say which session they belong to", () => {
@@ -230,6 +230,28 @@ describe("several agents", () => {
     expect(defaultAgent([{ name: "kimi", command: "k", args: [] }, ...agents])).toBe("opencode");
     expect(defaultAgent([{ name: "kimi", command: "k", args: [] }])).toBe("kimi");
     expect(defaultAgent([])).toBeUndefined();
+  });
+});
+
+describe("which agent the controls act on", () => {
+  const three = normalizeAgents([]);
+
+  test("with no choice made it is the default", () => {
+    expect(activeAgent(three)).toBe("claude");
+    expect(activeAgent([])).toBeUndefined();
+  });
+
+  test("a chosen agent is the one, default or not", () => {
+    // Three agents are seeded for everybody now, so two running at once is
+    // ordinary. The session options and the @agent prefill act on one of them,
+    // and reaching the other must not mean stopping the first.
+    expect(activeAgent(three, "opencode")).toBe("opencode");
+    expect(activeAgent(three, "codex")).toBe("codex");
+  });
+
+  test("a choice that outlived its definition is not a choice", () => {
+    expect(activeAgent(three, "kimi")).toBe("claude");
+    expect(activeAgent([], "claude")).toBeUndefined();
   });
 });
 
