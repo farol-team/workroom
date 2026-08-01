@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { BASELINE } from "../src/agents/catalog";
 import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("routing by session", () => {
@@ -234,22 +235,31 @@ describe("several agents", () => {
 });
 
 describe("agent definitions", () => {
+  const named = (defs: ReturnType<typeof normalizeAgents>) => defs.map((d) => d.name);
+  const seeded = BASELINE.map((p) => p.name);
+
   test("an entry with no name or no command is not an agent", () => {
-    expect(normalizeAgents([
+    const out = normalizeAgents([
       { name: "", command: "x", args: [] },
       { name: "y", command: "  ", args: [] },
       { name: "opencode", command: "opencode", args: ["acp"] },
-    ])).toEqual([{ name: "opencode", command: "opencode", args: ["acp"], default: true }]);
+    ]);
+
+    expect(named(out)).not.toContain("y");
+    expect(out[0]).toEqual({ name: "opencode", command: "opencode", args: ["acp"], default: true });
   });
 
   test("a name that cannot be typed as an address is not an agent", () => {
     // The name is the summons. One that @ cannot reach configures an agent
     // nobody can call, and makes the session key ambiguous besides.
-    expect(normalizeAgents([
+    const out = normalizeAgents([
       { name: "my agent", command: "x", args: [] },
       { name: "-lead", command: "x", args: [] },
       { name: "gpt-5.1_local", command: "x", args: [] },
-    ])).toEqual([{ name: "gpt-5.1_local", command: "x", args: [], default: true }]);
+    ]);
+
+    expect(named(out)).toEqual([ "gpt-5.1_local", ...seeded ]);
+    expect(out[0]).toEqual({ name: "gpt-5.1_local", command: "x", args: [], default: true });
   });
 
   test("one name, one agent — the first definition wins", () => {
@@ -257,8 +267,10 @@ describe("agent definitions", () => {
       { name: "claude", command: "first", args: [] },
       { name: "Claude", command: "second", args: [] },
     ]);
-    expect(out).toHaveLength(1);
-    expect(out[0].command).toBe("first");
+
+    const theirs = out.filter((d) => d.name.toLowerCase() === "claude");
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].command).toBe("first");
   });
 
   test("there is always exactly one default", () => {
@@ -272,12 +284,45 @@ describe("agent definitions", () => {
 
     const none = normalizeAgents([{ name: "a", command: "a", args: [] }]);
     expect(none[0].default).toBe(true);
+    expect(none.filter((d) => d.default)).toHaveLength(1);
   });
 
-  test("nothing configured is not an error — it is opencode", () => {
-    expect(normalizeAgents([])).toEqual([
-      { name: "opencode", command: "opencode", args: ["acp"], default: true },
+  test("nothing configured is not an error — it is the three the project supports", () => {
+    // A person who has configured nothing still sees Claude, Codex and opencode
+    // by name. Seeing them is not having them: what is installed is a separate
+    // question, answered by the probe.
+    const out = normalizeAgents([]);
+
+    expect(named(out)).toEqual(seeded);
+    expect(out.filter((d) => d.default)).toHaveLength(1);
+
+    for (const profile of BASELINE) {
+      const def = out.find((d) => d.name === profile.name)!;
+      expect(def.command).toBe(profile.command);
+      expect(def.args).toEqual(profile.args);
+    }
+  });
+
+  test("a person's own agents come first, and theirs is the one @agent means", () => {
+    const out = normalizeAgents([{ name: "kimi", command: "kimi-acp", args: [] }]);
+
+    expect(out[0]).toEqual({ name: "kimi", command: "kimi-acp", args: [], default: true });
+    expect(named(out)).toEqual([ "kimi", ...seeded ]);
+  });
+
+  test("a person's own definition of a name the catalog pins is the one that runs", () => {
+    // Seeding must not overwrite what somebody configured — an agent that
+    // silently reverts to a command they did not choose is worse than no
+    // seeding at all.
+    const out = normalizeAgents([
+      { name: "claude", command: "/home/alice/bin/claude-acp", args: [ "--verbose" ] },
     ]);
+
+    const theirs = out.filter((d) => d.name.toLowerCase() === "claude");
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].command).toBe("/home/alice/bin/claude-acp");
+    expect(theirs[0].args).toEqual([ "--verbose" ]);
+    expect(named(out)).toHaveLength(BASELINE.length);
   });
 });
 
