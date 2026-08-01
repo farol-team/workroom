@@ -24,6 +24,10 @@ the room, not by anyone's agent.
                                          memory + skills
 ```
 
+## How this is developed
+
+Every change goes through [agent-flow](https://github.com/farol-team/agent-flow): a card, a plan agreed first, a test before the code, and gates reported on the pull request. Three of its rules are checked by CI. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Documentation
 
 | | |

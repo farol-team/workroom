@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Check that .claude/ still holds the kit revision it says it holds.
+
+    bin/kit-verify              # verify this checkout
+    bin/kit-verify --selftest   # prove the check can fail
+
+Exit 0 when the kit is intact, 1 when it is not. Run by CI on every pull
+request, which is the only place a check cannot be skipped by not running it.
+"""
+
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# kit-digest has no .py suffix, so it is read rather than imported — which also
+# means no __pycache__ appears in a directory this repository keeps clean.
+_NS: dict = {}
+exec(compile((pathlib.Path(__file__).resolve().parent / "kit-digest").read_text(), "kit-digest", "exec"), _NS)
+kit_digest_of = _NS["digest"]
+
+REVISION = ".claude/KIT_REVISION"
+
+
+def read_revision(root: pathlib.Path):
+    """Return (source_line, recorded_digest) or exit with why it cannot."""
+    path = root / REVISION
+    if not path.exists():
+        sys.exit(
+            f"{REVISION} is missing.\n"
+            "Nothing records which revision of the workflow this repository holds.\n"
+            "Run bin/workflow-kit-sync to install it."
+        )
+    lines = [ln.strip() for ln in path.read_text().splitlines() if ln.strip()]
+    source = lines[0] if lines else ""
+    recorded = next((ln.split(None, 1)[1] for ln in lines if ln.startswith("digest ")), None)
+    if recorded is None:
+        sys.exit(f"{REVISION} records a revision but no digest — re-run bin/workflow-kit-sync.")
+    return source, recorded
+
+
+def verify(root: pathlib.Path) -> bool:
+    source, recorded = read_revision(root)
+    actual = kit_digest_of(root)
+    if actual == recorded:
+        print(f"kit intact — {source}")
+        return True
+    print(
+        "The workflow kit under .claude/ does not match the revision recorded in\n"
+        f"{REVISION}.\n\n"
+        f"  recorded {recorded}\n"
+        f"  actual   {actual}\n\n"
+        "A kit-owned file was edited here. The next `bin/workflow-kit-sync` deletes\n"
+        "that edit without a diff, so this is a decision, not a formality:\n\n"
+        "  - the change belongs upstream  -> send it to farol-team/agent-flow, then sync\n"
+        "  - the change belongs to us     -> move the file out of the kit-owned trees\n"
+        "  - the kit was updated on purpose -> re-run bin/workflow-kit-sync to record it",
+        file=sys.stderr,
+    )
+    return False
+
+
+def selftest() -> bool:
+    """A check that cannot fail is not a check. Prove this one can."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = pathlib.Path(tmp) / "repo"
+        shutil.copytree(root / ".claude", copy / ".claude")
+        shutil.copytree(root / "bin", copy / "bin")
+
+        before = kit_digest_of(copy)
+
+        edited = next((copy / ".claude" / "commands").glob("*.md"))
+        edited.write_text(edited.read_text() + "\nan edit the next sync would delete\n")
+        after = kit_digest_of(copy)
+
+        if before == after:
+            print("SELFTEST FAILED: editing a kit-owned file did not change the digest", file=sys.stderr)
+            return False
+
+        proc = subprocess.run([sys.executable, str(root / "bin" / "kit-verify")], cwd=copy, capture_output=True, text=True)
+        if proc.returncode == 0:
+            print("SELFTEST FAILED: kit-verify passed on a tampered kit", file=sys.stderr)
+            return False
+
+        print("selftest ok — an edited kit file changes the digest and fails the check")
+        return True
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(0 if selftest() else 1)
+    sys.exit(0 if verify(pathlib.Path.cwd()) else 1)
