@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, activeAgent, missingFrom, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, pickable, templateNote, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
 import { invoke } from "@tauri-apps/api/core";
@@ -723,7 +723,9 @@ $("memory-toggle").addEventListener("click", () => {
 
 /// Ask for a name and an address. One dialog, because making a room and making
 /// a channel ask the same two questions.
-function askForOne(title: string, note: string): Promise<{ slug: string; name: string } | null> {
+function askForOne(
+  title: string, note: string, templates: RoomTemplate[] = [],
+): Promise<{ slug: string; name: string; template?: string } | null> {
   const dialog = $<HTMLDialogElement>("make");
   $("make-title").textContent = title;
   $("make-note").textContent = note;
@@ -740,12 +742,59 @@ function askForOne(title: string, note: string): Promise<{ slug: string; name: s
     if (!typed) slug.value = name.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   };
 
+  const chosen = renderTemplates(templates, name, slug);
+
   dialog.showModal();
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => {
-      resolve(dialog.returnValue === "go" && slug.value ? { slug: slug.value, name: name.value } : null);
+      if (dialog.returnValue !== "go") return resolve(null);
+      if (chosen.key) return resolve({ slug: chosen.key, name: name.value, template: chosen.key });
+      resolve(slug.value ? { slug: slug.value, name: name.value } : null);
     }, { once: true });
   });
+}
+
+/// The offer, drawn. Picking fills the two fields with what the server would
+/// name the room and puts them beyond editing: they are a preview of somebody
+/// else's answer, and a name typed over one that is never sent would be a lie
+/// the dialog told. Picking again takes it back.
+function renderTemplates(
+  templates: RoomTemplate[], name: HTMLInputElement, slug: HTMLInputElement,
+): { key: string | null } {
+  const block = $("make-templates");
+  const list = $("make-template-list");
+  const state: { key: string | null } = { key: null };
+
+  list.innerHTML = "";
+  block.hidden = templates.length === 0;
+  // Before the early return: the dialog is shared with New workspace, which
+  // offers no shapes, and fields left disabled by a previous pick would open it
+  // with nothing that can be typed into.
+  name.disabled = slug.disabled = false;
+  if (!templates.length) return state;
+
+  const buttons = templates.map((t) => {
+    const b = document.createElement("button");
+    b.type = "button";                      // never submits the dialog
+    b.className = "template";
+    b.disabled = !pickable(t);
+    b.append(Object.assign(document.createElement("strong"), { textContent: t.name }));
+    b.append(Object.assign(document.createElement("span"),
+                           { className: "muted", textContent: templateNote(t) }));
+    b.onclick = () => {
+      state.key = state.key === t.key ? null : t.key;
+      for (const [ other, el ] of buttons) el.classList.toggle("chosen", other.key === state.key);
+      // Disabled fields sit out constraint validation, so `required` does not
+      // block the one submit that does not need them.
+      name.disabled = slug.disabled = state.key !== null;
+      name.value = state.key ? t.name : "";
+      slug.value = state.key ? t.key : "";
+    };
+    list.append(b);
+    return [ t, b ] as const;
+  });
+
+  return state;
 }
 
 /// Every channel of the room this token names, and the first one opened. Called
@@ -858,11 +907,15 @@ $("workspace-new").addEventListener("click", async () => {
 });
 
 $("channel-new").addEventListener("click", async () => {
-  const asked = await askForOne("New channel", "Everybody in this workspace can find it.");
-  if (!asked) return;
+  // A server too old to offer shapes, or one that cannot be reached for them,
+  // still opens the dialog. The templates are the offer, not the feature.
+  const templates = await api.channelTemplates().catch(() => []);
+  const asked = await askForOne("New channel", "Everybody in this workspace can find it.", templates);
+  const body = channelToCreate(asked);
+  if (!body) return;
 
   try {
-    const made = await api.createChannel({ slug: asked.slug, name: asked.name });
+    const made = await api.createChannel(body);
     await loadChannels();
     await open(made.slug);
   } catch (err) {

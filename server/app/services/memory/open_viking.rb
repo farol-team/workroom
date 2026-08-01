@@ -29,7 +29,16 @@ module Memory
     def initialize(base_url: ENV["OPENVIKING_URL"], api_key: ENV["OPENVIKING_API_KEY"])
       @base = URI.parse(base_url.to_s.chomp("/"))
       @api_key = api_key
+      @reachable = true
     end
+
+    # What the transport learned. Not a health check: a store is unavailable
+    # because something it was asked for did not arrive, which is the only
+    # moment anyone needs the answer. Once false it stays false — `all` is one
+    # `ls` plus a read per entry, and a later read succeeding does not make the
+    # listing whole. A store is resolved per request (`Store.current`), so the
+    # answer lives exactly as long as the question that asked it.
+    def available? = @reachable
 
     # --- reading -------------------------------------------------------------
 
@@ -260,16 +269,46 @@ module Memory
       request(req)
     end
 
+    # Every way the store can fail to answer arrives as this adapter's own
+    # error, so nothing above the seam has to know what HTTP is. A name that
+    # does not resolve raises Socket::ResolutionError, which is a SocketError
+    # and not a SystemCallError — it used to travel past every `rescue Error`
+    # here and out of the controller (#146). A refused connection and both
+    # timeouts already did not.
     def request(req)
       req["X-API-Key"] = @api_key
-      res = Net::HTTP.start(@base.host, @base.port, use_ssl: @base.scheme == "https",
-                            open_timeout: 5, read_timeout: 30) { |http| http.request(req) }
-      body = JSON.parse(res.body.presence || "{}")
+      res = begin
+        Net::HTTP.start(@base.host, @base.port, use_ssl: @base.scheme == "https",
+                        open_timeout: 5, read_timeout: 30) { |http| http.request(req) }
+      rescue SocketError, SystemCallError, OpenSSL::SSL::SSLError,
+             Net::OpenTimeout, Net::ReadTimeout => e
+        unreachable!(e.message)
+      end
+
+      # Answering badly is not answering. A 5xx is the store broken, a 401 or a
+      # 403 is a key that reaches nothing, and a body that is not JSON is
+      # something in the middle answering in its place — each of them lists
+      # nothing, and nothing listed reads as a room that knows nothing (#146).
+      # A 404 and a 409 are the store itself speaking: an entry that is not
+      # there, a directory that already is, which `read` and `mkdir` are built
+      # on and which say nothing about whether it can be reached.
+      unreachable!("HTTP #{res.code}") if res.is_a?(Net::HTTPServerError) ||
+                                          res.is_a?(Net::HTTPUnauthorized) ||
+                                          res.is_a?(Net::HTTPForbidden)
+
+      body = begin
+        JSON.parse(res.body.presence || "{}")
+      rescue JSON::ParserError => e
+        unreachable!(e.message)
+      end
       raise Error, body.dig("error", "message") || res.code if body["status"] == "error"
 
       body
-    rescue JSON::ParserError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout => e
-      raise Error, e.message
+    end
+
+    def unreachable!(message)
+      @reachable = false
+      raise Error, message
     end
   end
 end

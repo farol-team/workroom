@@ -104,3 +104,89 @@ class Memory::OpenVikingArchiveTest < ActiveSupport::TestCase
     assert_raises(Memory::OpenViking::Error) { store.supersede("viking://resources/channels/") }
   end
 end
+
+# A store that cannot be reached. No live instance: the point is a store that is
+# not there, and a name in `.invalid` is guaranteed by RFC 2606 never to be.
+#
+# Connection refused and both timeouts already arrived as the adapter's own
+# error. A name that does not resolve did not — `Socket::ResolutionError` is a
+# `SocketError`, which is not a `SystemCallError` — so it travelled past every
+# `rescue Error` in the adapter and out of the controller as a 500 (#146).
+class Memory::OpenVikingUnreachableTest < ActiveSupport::TestCase
+  def store
+    Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid", api_key: "unused")
+  end
+
+  setup { @channel = channel(name: "Meetings") }
+
+  # Asserted on `write`, which is the one path that does not swallow: `read`,
+  # `list`, `mkdir` and `tag` each rescue Error by design.
+  test "a name that does not resolve arrives as the adapter's own error" do
+    assert_raises(Memory::OpenViking::Error) do
+      store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
+    end
+  end
+
+  # The half that matters more. Rescuing alone would make an unreachable store
+  # indistinguishable from a room that has learned nothing — which is #99, and
+  # reads as the product being empty rather than as something being down. The
+  # listing paths swallow by design, so the fact travels beside what they
+  # return rather than in it.
+  test "a store answers for its availability once it has failed to answer" do
+    unreachable = store
+    assert unreachable.available?, "a store nobody has asked about is taken at its word"
+
+    assert_nil unreachable.context_for(@channel)
+    refute unreachable.available?, "which is what tells that nil from a room that knows nothing"
+  end
+end
+
+# A store that answers, badly. Reached, so nothing above the seam would learn
+# anything from the transport — and just as empty to the room, which is the
+# failure #146 exists to close and not only the one it was filed for.
+class Memory::OpenVikingAnsweringBadlyTest < ActiveSupport::TestCase
+  setup { @channel = channel(name: "Meetings") }
+
+  # 404 and 409 are the store speaking, not failing: `read` follows a uri that
+  # is gone, `mkdir` finds the directory already there. Reading those as down
+  # would take every fresh room with them.
+  test "an answer the store itself gave leaves it available" do
+    answering(404) do |store|
+      assert_nil store.context_for(@channel)
+      assert store.available?
+    end
+  end
+
+  test "a broken store and a key that reaches nothing are both unavailable" do
+    [ 500, 502, 401, 403 ].each do |code|
+      answering(code) do |store|
+        assert_nil store.context_for(@channel)
+        refute store.available?, "#{code} lists nothing, and nothing listed reads as an empty room"
+      end
+    end
+  end
+
+  # One connection, answered with a status and a well-formed empty body: `all`
+  # asks for the listing first and reads nothing when it does not arrive.
+  def answering(code)
+    server = TCPServer.new("127.0.0.1", 0)
+    thread = Thread.new do
+      while (socket = server.accept)
+        begin
+          socket.readpartial(4096)
+          socket.write("HTTP/1.1 #{code} Whatever\r\nContent-Type: application/json\r\n" \
+                       "Content-Length: 2\r\nConnection: close\r\n\r\n{}")
+        rescue IOError, SystemCallError
+          nil # the client hung up first; the test is not about this socket
+        ensure
+          socket.close
+        end
+      end
+    end
+
+    yield Memory::OpenViking.new(base_url: "http://127.0.0.1:#{server.addr[1]}", api_key: "unused")
+  ensure
+    thread&.kill
+    server&.close
+  end
+end

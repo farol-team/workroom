@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, enterRoom, mentionsIn, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -915,5 +915,49 @@ describe("a session that survives a restart", () => {
 
     expect(recall(store, "opencode", "meetings")).toBeUndefined();
     expect(recall(store, "claude", "meetings")).toBe("ses_2");
+  });
+});
+
+describe("the shape a room can be added with", () => {
+  const strategy = { key: "strategy", name: "Strategy", purpose: "Where the company is going, and why",
+                     skills: [ "Writing an objective" ], taken: false };
+  const legal = { key: "legal", name: "Legal", purpose: "Contracts, and what we agreed",
+                  skills: [], taken: true };
+  const hiring = { key: "hiring", name: "Hiring", purpose: "Roles, and what we decided",
+                   skills: [], taken: false };
+
+  test("a room this workspace already has is listed and cannot be picked", () => {
+    // Both halves matter: dropping it would leave somebody hunting for a shape
+    // they remember, and offering it would ask the server for a duplicate slug.
+    expect(pickable(strategy)).toBe(true);
+    expect(pickable(legal)).toBe(false);
+    expect(templateNote(legal)).toContain("already has one");
+  });
+
+  test("what a template opens the room knowing is said, and never promised emptily", () => {
+    expect(templateNote(strategy)).toBe(
+      "Where the company is going, and why · opens knowing writing an objective");
+    expect(templateNote(hiring)).toBe("Roles, and what we decided");
+  });
+
+  test("a chosen template travels as its key alone", () => {
+    // Not its name: that is the server's, and a copy sent from here would drift
+    // the first time channel_templates.yml is edited.
+    expect(channelToCreate({ slug: "strategy", name: "Strategy", template: "strategy" }))
+      .toEqual({ template: "strategy" });
+  });
+
+  test("a room somebody named themselves is those fields, and no template", () => {
+    expect(channelToCreate({ slug: "pricing", name: "Pricing" }))
+      .toEqual({ slug: "pricing", name: "Pricing" });
+  });
+
+  test("an address with no name is still a room", () => {
+    expect(channelToCreate({ slug: "pricing" })).toEqual({ slug: "pricing", name: "pricing" });
+  });
+
+  test("a cancelled dialog asks for nothing", () => {
+    expect(channelToCreate(null)).toBeNull();
+    expect(channelToCreate({ name: "Pricing" })).toBeNull();
   });
 });

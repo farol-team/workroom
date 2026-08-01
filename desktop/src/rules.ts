@@ -631,3 +631,39 @@ export function occupancyLabel(used: number, size: number): string | null {
   if (fraction < OCCUPANCY_THRESHOLD) return null;
   return `context ${Math.round(fraction * 100)}% full`;
 }
+
+/// A shape a room can be added with, as the server offers it.
+export interface RoomTemplate {
+  key: string; name: string; purpose: string; skills: string[]; taken: boolean;
+}
+
+/// Offered, never created — the server's own rule, kept here. A template whose
+/// room this workspace already has is still listed and cannot be picked: at the
+/// moment somebody is about to make a `# legal`, the fact that there is one is
+/// the thing they most need to know, and dropping it from the list would leave
+/// them wondering why the shape they remember is missing.
+export function pickable(t: RoomTemplate): boolean {
+  return !t.taken;
+}
+
+/// What a template opens the room knowing. Skills and never memory: a template
+/// cannot know a fact that is true for this room, but it can know how the work
+/// is done. Rooms that carry none say so as their purpose alone — an empty
+/// "opens knowing" reads as a promise the template does not keep.
+export function templateNote(t: RoomTemplate): string {
+  if (t.taken) return `${t.purpose} — this workspace already has one`;
+  if (!t.skills.length) return t.purpose;
+  return `${t.purpose} · opens knowing ${t.skills.join(", ").toLowerCase()}`;
+}
+
+/// What a filled-in dialog asks the server for. A chosen template travels as
+/// its key and nothing else: the name and purpose are the server's, and sending
+/// this client's copy of them would let the two drift apart on the first edit
+/// to `channel_templates.yml`.
+export function channelToCreate(
+  asked: { template?: string; slug?: string; name?: string } | null,
+): { template: string } | { slug: string; name: string } | null {
+  if (!asked) return null;
+  if (asked.template) return { template: asked.template };
+  return asked.slug ? { slug: asked.slug, name: asked.name ?? asked.slug } : null;
+}

@@ -49,6 +49,20 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     assert_equal [ "Held somewhere else" ], response.parsed_body.map { |e| e["title"] }
   end
 
+  # The listing is a bare array with nowhere in it to say which of the two this
+  # is, so for now it says the smaller thing: the room opens (#146). Telling an
+  # empty list from a store that is away needs a wire change and a client that
+  # reads it, which is the card filed after this one.
+  test "a listing from a store that cannot be reached is a listing, not a 500" do
+    with_store(Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                      api_key: "unused")) do
+      get api_v1_channel_memory_path(@channel.slug), headers: auth(@alice)
+    end
+
+    assert_response :success
+    assert_empty response.parsed_body
+  end
+
   test "what a person records is what the room lists" do
     post api_v1_channel_memory_path(@channel.slug),
          params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,

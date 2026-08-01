@@ -69,8 +69,11 @@ env:
     - STORAGE_BUCKET
     - STORAGE_ACCESS_KEY_ID
     - STORAGE_SECRET_ACCESS_KEY
-    # The context database, when one is configured. Without it memory is
-    # PostgreSQL, which works and retrieves by substring rather than by meaning.
+    # The context database. Required in production: a server that finds no
+    # store refuses to start rather than keep what every room knows in
+    # PostgreSQL, which retrieves by substring rather than by meaning. A
+    # workspace with an account of its own uses that instead; this is the store
+    # every room gets until one is provisioned.
     - OPENVIKING_URL
     - OPENVIKING_API_KEY
 
