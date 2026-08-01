@@ -1,21 +1,36 @@
 name: desktop
 
+# Unfiltered trigger, filtered work — see the note in server.yml. The filtering
+# now happens in the `changes` job so that `desktop-ci` always reports.
 on:
   push:
     branches: [main]
-    paths: ["desktop/**", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", ".github/workflows/desktop.yml"]
   # Full cross-platform bundles are expensive; build them on demand and on tags.
   workflow_dispatch:
 
-defaults:
-  run:
-    working-directory: desktop
-
 jobs:
-  check:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            desktop:
+              - 'desktop/**'
+              - '.github/workflows/desktop.yml'
+
+  check:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -38,6 +53,8 @@ jobs:
   # The bridge to the agent is the part everything else depends on, so it is
   # compiled on every change rather than only when a bundle is cut.
   bridge:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,6 +98,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
 
@@ -124,3 +144,21 @@ jobs:
           # The manifest the client checks. Without it the bundles exist and
           # nobody is told they do.
           includeUpdaterJson: true
+
+  # The required check. See the note on `server-ci`. `bundle` is deliberately
+  # not a dependency: it does not run on pull requests at all.
+  desktop-ci:
+    needs: [changes, check, bridge]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        run: |
+          echo "check: ${{ needs.check.result }}"
+          echo "bridge: ${{ needs.bridge.result }}"
+          for result in "${{ needs.check.result }}" "${{ needs.bridge.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          done

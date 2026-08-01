@@ -82,10 +82,40 @@ appeared in development:
 ## Releasing
 
 ```bash
-cd server && bin/kamal deploy
+cd server && bundle exec kamal deploy
 ```
 
 Kamal builds the image, pushes it, pulls it on the machine, boots the new
 container, waits for `/up`, and moves traffic across. The old container stays
 until the new one answers, so a failed boot is a deploy that did not happen
 rather than an outage.
+
+## From CI
+
+`.github/workflows/deploy.yml` runs the same command on every push to main that
+touches `server/**`, and on demand. It does not run the tests: `server-ci` and
+`desktop-ci` are required checks, so a commit only reaches main by way of a pull
+request that was already green.
+
+Values live in the repository, split by whether they are worth hiding. Settings
+go in Actions **variables**:
+
+```bash
+gh variable set WORKROOM_REGISTRY_ID --body "..."   # the Yandex registry id
+gh variable set WORKROOM_HOST        --body "..."   # the machine
+gh variable set WORKROOM_DOMAIN      --body "..."   # workroom.example
+```
+
+Everything in `.kamal/secrets` goes in Actions **secrets**, under the same names,
+plus three the workflow needs and a laptop does not:
+
+| | |
+|---|---|
+| `SSH_PRIVATE_KEY` | a key authorised on the machine, for CI alone, so it can be revoked without touching anybody's laptop |
+| `SSH_KNOWN_HOSTS` | `ssh-keyscan <host>` once, stored. Scanning on every deploy trusts whatever answers, and every secret below travels over that connection |
+| `YC_SERVICE_ACCOUNT_KEY` | the service account key JSON, used with the `json_key` username. The IAM token in the section above expires, and there is nothing on a runner to refresh one that dies mid-deploy |
+
+The deploy runs in the `production` environment. Adding required reviewers to it
+in repository settings is what turns "ships on merge" into "ships when somebody
+says so" — it is one setting, and it is the one to change if merging to main
+should stop being the same act as releasing.

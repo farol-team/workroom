@@ -1,0 +1,85 @@
+name: deploy
+
+# What lands on main has already been through `server-ci` and `desktop-ci` as
+# required checks, so a push here is a commit that was green in its pull
+# request. That is the whole reason this may deploy without testing again.
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one in flight: Kamal moving traffic
+# between containers is not a step that is safe to interrupt.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Add required reviewers to this environment to turn every deploy into
+    # something a person approves first. Without them it ships on merge.
+    environment:
+      name: production
+      url: https://${{ vars.WORKROOM_DOMAIN }}
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          working-directory: server
+          bundler-cache: false
+
+      - run: bundle install --jobs 4
+
+      # Kamal builds the image here before pushing it to the registry.
+      - uses: docker/setup-buildx-action@v3
+
+      # The host key is stored rather than scanned at deploy time. `ssh-keyscan`
+      # on every run trusts whatever answers, and what travels over this
+      # connection is every production secret below.
+      - name: SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: bundle exec kamal deploy
+        env:
+          WORKROOM_REGISTRY_ID: ${{ vars.WORKROOM_REGISTRY_ID }}
+          WORKROOM_HOST: ${{ vars.WORKROOM_HOST }}
+          WORKROOM_DOMAIN: ${{ vars.WORKROOM_DOMAIN }}
+
+          # A service account key authenticates without expiring, which an IAM
+          # token minted by `yc` does not. There is no `yc` on this runner and
+          # nothing to refresh a token that dies mid-deploy.
+          KAMAL_REGISTRY_USERNAME: json_key
+          KAMAL_REGISTRY_PASSWORD: ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WORKROOM_ALLOWED_ORIGINS: ${{ secrets.WORKROOM_ALLOWED_ORIGINS }}
+
+          OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
+          OIDC_CLIENT_ID: ${{ secrets.OIDC_CLIENT_ID }}
+          OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
+          OIDC_REDIRECT_URI: ${{ secrets.OIDC_REDIRECT_URI }}
+
+          STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
+          STORAGE_BUCKET: ${{ secrets.STORAGE_BUCKET }}
+          STORAGE_ACCESS_KEY_ID: ${{ secrets.STORAGE_ACCESS_KEY_ID }}
+          STORAGE_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_SECRET_ACCESS_KEY }}
+
+          OPENVIKING_URL: ${{ secrets.OPENVIKING_URL }}
+          OPENVIKING_API_KEY: ${{ secrets.OPENVIKING_API_KEY }}
