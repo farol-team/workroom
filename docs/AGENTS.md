@@ -28,7 +28,13 @@ different design.
 
 ## Which agents
 
-Any agent that speaks ACP. Two are known to work:
+The Claude adapter **ships with the application** — pinned, integrity-checked by
+the lockfile, and resolved from the bundle rather than fetched when somebody
+opens a channel (#120). A person who has configured nothing has an agent that is
+certainly there.
+
+Any other agent that speaks ACP works by naming its command in the definitions
+file, which is what that file is for. Two are known to work:
 
 | Agent | How | Notes |
 |---|---|---|
