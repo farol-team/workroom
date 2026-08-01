@@ -121,6 +121,16 @@
     <dialog id="make">
       <form method="dialog" id="make-form">
         <h3 id="make-title">New</h3>
+
+        <!-- Shapes the server offers, shown only where there are any — a
+             workspace has none. Picking one is picking what the room opens
+             knowing; naming your own below is the other half of the same
+             dialog, and neither is the lesser answer. -->
+        <div id="make-templates" hidden>
+          <p class="muted">Start from a shape, or name your own below.</p>
+          <div id="make-template-list"></div>
+        </div>
+
         <label>Name <input id="make-name" required autocomplete="off" /></label>
         <label>Address <input id="make-slug" required autocomplete="off"
                               pattern="[a-z0-9][a-z0-9._-]*"

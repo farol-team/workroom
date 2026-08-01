@@ -19,6 +19,9 @@ export interface Channel {
 }
 
 export { ADDRESS, parseAddress } from "./rules";
+export type { RoomTemplate } from "./rules";
+
+import type { RoomTemplate } from "./rules";
 
 export class Api {
   constructor(public base = "http://127.0.0.1:3000", public token = "") {}
@@ -111,9 +114,12 @@ export class Api {
       `/invitations/${encodeURIComponent(code)}/accept`, { method: "POST" });
   }
 
+  /// The shapes a room can be added with. `skills` is what the room would open
+  /// knowing, which is the whole of what a template is over an empty channel —
+  /// so it is carried here rather than dropped. `taken` is this workspace
+  /// already having that room.
   channelTemplates() {
-    return this.call<Array<{ key: string; name: string; purpose: string; taken: boolean }>>(
-      "/channel-templates");
+    return this.call<RoomTemplate[]>("/channel-templates");
   }
 
   /// The channel's capability rail, as the agent should mount it.

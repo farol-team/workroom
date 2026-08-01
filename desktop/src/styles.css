@@ -165,6 +165,21 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
 #make-form { display: flex; flex-direction: column; gap: .6rem; min-width: 22rem; }
 #make-form label { display: flex; flex-direction: column; gap: .2rem; }
 
+/* The shapes on offer. Scrolled rather than truncated — a template left off the
+   list is one nobody can ask for. */
+#make-template-list { display: flex; flex-direction: column; gap: .2rem;
+  max-height: 15rem; overflow-y: auto; }
+button.template { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem;
+  width: 100%; text-align: left; background: none; border: 1px solid transparent;
+  border-radius: 6px; padding: .4rem .5rem; color: var(--text); cursor: pointer; font-size: 13px; }
+button.template:hover:not(:disabled) { background: #22262e; }
+button.template.chosen { border-color: var(--accent); background: #22262e; }
+/* Taken shapes stay on the list and cannot be picked: at the moment somebody is
+   about to make a room, the fact that this workspace has one already is the
+   thing they most need to see. */
+button.template:disabled { cursor: default; opacity: .5; }
+#make-form input:disabled { opacity: .5; }
+
 #invite form, #join form { display: flex; flex-direction: column; gap: .6rem; min-width: 24rem; }
 #invite label, #join label { display: flex; flex-direction: column; gap: .2rem; }
 #invite-open div { font-family: monospace; font-size: .85em; padding: .1rem 0; }
