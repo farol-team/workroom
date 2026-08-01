@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
 import { invoke } from "@tauri-apps/api/core";
@@ -368,7 +368,7 @@ function offerTranscript(runId: number, name: string, sessionId: string) {
 function renderOptions() {
   const box = $("session-options");
   box.innerHTML = "";
-  const name = activeAgent();
+  const name = chosenAgent();
   if (!current || !name || !agents.isRunning(name)) return;
 
   for (const option of selectable(agents.configFor(name, current.slug))) {
@@ -567,7 +567,7 @@ $("input").addEventListener("input", refreshDestination);
 $("summon").addEventListener("click", () => {
   const input = $<HTMLInputElement>("input");
   if (!parseAddress(input.value, agents.definitions()).addressed) {
-    input.value = `@${activeAgent() ?? "agent"} ${input.value}`;
+    input.value = `@${chosenAgent() ?? "agent"} ${input.value}`;
   }
   input.focus();
   refreshDestination();
@@ -583,11 +583,9 @@ $("composer").addEventListener("submit", async (e) => {
   await send(text).catch((err) => alert(String(err)));
 });
 
-/// Which agent the controls act on: the one last acted on, or the default.
+/// The one chosen in the panel, if a choice has been made at all.
 let picked: string | undefined;
-function activeAgent(): string | undefined {
-  return picked ?? defaultAgent(agents.definitions());
-}
+const chosenAgent = () => activeAgent(agents.definitions(), picked);
 
 /// What a row is doing right now, when it is doing something. Held here rather
 /// than written into the row, because every render rebuilds it.
@@ -604,6 +602,7 @@ let prefix = "";
 function renderAgents() {
   const box = $("agents");
   box.innerHTML = "";
+  const chosen = chosenAgent();
 
   for (const def of agents.definitions()) {
     const profile = profileFor(def.name);
@@ -615,9 +614,17 @@ function renderAgents() {
     const row = document.createElement("div");
     row.className = "agent-row";
 
-    const name = document.createElement("span");
+    // The name is how one of them is chosen — what the picker was for, and the
+    // one thing the panel that replaced it did not carry over. Three agents are
+    // listed for everybody now, so two running at once is ordinary, and the
+    // second one's session options were reachable only by stopping the first.
+    const name = document.createElement("button");
+    name.className = "agent-name";
+    name.style.cssText = "background: none; border: 0; padding: 0; font: inherit; cursor: pointer;"
+      + `color: var(${def.name === chosen ? "--accent" : "--text"});`;
     name.textContent = profile?.label ?? def.name;
-    name.title = `${def.command} ${def.args.join(" ")}`.trim();
+    name.title = `${[ def.command, ...def.args ].join(" ")} — press to address this one`;
+    name.onclick = () => { picked = def.name; renderAgents(); renderOptions(); };
 
     const said = document.createElement("span");
     said.className = "muted";

@@ -43,6 +43,17 @@ export function defaultAgent(agents: AgentDef[]): string | undefined {
   return (agents.find((a) => a.default) ?? agents[0])?.name;
 }
 
+/// Which agent the controls act on: the one chosen, while it is still one this
+/// person has, and otherwise the default. Choosing is separate from addressing
+/// — `@agent` always means the default, and this is what the session options
+/// and the summon button follow.
+///
+/// A name nothing answers to is not a choice, so a definition that went away
+/// hands the controls back to the default rather than to nothing.
+export function activeAgent(agents: AgentDef[], chosen?: string): string | undefined {
+  return agents.some((a) => a.name === chosen) ? chosen : defaultAgent(agents);
+}
+
 /// The adapter ships with this application, so a person who has configured
 /// nothing has an agent that is certainly there — rather than one they are
 /// assumed to have installed, or one downloaded when they open a channel (#120).
