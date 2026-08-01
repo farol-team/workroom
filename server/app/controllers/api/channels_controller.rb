@@ -37,6 +37,10 @@ module Api
     def show
       channel!.memberships.find_or_create_by!(user: current_user)
       render json: serialize(channel!).merge(
+        # One store call, for one room somebody just opened. The listing does
+        # not carry this: a count per channel there is a fan-out across every
+        # room in the sidebar, paid on every refresh (#99).
+        memory_count: Memory::Store.current.count(channel!),
         messages: channel!.messages.includes(:author).order(:created_at).last(200).map { |m| MessageSerializer.call(m) }
       )
     end
@@ -52,9 +56,14 @@ module Api
 
     private
 
+    # No memory count here. It was read straight off `memory_entries`, which is
+    # empty for every channel once a context database is configured — so the
+    # number was not stale, it was structurally zero and would have stayed zero
+    # (#99). The store can answer it, but only one room at a time, so the answer
+    # belongs to `show`.
     def serialize(c)
       c.slice(:id, :slug, :name, :purpose, :visibility, :memory_uri)
-       .merge(message_count: c.messages.count, memory_count: c.memory_entries.current.count)
+       .merge(message_count: c.messages.count)
     end
   end
 end

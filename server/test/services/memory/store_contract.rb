@@ -162,6 +162,50 @@ module Memory
       assert_empty @store.all(@other)
     end
 
+    # --- count ----------------------------------------------------------------
+    #
+    # A number the sidebar can afford. `all(...).size` would answer it too, and
+    # would read every entry to do so — which is why this is a contract method
+    # and not a caller counting for itself. Counting the table instead is how a
+    # room that had learned things reported that it knew nothing (#99).
+
+    def test_count_is_zero_for_a_room_that_knows_nothing
+      assert_equal 0, @store.count(@other)
+    end
+
+    def test_count_is_what_the_room_currently_knows
+      @store.write(@channel, title: "Reporting cadence", detail: "Monthly.", trust: "human")
+      @store.write(@channel, title: "Pricing pattern", detail: "Setup cost.", trust: "agent")
+
+      assert_equal 2, retrieving { c = @store.count(@channel); c == 2 ? c : nil }
+    end
+
+    def test_count_never_crosses_into_another_channel
+      @store.write(@other, title: "Campaign brief", detail: "Elsewhere.", trust: "human")
+
+      assert_equal 0, @store.count(@channel),
+                   "a count that sees another room is the same defect as a listing that does"
+    end
+
+    # A procedure is not something the room learned. `all` excludes skills, so a
+    # count that includes them describes a different set than the listing beside
+    # it — and the number people see would rise when nobody learned anything.
+    def test_count_excludes_skills
+      @store.write_skill(@channel, title: "How we invoice", body: "Monthly, in arrears.")
+
+      assert_equal 0, @store.count(@channel)
+    end
+
+    def test_count_drops_when_an_entry_is_superseded
+      entry = @store.write(@channel, title: "Weekly", detail: "Weekly rollups.", key: "cadence")
+      assert_equal 1, retrieving { c = @store.count(@channel); c == 1 ? c : nil }
+
+      @store.supersede(entry.uri)
+
+      assert_equal 0, retrieving { c = @store.count(@channel); c.zero? ? c : nil },
+                   "what the room used to know is not what it knows"
+    end
+
     def test_fetch_returns_the_entry_a_search_pointed_at
       written = @store.write(@channel, title: "Cadence", detail: "Monthly rollups, first Tuesday.")
 
