@@ -43,6 +43,13 @@ jobs:
           cache-dependency-path: desktop/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+
+      # The agent adapter is a dependency now rather than something fetched from
+      # the internet when a person opens a channel. That is only worth anything
+      # if the registry's signatures are checked rather than admired.
+      - name: Signatures
+        run: pnpm audit signatures
+
       - name: Test
         run: pnpm test
       - name: Typecheck
