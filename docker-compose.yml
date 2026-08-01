@@ -14,7 +14,10 @@ services:
       timeout: 5s
       retries: 10
 
-  # The context database. Optional: without it the memory store is PostgreSQL.
+  # The context database. Optional here because here is development: without it
+  # the memory store is PostgreSQL, which is why the suite runs against no
+  # external service and bin/prototype runs with no credentials. A production
+  # server that finds no store refuses to start instead.
   # It computes abstracts and embeddings, so it needs a model provider of its
   # own — infrastructure inference, which Article P2 permits server-side and
   # permits for nothing else.
