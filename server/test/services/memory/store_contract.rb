@@ -102,6 +102,52 @@ module Memory
                       "history is corrected by superseding, never by editing (Article P6)"
     end
 
+    # --- the write policy ------------------------------------------------------
+    #
+    # What a key is derived from, what a collision does, and what fills the tiers
+    # a caller left out. Both stores wrote those rules out for themselves, in
+    # their own words — and two copies of a rule are two rules from the day one
+    # of them is touched. The answer must not depend on which store the workspace
+    # happens to be on, so it is pinned here rather than beside either (#177).
+
+    def test_a_title_written_again_corrects_what_was_there_however_often
+      @store.write(@channel, title: "Reporting cadence", detail: "Weekly.")
+      @store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
+
+      assert_equal [ "Monthly." ], @store.all(@channel).map(&:detail),
+                   "a title is a key: writing under it again corrects rather than adds (Article P6)"
+
+      @store.write(@channel, title: "Reporting cadence", detail: "Quarterly.")
+
+      assert_equal [ "Quarterly." ], @store.all(@channel).map(&:detail),
+                   "the third correction is the same act as the second"
+      assert_equal 1, retrieving { c = @store.count(@channel); c == 1 ? c : nil },
+                   "a room that was told one thing three times knows one thing"
+    end
+
+    def test_a_skill_written_again_under_the_same_title_supersedes_the_old_one
+      first  = @store.write_skill(@channel, title: "Running a client call", body: "Agenda first.")
+      second = @store.write_skill(@channel, title: "Running a client call",
+                                  body: "Agenda out the day before.")
+
+      refute_equal first.uri, second.uri, "a uri identifies an entry; two of them cannot share one"
+      assert_equal [ "Agenda out the day before." ], @store.skills(@channel).map(&:detail),
+                   "a procedure is corrected the way a fact is (Article P6)"
+    end
+
+    # The tiers a write did not state, and the key a title has nothing in it to
+    # give. Both stores answer this identically today, which is the whole reason
+    # it can be one rule — this is the assertion that says so out loud, and the
+    # one that goes red if the move changes what a caller gets back.
+    def test_a_write_that_gives_only_a_title_and_a_detail_gets_the_rest
+      entry = @store.write(@channel, title: "?!", detail: "The whole story.")
+
+      assert entry.uri.start_with?(@channel.memory_uri),
+             "#{entry.uri}: a title with no key in it is still filed under the channel"
+      assert_equal "The whole story.", entry.overview, "the orientation tier falls back to the detail"
+      assert_equal "?!", entry.abstract, "and the discovery tier to the title"
+    end
+
     # --- provenance -----------------------------------------------------------
     #
     # Article P3 removed the human gate on the strength of provenance being
