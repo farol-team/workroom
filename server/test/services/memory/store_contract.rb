@@ -114,6 +114,20 @@ module Memory
                  "history is corrected by superseding, and what was superseded leaves retrieval (Article P6)"
     end
 
+    # A store supersedes the uri it is handed and nothing beside it. Which uris
+    # an agent may hand it is the rail's question, not the store's — both stores
+    # obey whatever they are given, so the answer cannot live in one of them.
+    def test_superseding_here_leaves_another_room_knowing_what_it_knew
+      ours = @store.write(@channel, title: "Cadence", detail: "Weekly.", key: "cadence")
+      @store.write(@other, title: "Cadence", detail: "Weekly.", key: "cadence")
+
+      @store.supersede(ours.uri)
+
+      assert_empty @store.all(@channel)
+      assert_equal [ "Cadence" ], @store.all(@other).map(&:title),
+                   "a correction made in one room is not a correction in another (Article P5)"
+    end
+
     def test_superseding_something_that_is_not_there_is_not_an_error
       assert_nil @store.supersede("#{@channel.memory_uri}nothing")
     end
