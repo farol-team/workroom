@@ -139,9 +139,12 @@ contract suite, and no call site can tell which one is behind it.
 | Superseding | a timestamp on the row | the entry moves to `viking://resources/superseded/…` |
 | Needs | nothing | a model provider of its own |
 
-Set `OPENVIKING_URL` and `OPENVIKING_API_KEY` and the swap happens at boot.
-Without them the store is PostgreSQL, which is why the prototype runs with one
-command and no credentials at all.
+Set `OPENVIKING_URL` and `OPENVIKING_API_KEY` and the swap happens per request,
+because one process serves every workspace: a workspace with an account of its
+own uses that, and the environment is what every other room gets. Without either,
+the store is PostgreSQL — in development, which is why the prototype runs with
+one command and no credentials at all. In production there is no such fallback:
+a server that finds no store refuses to start.
 
 ### What the uri had to become
 
