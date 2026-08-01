@@ -158,18 +158,21 @@ export function mcpServersFor(rail?: Rail): unknown[] {
 /// has quietly moved the decision, and a client that invents an option the
 /// agent did not offer is answering a question it was not asked.
 export interface Asked {
-  id: number;
+  /// As the agent sent it. JSON-RPC allows a string here, and `Number("abc")`
+  /// is NaN — an answer addressed to nobody, which is a turn that never ends.
+  id: unknown;
   title: string;
   options: Array<{ id: string; name: string; kind?: string }>;
 }
 
 export function permissionAsked(event: unknown): Asked | null {
-  const e = event as { id?: number; request?: { method?: string; params?: any } };
+  const e = event as { id?: unknown; request?: { method?: string; params?: any } };
   if (e?.request?.method !== "session/request_permission") return null;
 
   const params = e.request.params ?? {};
   return {
-    id: Number(e.id),
+    // Passed through untouched, all the way back to the agent's stdin.
+    id: e.id,
     title: params.toolCall?.title ?? "The agent is asking to do something",
     options: (params.options ?? []).map((o: any) => ({
       id: String(o.optionId), name: String(o.name ?? o.optionId), kind: o.kind,

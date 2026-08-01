@@ -14,44 +14,75 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::{oneshot, Mutex};
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
+type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
+
+/// JSON-RPC 2.0 says an id is a String or a Number. We only ever send numbers,
+/// but what comes back is whatever the agent chose to send, and an agent that
+/// answers `3` with `"3"` is answering — so both spell the same key. What is
+/// quoted back to the agent is never this: that is the value as it arrived.
+fn id_key(id: &Value) -> String {
+    match id {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// An id worth routing on. `null` is legal JSON-RPC and means "no id".
+fn routable(id: &Value) -> bool {
+    id.is_string() || id.is_number()
+}
 
 /// What a line from the agent turns out to be, and the message itself.
 #[derive(Debug, PartialEq)]
 pub enum Inbound {
-    /// An answer to a request we made, awaited under this id.
-    Reply(u64, Value),
+    /// An answer to a request we made, awaited under this id. Carries the id as
+    /// it arrived; `id_key` is what the waiting caller is filed under.
+    Reply(Value, Value),
     /// The agent asking us something, and waiting. Carries the id its answer
     /// must quote — an unanswered request is a turn that never ends.
-    Ask(u64, Value),
+    Ask(Value, Value),
     /// The agent telling us something. Nothing is expected back.
     Notify(Value),
+    /// JSON-RPC we cannot route: an id that is neither string nor number, or a
+    /// frame with neither. Distinct from `Ignore` on purpose — this is the
+    /// agent speaking a protocol we both claim to speak, and dropping it in the
+    /// same silence as a log line is how a turn hangs with nothing to look at.
+    Unroutable(Value),
     /// Neither. A log line on stdout is not a reason to drop the connection.
     Ignore,
 }
 
 /// ACP runs in both directions, so an id does not mean "answer". A message
-/// carrying a method is the agent speaking even when it carries an id — and its
-/// ids are numbered from one, exactly like ours.
+/// carrying a method is the agent speaking even when it carries an id.
 pub fn classify(line: &str) -> Inbound {
     let Ok(msg) = serde_json::from_str::<Value>(line) else {
         return Inbound::Ignore;
     };
+    if !msg.is_object() {
+        return Inbound::Ignore;
+    }
+
     if msg.get("method").is_some() {
-        return match msg.get("id").and_then(|v| v.as_u64()) {
-            Some(id) => Inbound::Ask(id, msg),
-            None => Inbound::Notify(msg),
+        return match msg.get("id") {
+            None | Some(Value::Null) => Inbound::Notify(msg),
+            Some(id) if routable(id) => Inbound::Ask(id.clone(), msg),
+            // A question addressed by something we cannot quote back. The agent
+            // is waiting on it and always will be; saying so beats silence.
+            Some(_) => Inbound::Unroutable(msg),
         };
     }
-    match msg.get("id").and_then(|v| v.as_u64()) {
-        Some(id) => Inbound::Reply(id, msg),
-        None => Inbound::Ignore,
+
+    match msg.get("id") {
+        Some(id) if routable(id) => Inbound::Reply(id.clone(), msg),
+        _ if msg.get("jsonrpc").is_some() => Inbound::Unroutable(msg),
+        _ => Inbound::Ignore,
     }
 }
 
-/// An answer to something the agent asked. It quotes the id or it answers
-/// nobody: the agent is blocked on that number.
-pub fn answer_frame(id: u64, result: Value) -> String {
+/// An answer to something the agent asked. It quotes the id **as it arrived**
+/// or it answers nobody: the agent is blocked on that exact token, and a number
+/// we re-serialised is not the string it sent.
+pub fn answer_frame(id: &Value, result: Value) -> String {
     let frame = json!({ "jsonrpc": "2.0", "id": id, "result": result });
     format!("{frame}\n")
 }
@@ -145,7 +176,7 @@ impl Agent {
                 while let Ok(Some(line)) = lines.next_line().await {
                     match classify(&line) {
                         Inbound::Reply(id, msg) => {
-                            if let Some(tx) = pending.lock().await.remove(&id) {
+                            if let Some(tx) = pending.lock().await.remove(&id_key(&id)) {
                                 let _ = tx.send(msg);
                             }
                         }
@@ -157,6 +188,13 @@ impl Agent {
                         }
                         Inbound::Notify(msg) => {
                             let _ = app.emit("acp://notify", msg);
+                        }
+                        // Nowhere better to put it yet — surfacing what the
+                        // agent says is #93's subject. What matters here is
+                        // that it is no longer indistinguishable from a log
+                        // line the bridge was right to skip.
+                        Inbound::Unroutable(msg) => {
+                            eprintln!("acp: cannot route {msg}");
                         }
                         Inbound::Ignore => {}
                     }
@@ -192,7 +230,9 @@ impl Agent {
             *n
         };
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        // Filed under the same key the reply will be looked up by, whichever
+        // way the agent chooses to spell the id back.
+        self.pending.lock().await.insert(id_key(&json!(id)), tx);
 
         {
             let mut w = self.stdin.lock().await;
@@ -207,7 +247,7 @@ impl Agent {
 
     /// Answer something the agent asked. One line, quoting its id — the agent is
     /// blocked until it arrives.
-    pub async fn answer(&self, id: u64, result: Value) -> Result<(), String> {
+    pub async fn answer(&self, id: &Value, result: Value) -> Result<(), String> {
         let line = answer_frame(id, result);
         let mut w = self.stdin.lock().await;
         w.write_all(line.as_bytes())
@@ -299,8 +339,58 @@ mod tests {
     fn an_error_is_still_a_reply() {
         assert!(matches!(
             classify(r#"{"jsonrpc":"2.0","id":7,"error":{"code":-32601}}"#),
-            Inbound::Reply(7, _)
+            Inbound::Reply(id, _) if id == 7
         ));
+    }
+
+    // JSON-RPC 2.0 says an id is a String or a Number. Everything this client
+    // has ever spoken to numbers them, which is why reading ids with `as_u64`
+    // was invisible: the first agent to use strings does not fail, it hangs.
+
+    #[test]
+    fn a_reply_under_a_string_id_still_reaches_whoever_asked() {
+        let Inbound::Reply(id, msg) =
+            classify(r#"{"jsonrpc":"2.0","id":"7","result":{"ok":true}}"#)
+        else {
+            panic!("a string id is an id")
+        };
+        assert_eq!(msg["result"]["ok"], true);
+        assert_eq!(
+            id_key(&id),
+            id_key(&json!(7)),
+            "an agent that answers 7 with \"7\" is answering, and the caller is filed under one key"
+        );
+    }
+
+    #[test]
+    fn a_question_under_a_string_id_is_a_question() {
+        let Inbound::Ask(id, _) = classify(
+            r#"{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{}}"#,
+        ) else {
+            panic!("a method with a string id is a question, not an announcement")
+        };
+        assert_eq!(id, "perm-1");
+    }
+
+    #[test]
+    fn an_answer_quotes_a_string_id_as_it_arrived() {
+        let line = answer_frame(&json!("perm-1"), json!({ "outcome": "cancelled" }));
+        let parsed: Value = serde_json::from_str(line.trim_end()).unwrap();
+
+        assert_eq!(
+            parsed["id"], "perm-1",
+            "the agent is blocked on that exact token, not on our reading of it"
+        );
+    }
+
+    #[test]
+    fn json_rpc_we_cannot_route_is_not_a_log_line() {
+        // Both are dropped, and only one of them should be quiet about it.
+        assert!(matches!(
+            classify(r#"{"jsonrpc":"2.0","id":{"seq":1},"method":"session/request_permission"}"#),
+            Inbound::Unroutable(_)
+        ));
+        assert_eq!(classify("Listening on stdio..."), Inbound::Ignore);
     }
 
     #[test]
@@ -311,7 +401,7 @@ mod tests {
         // is handed to whoever awaits our first request.
         assert!(matches!(
             classify(r#"{"jsonrpc":"2.0","id":1,"method":"session/request_permission"}"#),
-            Inbound::Ask(1, _)
+            Inbound::Ask(id, _) if id == 1
         ));
     }
 
@@ -338,7 +428,7 @@ mod tests {
     #[test]
     fn an_answer_quotes_the_id_it_answers() {
         let line = answer_frame(
-            7,
+            &json!(7),
             json!({ "outcome": { "outcome": "selected", "optionId": "yes" } }),
         );
         let parsed: Value = serde_json::from_str(line.trim_end()).unwrap();
@@ -359,7 +449,13 @@ mod tests {
     fn a_stray_log_line_does_not_take_the_bridge_down() {
         assert_eq!(classify("Listening on stdio..."), Inbound::Ignore);
         assert_eq!(classify(""), Inbound::Ignore);
-        assert_eq!(classify(r#"{"jsonrpc":"2.0"}"#), Inbound::Ignore);
+        assert_eq!(classify("42"), Inbound::Ignore);
+        // A frame with neither method nor id used to land here too, and it is
+        // not a log line — it is us and the agent disagreeing about JSON-RPC.
+        assert!(matches!(
+            classify(r#"{"jsonrpc":"2.0"}"#),
+            Inbound::Unroutable(_)
+        ));
     }
 
     #[test]
