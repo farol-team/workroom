@@ -1,0 +1,1 @@
+{"date":"2026-08-01","card":"i131","type":"pitfall","key":"catalog-specs-must-pin-literals","insight":"Specs over data modules in `desktop/src` are stub-passable whenever the expected value is read back out of the module under test (`toBe(profile.cliInstall.unix)`), so catalog contents must be asserted as literal strings.","confidence":8,"files":["desktop/test/catalog.test.ts"]}
