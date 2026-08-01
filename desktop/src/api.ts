@@ -61,6 +61,32 @@ export class Api {
 
   channels() { return this.call<Channel[]>("/channels"); }
 
+  /// The rooms this person belongs to. Without tokens, deliberately — see
+  /// `Rooms` in rules.ts for why one is never fetched.
+  workspaces() {
+    return this.call<Array<{ id: number; slug: string; name: string; role: string;
+                             has_own_context_store: boolean }>>("/workspaces");
+  }
+
+  /// A room, and the token that reaches it — which comes back because the
+  /// caller just made it, and from nowhere else.
+  createWorkspace(slug: string, name: string) {
+    return this.call<{ slug: string; name: string; role: string; token: string }>("/workspaces", {
+      method: "POST", body: JSON.stringify({ slug, name }),
+    });
+  }
+
+  /// A channel in the room this token names. `template` fills one in from the
+  /// shapes the server offers; without it the three fields are the channel.
+  createChannel(body: { slug?: string; name?: string; purpose?: string; template?: string }) {
+    return this.call<Channel>("/channels", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  channelTemplates() {
+    return this.call<Array<{ key: string; name: string; purpose: string; taken: boolean }>>(
+      "/channel-templates");
+  }
+
   /// The channel's capability rail, as the agent should mount it.
   rail(slug: string) {
     return { url: `${this.base}/api/v1/rail/${slug}`, token: this.token };

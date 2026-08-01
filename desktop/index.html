@@ -13,7 +13,15 @@
           <strong>WorkRoom</strong>
           <span id="who" class="muted"></span>
         </header>
+        <!-- Which room's server this is. A person in two of them holds two
+             tokens, so the list is what this client was given a way into
+             rather than everything they belong to. -->
+        <div id="workspace-bar">
+          <select id="workspace-pick" title="Workspace"></select>
+          <button type="button" id="workspace-new" class="ghost" title="New workspace">+</button>
+        </div>
         <nav id="channels"></nav>
+        <button type="button" id="channel-new" class="ghost">New channel</button>
         <!-- One row per agent, so an agent you did not guess the name of is
              not one you do not have. Laid out here because the footer is a
              row and this is a list. The name in a row is also how one of them
@@ -68,6 +76,21 @@
         </form>
       </aside>
     </div>
+
+    <dialog id="make">
+      <form method="dialog" id="make-form">
+        <h3 id="make-title">New</h3>
+        <label>Name <input id="make-name" required autocomplete="off" /></label>
+        <label>Address <input id="make-slug" required autocomplete="off"
+                              pattern="[a-z0-9][a-z0-9._-]*"
+                              title="lowercase letters, numbers, dot, dash or underscore" /></label>
+        <p id="make-note" class="muted"></p>
+        <menu>
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button id="make-go" value="go">Create</button>
+        </menu>
+      </form>
+    </dialog>
 
     <dialog id="signin">
       <h2>Sign in</h2>

@@ -156,3 +156,11 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
 /* Said once, at the top, and never in the way of the work. */
 .notice { padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--accent);
   font-size: 13px; display: flex; align-items: center; gap: 8px; }
+
+/* Which room's server this is, above its channels. Hidden when there is one,
+   because a picker with a single option is a control that does nothing. */
+#workspace-bar { display: flex; gap: .4rem; align-items: center; padding: 0 .6rem .4rem; }
+#workspace-pick { flex: 1; min-width: 0; }
+#channel-new { margin: .4rem .6rem; text-align: left; }
+#make-form { display: flex; flex-direction: column; gap: .6rem; min-width: 22rem; }
+#make-form label { display: flex; flex-direction: column; gap: .2rem; }
