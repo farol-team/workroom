@@ -91,7 +91,7 @@ Two traps for whoever implements it:
   stated at all — precisely the channel where the agent has least to go on and
   most room to wander.
 - the endpoint already returns `memory_uri` alongside the context
-  (`GET /api/channels/:slug/context`), so the root can be named exactly rather
+  (`GET /api/v1/channels/:slug/context`), so the root can be named exactly rather
   than described.
 
 ## Consequences taken deliberately

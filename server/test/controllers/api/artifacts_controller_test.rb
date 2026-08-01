@@ -1,6 +1,6 @@
 require "test_helper"
 
-class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::ArtifactsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel
     @alice = user(name: "Alice")
@@ -13,7 +13,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
 
   test "a transcript is attached to the run it came from" do
     assert_difference -> { Artifact.count }, 1 do
-      post api_run_artifacts_path(@run),
+      post api_v1_run_artifacts_path(@run),
            params: { name: "transcript.json", kind: "transcript", content: @transcript }.to_json,
            headers: auth(@alice).merge(@json)
     end
@@ -31,7 +31,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
     # corrupted, and nothing complains — the file is simply wrong on download.
     png = "\x89PNG\r\n\x1a\n\x00\x00\x00binary".b
 
-    post api_run_artifacts_path(@run),
+    post api_v1_run_artifacts_path(@run),
          params: { name: "chart.png", kind: "file", content_type: "image/png",
                    content_base64: Base64.strict_encode64(png) }.to_json,
          headers: auth(@alice).merge(@json)
@@ -42,7 +42,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "an attachment must carry something" do
-    post api_run_artifacts_path(@run),
+    post api_v1_run_artifacts_path(@run),
          params: { name: "empty.png", kind: "file" }.to_json,
          headers: auth(@alice).merge(@json)
 
@@ -52,7 +52,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
 
   test "attaching does not touch the channel's memory" do
     assert_no_difference -> { MemoryEntry.count } do
-      post api_run_artifacts_path(@run),
+      post api_v1_run_artifacts_path(@run),
            params: { name: "transcript.json", kind: "transcript", content: @transcript }.to_json,
            headers: auth(@alice).merge(@json)
     end
@@ -60,7 +60,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
 
   test "the channel learns of it" do
     payloads = broadcasts(@channel) do
-      post api_run_artifacts_path(@run),
+      post api_v1_run_artifacts_path(@run),
            params: { name: "transcript.json", kind: "transcript", content: @transcript }.to_json,
            headers: auth(@alice).merge(@json)
     end
@@ -69,18 +69,18 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "the channel's artifacts are listed" do
-    post api_run_artifacts_path(@run),
+    post api_v1_run_artifacts_path(@run),
          params: { name: "transcript.json", kind: "transcript", content: @transcript }.to_json,
          headers: auth(@alice).merge(@json)
 
-    get api_channel_artifacts_path(@channel.slug), headers: auth(@alice)
+    get api_v1_channel_artifacts_path(@channel.slug), headers: auth(@alice)
 
     assert_response :success
     assert_equal [ "transcript.json" ], response.parsed_body.map { |a| a["name"] }
   end
 
   test "somebody else's run will not take an artifact" do
-    post api_run_artifacts_path(@run),
+    post api_v1_run_artifacts_path(@run),
          params: { name: "x.json", content: "{}" }.to_json,
          headers: auth(user(name: "Bob")).merge(@json)
 
@@ -88,7 +88,7 @@ class Api::ArtifactsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "an unauthenticated request is refused" do
-    post api_run_artifacts_path(@run), params: { name: "x.json", content: "{}" }.to_json, headers: @json
+    post api_v1_run_artifacts_path(@run), params: { name: "x.json", content: "{}" }.to_json, headers: @json
 
     assert_response :unauthorized
   end

@@ -2,7 +2,7 @@ require "test_helper"
 
 # The rail is one MCP endpoint with exactly two tools. Fifty skills as fifty
 # tools would charge every session for fifty schemas before anything happened.
-class Api::RailControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel(name: "Meetings")
     @alice = user(name: "Alice")
@@ -13,7 +13,7 @@ class Api::RailControllerTest < ActionDispatch::IntegrationTest
   end
 
   def rpc(method, params = {}, user: @alice, slug: @channel.slug)
-    post api_rail_path(slug),
+    post api_v1_rail_path(slug),
          params: { jsonrpc: "2.0", id: 1, method: method, params: params }.to_json,
          headers: (user ? auth(user) : {}).merge(@json)
     response.parsed_body

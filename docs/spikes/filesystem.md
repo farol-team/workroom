@@ -61,7 +61,7 @@ and nobody read it. Agreed on the first Tuesday of each month.
 
 Every field a memory entry carries survives the trip: `uri`, `trust`, author,
 timestamp, title, detail. Nothing had to be invented, and no new server endpoint
-is needed — `GET /api/channels/:slug/memory` already returns all of it.
+is needed — `GET /api/v1/channels/:slug/memory` already returns all of it.
 
 So the cost of the mirror is not the mirror. It is what happens next.
 

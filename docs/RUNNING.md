@@ -94,7 +94,7 @@ handed to the session when it opened. Open **What the room knows** to see exactl
 what it was given — `•` for what a person stated, `◦` for what an agent inferred.
 
 **The rail.** The agent has two tools, `search_capabilities` and
-`execute_capability`, pointed at `/api/rail/meetings`. The channel is in the URL,
+`execute_capability`, pointed at `/api/v1/rail/meetings`. The channel is in the URL,
 so the scope is structural: an agent working in `# meetings` cannot reach
 `# marketing`'s memory by asking differently.
 

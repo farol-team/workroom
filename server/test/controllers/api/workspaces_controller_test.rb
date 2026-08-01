@@ -3,14 +3,14 @@ require "test_helper"
 # #118 built the boundary and left no way through the front door: a room was
 # made by a migration or by a console, and onboarding a team was three manual
 # steps. This is the door.
-class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
+class Api::V1::WorkspacesControllerTest < ActionDispatch::IntegrationTest
   setup do
     @alice = user(name: "Alice")
     @json = { "Content-Type" => "application/json" }
   end
 
   def make(slug:, name: "Acme", as: @alice)
-    post api_workspaces_path, params: { slug:, name: }.to_json, headers: auth(as).merge(@json)
+    post api_v1_workspaces_path, params: { slug:, name: }.to_json, headers: auth(as).merge(@json)
     response.parsed_body
   end
 
@@ -35,7 +35,7 @@ class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
   test "the new workspace opens with rooms rather than an empty screen" do
     token = make(slug: "acme-#{SecureRandom.hex(3)}")["token"]
 
-    get api_channels_path, headers: { "Authorization" => "Bearer #{token}" }
+    get api_v1_channels_path, headers: { "Authorization" => "Bearer #{token}" }
 
     assert_response :success
     assert_equal %w[general meetings random], response.parsed_body.map { |c| c["slug"] }.sort
@@ -45,7 +45,7 @@ class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
     channel(slug: "salaries-#{SecureRandom.hex(3)}", name: "Salaries")
     token = make(slug: "acme-#{SecureRandom.hex(3)}")["token"]
 
-    get api_channels_path, headers: { "Authorization" => "Bearer #{token}" }
+    get api_v1_channels_path, headers: { "Authorization" => "Bearer #{token}" }
 
     refute_includes response.parsed_body.map { |c| c["name"] }, "Salaries",
                     "the boundary, seen from outside: a new room holds nobody else's channels"
@@ -75,7 +75,7 @@ class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
     mine = make(slug: "mine-#{SecureRandom.hex(3)}")
     make(slug: "theirs-#{SecureRandom.hex(3)}", as: user(name: "Bob"))
 
-    get api_workspaces_path, headers: auth(@alice)
+    get api_v1_workspaces_path, headers: auth(@alice)
     slugs = response.parsed_body.map { |w| w["slug"] }
 
     assert_includes slugs, mine["slug"]
@@ -85,7 +85,7 @@ class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
   test "listing hands over no tokens" do
     make(slug: "acme-#{SecureRandom.hex(3)}")
 
-    get api_workspaces_path, headers: auth(@alice)
+    get api_v1_workspaces_path, headers: auth(@alice)
 
     response.parsed_body.each do |room|
       assert_nil room["token"],
@@ -118,7 +118,7 @@ class Api::WorkspacesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "nobody signed in makes nothing" do
-    post api_workspaces_path, params: { slug: "x", name: "X" }.to_json, headers: @json
+    post api_v1_workspaces_path, params: { slug: "x", name: "X" }.to_json, headers: @json
 
     assert_response :unauthorized
   end

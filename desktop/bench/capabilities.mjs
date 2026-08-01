@@ -38,7 +38,7 @@ const INITIALIZE = frame(1, "initialize", {
 const NEW_SESSION = frame(2, "session/new", {
   cwd: process.cwd(),
   mcpServers: [ {
-    name: "workroom", type: "http", url: "http://127.0.0.1:1/api/rail/bench",
+    name: "workroom", type: "http", url: "http://127.0.0.1:1/api/v1/rail/bench",
     headers: [ { name: "Authorization", value: "Bearer bench" } ],
   } ],
 });

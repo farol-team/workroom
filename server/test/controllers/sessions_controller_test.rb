@@ -112,7 +112,7 @@ class SignInMethodsTest < ActionDispatch::IntegrationTest
   test "a workspace says how it lets people in" do
     # The client cannot guess: a workspace with a provider must not offer a box
     # that takes any address, and one without a provider must offer something.
-    get api_auth_methods_path
+    get api_v1_auth_methods_path
 
     assert_response :success
     assert_equal true, response.parsed_body["development"]
@@ -126,14 +126,14 @@ class WhoAmITest < ActionDispatch::IntegrationTest
   test "a client that signed in through the browser can ask whose token it holds" do
     alice = user(name: "Alice")
 
-    get api_me_path, headers: auth(alice)
+    get api_v1_me_path, headers: auth(alice)
 
     assert_response :success
     assert_equal alice.name, response.parsed_body.dig("user", "name")
   end
 
   test "a token nobody issued gets nothing" do
-    get api_me_path, headers: { "Authorization" => "Bearer not-a-token" }
+    get api_v1_me_path, headers: { "Authorization" => "Bearer not-a-token" }
 
     assert_response :unauthorized
   end
@@ -141,7 +141,7 @@ end
 
 class DevelopmentSignInTest < ActionDispatch::IntegrationTest
   test "development sign-in works where it is meant to" do
-    post api_auth_path, params: { email: "new@farol.run" }.to_json,
+    post api_v1_auth_path, params: { email: "new@farol.run" }.to_json,
          headers: { "Content-Type" => "application/json" }
 
     assert_response :success
@@ -152,7 +152,7 @@ class DevelopmentSignInTest < ActionDispatch::IntegrationTest
     # A forgotten development path is an open door: any address, no proof.
     Rails.configuration.x.dev_signin = false
     assert_no_difference -> { User.count } do
-      post api_auth_path, params: { email: "intruder@example.com" }.to_json,
+      post api_v1_auth_path, params: { email: "intruder@example.com" }.to_json,
            headers: { "Content-Type" => "application/json" }
     end
     assert_response :not_found

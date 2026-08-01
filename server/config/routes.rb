@@ -10,7 +10,13 @@ Rails.application.routes.draw do
   post "auth/:provider/callback", to: "sessions#create"
   get  "auth/failure",            to: "sessions#failure"
 
+  # Versioned, because the desktop client is installed on people's machines and
+  # updated when they say so (#69) — so old ones exist by design, and a response
+  # shape that changes under one of them fails the way #94 describes: the turn
+  # completes and the answer is wrong. `/up` is not here; a health check is not
+  # an API.
   namespace :api do
+    namespace :v1 do
     post "auth", to: "auth#create"
     get  "auth/methods", to: "auth#methods_available", as: :auth_methods
     get  "me", to: "auth#me", as: :me
@@ -44,4 +50,5 @@ Rails.application.routes.draw do
     post "runs/:run_id/artifacts",           to: "artifacts#create", as: :run_artifacts
     post "runs/:id/messages", to: "runs#message", as: :run_messages
   end
+    end
 end

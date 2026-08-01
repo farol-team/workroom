@@ -9,7 +9,7 @@ require "test_helper"
 #
 # An endpoint added later without the filter fails here rather than shipping a
 # double render.
-class Api::AuthorizationTest < ActionDispatch::IntegrationTest
+class Api::V1::AuthorizationTest < ActionDispatch::IntegrationTest
   setup do
     @channel = Channel.create!(slug: "private-#{SecureRandom.hex(3)}", name: "Private",
                                visibility: "private")
@@ -24,14 +24,14 @@ class Api::AuthorizationTest < ActionDispatch::IntegrationTest
 
   def endpoints
     [
-      [ :get,  -> { api_channel_path(@channel.slug) },           nil ],
-      [ :get,  -> { api_channel_context_path(@channel.slug) },   nil ],
-      [ :post, -> { api_channel_messages_path(@channel.slug) },  { body: "hello" } ],
-      [ :get,  -> { api_channel_memory_path(@channel.slug) },    nil ],
-      [ :post, -> { api_channel_memory_path(@channel.slug) },    { title: "T", detail: "D" } ],
-      [ :post, -> { api_channel_runs_path(@channel.slug) },      {} ],
-      [ :get,  -> { api_channel_artifacts_path(@channel.slug) }, nil ],
-      [ :post, -> { api_rail_path(@channel.slug) },              { jsonrpc: "2.0", id: 1, method: "tools/list" } ]
+      [ :get,  -> { api_v1_channel_path(@channel.slug) },           nil ],
+      [ :get,  -> { api_v1_channel_context_path(@channel.slug) },   nil ],
+      [ :post, -> { api_v1_channel_messages_path(@channel.slug) },  { body: "hello" } ],
+      [ :get,  -> { api_v1_channel_memory_path(@channel.slug) },    nil ],
+      [ :post, -> { api_v1_channel_memory_path(@channel.slug) },    { title: "T", detail: "D" } ],
+      [ :post, -> { api_v1_channel_runs_path(@channel.slug) },      {} ],
+      [ :get,  -> { api_v1_channel_artifacts_path(@channel.slug) }, nil ],
+      [ :post, -> { api_v1_rail_path(@channel.slug) },              { jsonrpc: "2.0", id: 1, method: "tools/list" } ]
     ]
   end
 
@@ -66,7 +66,7 @@ class Api::AuthorizationTest < ActionDispatch::IntegrationTest
 
   test "an open channel admits anyone" do
     open_channel = channel
-    get api_channel_path(open_channel.slug), headers: auth(@outsider)
+    get api_v1_channel_path(open_channel.slug), headers: auth(@outsider)
 
     assert_response :success
   end

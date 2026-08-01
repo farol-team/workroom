@@ -4,7 +4,7 @@ require "test_helper"
 # alternative — authenticate, then remember to scope — is the shape every
 # multi-tenant leak has, and the point of #134 is that there is no second step
 # for anybody to forget.
-class Api::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
+class Api::V1::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
   setup do
     @workspace = Workspace.create!(slug: "acme-#{SecureRandom.hex(3)}", name: "Acme")
     @alice = user(name: "Alice", workspace: @workspace)
@@ -12,7 +12,7 @@ class Api::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
   end
 
   def me(token)
-    get api_me_path, headers: { "Authorization" => "Bearer #{token}" }
+    get api_v1_me_path, headers: { "Authorization" => "Bearer #{token}" }
   end
 
   test "a membership token is the person and the room at once" do
@@ -29,7 +29,7 @@ class Api::WorkspaceAuthenticationTest < ActionDispatch::IntegrationTest
   end
 
   test "no token at all is not a person with no token" do
-    get api_me_path
+    get api_v1_me_path
 
     assert_response :unauthorized
   end

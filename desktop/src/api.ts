@@ -24,7 +24,7 @@ export class Api {
   constructor(public base = "http://127.0.0.1:3000", public token = "") {}
 
   private async call<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.base}/api${path}`, {
+    const res = await fetch(`${this.base}/api/v1${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -63,7 +63,7 @@ export class Api {
 
   /// The channel's capability rail, as the agent should mount it.
   rail(slug: string) {
-    return { url: `${this.base}/api/rail/${slug}`, token: this.token };
+    return { url: `${this.base}/api/v1/rail/${slug}`, token: this.token };
   }
 
   channel(slug: string) {

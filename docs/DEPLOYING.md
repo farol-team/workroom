@@ -75,7 +75,7 @@ and seeds a database it just created, so this is a guard rather than a
 convention.
 
 A workspace with no `OIDC_ISSUER` has **no way to sign in**, and says so: the
-client asks `/api/auth/methods`, gets `development: false, provider: false`, and
+client asks `/api/v1/auth/methods`, gets `development: false, provider: false`, and
 shows a sentence instead of a form that cannot work. That is the correct state
 for a server that is up before its identity provider is configured.
 
