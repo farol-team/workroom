@@ -106,6 +106,43 @@ pub struct Agent {
     pending: Pending,
     next_id: Mutex<u64>,
     child: Mutex<Child>,
+    /// Everything the agent said about itself when it was asked. Kept, because
+    /// the handshake is where we find out the rail cannot work, and throwing it
+    /// away meant finding out never (#94).
+    handshake: Mutex<Value>,
+}
+
+/// Whether an agent says it can mount an HTTP MCP server — which is the only way
+/// the capability rail reaches it. Read from either place agents put it: the
+/// protocol nests it under `agentCapabilities`, and docs/AGENTS.md records
+/// opencode reporting it at the top level.
+pub fn mounts_http_mcp(handshake: &Value) -> bool {
+    handshake
+        .pointer("/agentCapabilities/mcpCapabilities/http")
+        .or_else(|| handshake.pointer("/mcpCapabilities/http"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// How this agent says a person logs in, if it says at all. The one actionable
+/// sentence an agent offers before a session can be opened, and it arrives only
+/// here — `session/new` on a logged-out agent answers with an internal error.
+pub fn auth_hint(handshake: &Value) -> Option<String> {
+    let methods = handshake.get("authMethods")?.as_array()?;
+    let hints: Vec<String> = methods
+        .iter()
+        .filter_map(|m| {
+            let name = m.get("name").and_then(Value::as_str);
+            let how = m.get("description").and_then(Value::as_str);
+            match (name, how) {
+                (Some(n), Some(d)) => Some(format!("{n} — {d}")),
+                (Some(n), None) => Some(n.to_string()),
+                (None, Some(d)) => Some(d.to_string()),
+                _ => None,
+            }
+        })
+        .collect();
+    (!hints.is_empty()).then(|| hints.join("; "))
 }
 
 /// The agents a person is running, by the name they address them with. Generic
@@ -208,19 +245,38 @@ impl Agent {
             pending,
             next_id: Mutex::new(0),
             child: Mutex::new(child),
+            handshake: Mutex::new(Value::Null),
         });
 
-        agent
+        const PROTOCOL_VERSION: i64 = 1;
+        let handshake = agent
             .request(
                 "initialize",
                 json!({
-                    "protocolVersion": 1,
+                    "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false } }
                 }),
             )
             .await?;
 
+        // An agent answering a version we did not ask for is worth saying before
+        // the first turn rather than after it behaves oddly. Not fatal: the
+        // protocol is young and this is information, not a verdict.
+        match handshake.get("protocolVersion").and_then(Value::as_i64) {
+            Some(v) if v == PROTOCOL_VERSION => {}
+            other => {
+                eprintln!("acp: asked for protocol {PROTOCOL_VERSION}, agent answered {other:?}")
+            }
+        }
+
+        *agent.handshake.lock().await = handshake;
         Ok(agent)
+    }
+
+    /// What the agent said about itself. Empty until the handshake completes,
+    /// which cannot be observed from outside — `launch` does not return early.
+    pub async fn handshake(&self) -> Value {
+        self.handshake.lock().await.clone()
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -381,6 +437,61 @@ mod tests {
             parsed["id"], "perm-1",
             "the agent is blocked on that exact token, not on our reading of it"
         );
+    }
+
+    // The handshake is the only place an agent says whether the rail can reach
+    // it. Discarded, the answer was assumed — and an agent that cannot mount an
+    // HTTP MCP server accepts the session, ignores the rail, and answers the
+    // turn confidently from nothing.
+
+    #[test]
+    fn an_agent_that_mounts_http_mcp_says_so_wherever_it_says_it() {
+        // The protocol nests this under agentCapabilities; docs/AGENTS.md
+        // records opencode reporting it at the top level. Both are the agent
+        // saying yes.
+        assert!(mounts_http_mcp(&json!({
+            "agentCapabilities": { "mcpCapabilities": { "http": true, "sse": true } }
+        })));
+        assert!(mounts_http_mcp(&json!({
+            "mcpCapabilities": { "http": true, "sse": true }
+        })));
+    }
+
+    #[test]
+    fn silence_about_http_mcp_is_not_a_yes() {
+        assert!(!mounts_http_mcp(&json!({})));
+        assert!(!mounts_http_mcp(&Value::Null));
+        assert!(!mounts_http_mcp(&json!({
+            "agentCapabilities": { "mcpCapabilities": { "sse": true } }
+        })));
+        assert!(
+            !mounts_http_mcp(&json!({
+                "agentCapabilities": { "mcpCapabilities": { "http": false } }
+            })),
+            "an agent that says no is not an agent that said nothing"
+        );
+    }
+
+    #[test]
+    fn the_way_in_is_whatever_the_agent_said_it_was() {
+        // Measured against @agentclientprotocol/claude-agent-acp: a logged-out
+        // agent answers session/new with an opaque internal error and puts the
+        // instruction here.
+        let hint = auth_hint(&json!({
+            "authMethods": [ { "id": "claude-login", "name": "Log in with Claude Code",
+                               "description": "Run `claude /login` in the terminal" } ]
+        }));
+
+        let Some(hint) = hint else {
+            panic!("an agent that says how to log in must be quoted")
+        };
+        assert!(hint.contains("claude /login"), "the instruction survives");
+    }
+
+    #[test]
+    fn an_agent_with_nothing_to_say_about_logging_in_says_nothing() {
+        assert_eq!(auth_hint(&json!({ "authMethods": [] })), None);
+        assert_eq!(auth_hint(&json!({})), None);
     }
 
     #[test]
