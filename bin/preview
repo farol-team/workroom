@@ -26,7 +26,13 @@ curl -sf "$SERVER/up" >/dev/null 2>&1 || fail "No server on $SERVER. Start one w
 BROWSER="${WORKROOM_BROWSER:-}"
 if [ -z "$BROWSER" ]; then
   BROWSER=$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)
-  [ -z "$BROWSER" ] && BROWSER=$(ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | head -1 || true)
+  [ -z "$BROWSER" ] && BROWSER=$(ls -d "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell 2>/dev/null | head -1 || true)
+  # The installed apps, last: they work, but branded Chrome renders and then
+  # stays (headless is a mode, not an exit), which is what the watchdog in
+  # render() is for.
+  [ -z "$BROWSER" ] && BROWSER=$(ls -d \
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    "/Applications/Chromium.app/Contents/MacOS/Chromium" 2>/dev/null | head -1 || true)
 fi
 [ -n "$BROWSER" ] || fail "No headless browser found. Set WORKROOM_BROWSER to one."
 
@@ -67,61 +73,39 @@ done
 curl -sf "http://127.0.0.1:$PORT/bridge.js" >/dev/null 2>&1 \
   || fail "Something else is on port $PORT. Set WORKROOM_PREVIEW_PORT."
 
-# A budget of *virtual* time: timers fire instantly, so it drains through the
-# gaps between real network responses rather than measuring them. Generous, or
-# pages come out half-loaded.
-render() {
-  local query=$1 what=$2 out=${3:-}
-  "$BROWSER" --headless --disable-gpu --no-sandbox --hide-scrollbars \
-    --user-data-dir="$PROFILE" --window-size=1440,900 \
-    "$what${out:+=$out}" --virtual-time-budget=60000 \
-    "http://127.0.0.1:$PORT/?v=$RANDOM$query" 2>/dev/null
-}
+# One browser for all the pictures, driven over CDP by
+# `desktop/preview/shoot.mjs`. Process exit cannot be the signal a render
+# finished (branded Chrome renders, prints, and stays — headless is a mode,
+# not an exit), and the CLI flags cannot ask the page whether it is ready:
+# `--dump-dom` fires at load, before the boot chain's fetches land, and
+# `--virtual-time-budget` does not pause for them. CDP can ask, so "ready" is
+# what it actually is — the DOM containing what the state is meant to show.
+DEBUG_PORT=$(( 20000 + RANDOM % 20000 ))
+"$BROWSER" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+  --no-first-run --no-default-browser-check --disable-background-networking \
+  --disable-component-update --disable-sync \
+  --user-data-dir="$PROFILE" --remote-debugging-port="$DEBUG_PORT" \
+  about:blank >/dev/null 2>&1 &
+# The browser outlives its kill signal by a beat, still writing its cache —
+# give it the beat, and let a stubborn remnant go rather than fail the run
+# over a temp directory.
+trap 'kill %1 %2 2>/dev/null || true; sleep 1; rm -rf "$STAGE" "$PROFILE" 2>/dev/null || true' EXIT
 
-# One profile, reused, and warmed once: a cold start happens in real time while
-# the virtual clock is already running, so the first picture paid for it and
-# every one after it came out fine.
-render "&signed-in=no" --dump-dom > /dev/null 2>&1 || true
+for _ in $(seq 20); do
+  curl -sf "http://127.0.0.1:$DEBUG_PORT/json/version" >/dev/null 2>&1 && break
+  sleep 0.5
+done
+curl -sf "http://127.0.0.1:$DEBUG_PORT/json/version" >/dev/null 2>&1 \
+  || fail "The browser never opened its debugging port on $DEBUG_PORT."
 
 mkdir -p "$OUT"
 
-shoot() {
-  local name=$1 query=$2 want=$3 attempt=1
-  while [ "$attempt" -le 3 ]; do
-    # Ask what rendered before keeping a picture of it — a screenshot cannot be
-    # inspected by a script, and the dom can. To a file rather than a pipe:
-    # `grep -q` closes the pipe on its first match, the browser dies of SIGPIPE,
-    # and `pipefail` calls the check failed exactly when it succeeded.
-    render "$query" --dump-dom > "$STAGE/dom.html" 2>/dev/null || true
-    if grep -q "$want" "$STAGE/dom.html"; then
-      # The dom check settles correctness. The picture is a separate navigation
-      # and races the same way — Chrome captures on load, and this room fills in
-      # after it. A page that did not finish is a smaller image than one that
-      # did, so take a few and keep the fullest.
-      local best=0 size
-      for _ in 1 2 3 4 5; do
-        render "$query" --screenshot "$STAGE/shot.png" > /dev/null 2>&1 || true
-        size=$(wc -c < "$STAGE/shot.png" 2>/dev/null || echo 0)
-        if [ "$size" -gt "$best" ]; then best=$size; cp "$STAGE/shot.png" "$OUT/$name.png"; fi
-      done
-      printf '   %-11s %s\n' "$name" "$OUT/$name.png"
-      return 0
-    fi
-    attempt=$((attempt + 1))
-  done
-
-  # Say what did arrive. "It did not load" is not a diagnosis, and twice now the
-  # answer has been something outside the client entirely.
-  printf '\033[31m%s never rendered %s\033[0m\n' "$name" "$want" >&2
-  printf '   what arrived instead:\n' >&2
-  head -c 400 "$STAGE/dom.html" | sed 's/^/   /' >&2
-  exit 1
-}
-
 say "looking"
-shoot "signed-out" "&signed-in=no" "Sign in"
-shoot "room"       ""              'class="msg'
-shoot "memory"     "&open=memory"  '<aside id="memory">'
-shoot "thread"     "&open=thread"  '<aside id="thread">'
+node desktop/preview/shoot.mjs "$DEBUG_PORT" "http://127.0.0.1:$PORT/" "$OUT" '[
+  { "name": "signed-out", "query": "&signed-in=no", "want": "Sign in" },
+  { "name": "room",       "query": "",              "want": "class=\"msg" },
+  { "name": "memory",     "query": "&open=memory",  "want": "<aside id=\"memory\">" },
+  { "name": "thread",     "query": "&open=thread",  "want": "<aside id=\"thread\">" }
+]'
 
 say "written to $OUT"

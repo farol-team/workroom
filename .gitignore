@@ -6,3 +6,7 @@ ov.conf
 
 # Pictures from bin/preview. Looking is repeatable; the pictures are not history.
 tmp/preview/
+
+# Clones of external repositories kept locally as reading material for
+# agents. Not ours to version; a fresh shallow clone restores them.
+references/

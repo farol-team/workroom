@@ -8,27 +8,35 @@
   </head>
   <body>
     <div id="app">
-      <aside>
+      <!-- The rail of rooms this client has a way into, leftmost like the
+           rooms themselves are the outermost thing on screen. Hidden while
+           there is one — a picker with a single option is a control that
+           does nothing. -->
+      <nav id="rail" hidden>
+        <div id="rail-workspaces"></div>
+        <div class="rail-bottom">
+          <button type="button" id="workspace-join" class="rail-action" title="Join with a code">&#8595;</button>
+          <button type="button" id="workspace-new" class="rail-action" title="New workspace">+</button>
+        </div>
+      </nav>
+      <aside id="sidebar">
         <header>
           <strong>WorkRoom</strong>
-          <span id="who" class="muted"></span>
+          <button type="button" id="workspace-invite" class="ghost" title="Invite somebody">Invite</button>
         </header>
-        <!-- Which room's server this is. A person in two of them holds two
-             tokens, so the list is what this client was given a way into
-             rather than everything they belong to. -->
-        <div id="workspace-bar">
-          <select id="workspace-pick" title="Workspace"></select>
-          <button type="button" id="workspace-join" class="ghost" title="Join with a code">↓</button>
-          <button type="button" id="workspace-invite" class="ghost" title="Invite somebody">↑</button>
-          <button type="button" id="workspace-new" class="ghost" title="New workspace">+</button>
+        <div class="section-head">
+          <span>Channels</span>
+          <button type="button" id="channel-new" class="ghost" title="New channel">+</button>
         </div>
         <nav id="channels"></nav>
-        <button type="button" id="channel-new" class="ghost">New channel</button>
-        <!-- One row per agent, so an agent you did not guess the name of is
-             not one you do not have. Laid out here because the footer is a
-             row and this is a list. The name in a row is also how one of them
-             is chosen — the picker this replaced. -->
-        <footer id="agents" style="flex-direction: column; align-items: stretch;"></footer>
+        <!-- The person and their agent, side by side at the bottom — whose
+             voice the room hears, and whose hands do the work. The agent row
+             opens the panel; the panel is a dialog because managing agents is
+             an errand, not a permanent fixture. -->
+        <footer id="me-card">
+          <span id="who" class="muted"></span>
+          <button type="button" id="agents-open" class="ghost">Set up your agent</button>
+        </footer>
       </aside>
 
       <main>
@@ -162,6 +170,38 @@
         WORKROOM_DEV_SIGNIN=1 if you meant to leave it open.
       </p>
     </dialog>
+
+    <!-- One row per agent, so an agent you did not guess the name of is not
+         one you do not have. The name in a row is also how one of them is
+         chosen — the picker this replaced. -->
+    <dialog id="agents-dialog">
+      <form method="dialog">
+        <h3>Your agents</h3>
+        <div id="agents"></div>
+        <menu>
+          <button type="button" id="agents-setup" class="ghost">Run setup again</button>
+          <button value="close">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- The first run asks once: which agent, and which of the ready ones is
+         the default. An overlay rather than a dialog, because it is the whole
+         window's business until it is answered. -->
+    <div id="onboarding" hidden>
+      <div class="ob-box">
+        <h2 id="ob-title">Your agent</h2>
+        <p id="ob-note" class="muted"></p>
+        <div id="ob-cards"></div>
+        <div class="ob-foot">
+          <span id="ob-dots" class="muted"></span>
+          <span class="ob-actions">
+            <button type="button" id="ob-back" class="ghost" hidden>Back</button>
+            <button type="button" id="ob-next">Continue</button>
+          </span>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

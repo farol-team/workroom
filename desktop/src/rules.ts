@@ -532,6 +532,41 @@ export function dayLabel(at: string, today = new Date()): string {
     { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
 }
 
+/// The time of day on a message row — the day itself is the divider's job.
+/// Read straight out of the timestamp, in the timezone the record carries, the
+/// same way `dayLabel` compares the day it was given rather than converting.
+export function timeLabel(at: string): string {
+  return /T(\d{2}:\d{2})/.exec(at)?.[1] ?? "";
+}
+
+/// One card of the first-run setup: what the agent is called, what the machine
+/// said about it, and the one thing pressing the card does. The states are the
+/// panel's own inputs, so the setup and the panel cannot disagree about an
+/// agent — they can only disagree about the drawing.
+export interface OnboardingCard {
+  name: string;
+  label: string;
+  state: "ready" | "missing";
+  running: boolean;
+  action: "install" | "start" | "stop";
+}
+
+export function onboardingCards(
+  agents: Array<{ name: string; label: string; state: "ready" | "missing"; running: boolean }>,
+): OnboardingCard[] {
+  return agents.map((a) => ({
+    ...a,
+    action: a.state === "missing" ? "install" : a.running ? "stop" : "start",
+  }));
+}
+
+/// Setup is worth finishing once one agent can be addressed. Zero ready is not
+/// a lock — it is an empty room, and leaving is how somebody comes back with
+/// one installed.
+export function anyReady(cards: OnboardingCard[]): boolean {
+  return cards.some((c) => c.state === "ready" || c.running);
+}
+
 /// What arrived since you last looked, from the count the channel already
 /// reports. The client is subscribed to the room it has open and to nothing
 /// else, so this cannot come from the stream.

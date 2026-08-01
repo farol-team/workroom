@@ -44,6 +44,30 @@ export function bind(slug: string, folder: string | null): Bindings {
   return all;
 }
 
+const PICKED = "workroom.picked";
+
+/// The agent this person addresses by default. Kept across windows because a
+/// choice that evaporates on restart reads as never having been offered.
+export function loadPicked(): string | undefined {
+  return localStorage.getItem(PICKED) ?? undefined;
+}
+
+export function savePicked(name: string): void {
+  localStorage.setItem(PICKED, name);
+}
+
+const ONBOARDED = "workroom.onboarded";
+
+/// Whether the first-run setup has had its say. The flag, not the outcome: an
+/// agent installed later through the panel is as good as one installed there.
+export function isOnboarded(): boolean {
+  return localStorage.getItem(ONBOARDED) === "done";
+}
+
+export function markOnboarded(): void {
+  localStorage.setItem(ONBOARDED, "done");
+}
+
 const ROOMS = "workroom.rooms";
 
 /// Where this person is, and what reaches the rooms they have been given a way

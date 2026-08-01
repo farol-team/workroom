@@ -1,7 +1,8 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, activeAgent, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, pickable, templateNote, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RoomTemplate, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, onboardingCards, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, pickable, templateNote, threadOf, threadSummary, timeLabel, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
+import { showOnboarding } from "./onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { check } from "@tauri-apps/plugin-updater";
@@ -70,9 +71,16 @@ function messageEl(m: Message) {
   el.dataset.id = String(m.id);
   const who = m.author.kind === "agent" ? `${m.author.name}'s agent` : m.author.name;
   const id = identity(m.author);
-  el.innerHTML = `<div class="from">` +
+  // A face, then a head line (name, mark, time), then what was said. The name
+  // keeps the `.from` class because `recentHistory` reads the room from the
+  // DOM, and what it reads must stay the name.
+  el.innerHTML =
     `<span class="avatar${id.isAgent ? " is-agent" : ""}" style="--hue:${id.hue}">` +
-    `${escape(id.initials)}</span>${escape(who)}</div><div class="body"></div>`;
+    `${escape(id.initials)}</span><div class="msg-main"><div class="msg-head">` +
+    `<span class="from">${escape(who)}</span>` +
+    (id.isAgent ? `<span class="agent-badge">agent</span>` : "") +
+    `<span class="msg-time">${escape(timeLabel(m.created_at))}</span>` +
+    `</div><div class="body"></div></div>`;
   const body = el.querySelector<HTMLElement>(".body")!;
   body.textContent = m.body;
 
@@ -561,9 +569,15 @@ $("composer").addEventListener("submit", async (e) => {
   offerToAdd(text).catch(() => {});
 });
 
-/// The one chosen in the panel, if a choice has been made at all.
-let picked: string | undefined;
+/// The one chosen, kept across windows — a choice that evaporates on restart
+/// reads as never having been offered.
+let picked: string | undefined = settings.loadPicked();
 const chosenAgent = () => activeAgent(agents.definitions(), picked);
+
+function pick(name: string) {
+  picked = name;
+  settings.savePicked(name);
+}
 
 /// What a row is doing right now, when it is doing something. Held here rather
 /// than written into the row, because every render rebuilds it.
@@ -602,7 +616,7 @@ function renderAgents() {
       + `color: var(${def.name === chosen ? "--accent" : "--text"});`;
     name.textContent = profile?.label ?? def.name;
     name.title = `${[ def.command, ...def.args ].join(" ")} — press to address this one`;
-    name.onclick = () => { picked = def.name; renderAgents(); renderOptions(); };
+    name.onclick = () => { pick(def.name); renderAgents(); renderOptions(); };
 
     const said = document.createElement("span");
     said.className = "muted";
@@ -633,6 +647,14 @@ function renderAgents() {
       box.append(shown);
     }
   }
+
+  // The sidebar footer carries the same answer in one line, and is the way
+  // into this panel. Nobody should have to open a dialog to learn whether
+  // their agent is running.
+  const chosenLabel = chosen ? (profileFor(chosen)?.label ?? chosen) : null;
+  $("agents-open").textContent = chosenLabel
+    ? `${chosenLabel} · ${agents.isRunning(chosen!) ? "running" : agents.stateOf(chosen!)}`
+    : "Set up your agent";
 }
 
 /// Ask the machine which of these agents it actually has. Their state is what
@@ -666,7 +688,7 @@ async function installAgent(name: string) {
 }
 
 async function toggleAgent(name: string) {
-  picked = name;
+  pick(name);
   if (agents.isRunning(name)) {
     await agents.stop(name);
     renderAgents();
@@ -683,7 +705,7 @@ async function toggleAgent(name: string) {
 /// with the notice an agent leaves when its process ends (#93) — the person
 /// asks for the restart there, the same way they would here.
 async function startAgent(name: string) {
-  picked = name;
+  pick(name);
   busy.set(name, "starting…");
   renderAgents();
   try {
@@ -706,6 +728,43 @@ async function startAgent(name: string) {
 // A local view preference, not a property of the session. The record is
 // complete either way; this only decides how much of it is on screen.
 let showSteps = true;
+
+/// The first run, and any run asked for again from the agents panel. All the
+/// actions are the panel's own — setup is another door into the same room,
+/// not a room of its own.
+function openOnboarding() {
+  showOnboarding({
+    cards: () => onboardingCards(agents.definitions().map((d) => ({
+      name: d.name,
+      label: profileFor(d.name)?.label ?? d.name,
+      state: agents.stateOf(d.name),
+      running: agents.isRunning(d.name),
+    }))),
+    installCommand: (name) => {
+      const profile = profileFor(name);
+      return profile && prefix ? installCommand(profile, prefix) : null;
+    },
+    onInstall: installAgent,
+    onToggle: toggleAgent,
+    onFinish: (chosen) => {
+      if (chosen) pick(chosen);
+      settings.markOnboarded();
+      renderAgents();
+      renderOptions();
+    },
+    initialPicked: picked,
+  });
+}
+
+$("agents-open").addEventListener("click", () => {
+  renderAgents();
+  $<HTMLDialogElement>("agents-dialog").showModal();
+});
+
+$("agents-setup").addEventListener("click", () => {
+  $<HTMLDialogElement>("agents-dialog").close();
+  openOnboarding();
+});
 
 $("show-steps").addEventListener("change", (e) => {
   showSteps = (e.target as HTMLInputElement).checked;
@@ -807,16 +866,19 @@ async function loadChannels() {
 }
 
 function renderWorkspaces() {
-  const pick = $<HTMLSelectElement>("workspace-pick");
-  pick.innerHTML = "";
-  for (const slug of reachableRooms(rooms)) {
-    const option = document.createElement("option");
-    option.value = slug;
-    option.textContent = slug;
-    option.selected = slug === rooms.current;
-    pick.append(option);
+  const slugs = reachableRooms(rooms);
+  // The rail appears when there is a choice to make; one room is no choice.
+  $("rail").hidden = slugs.length < 2;
+  const box = $("rail-workspaces");
+  box.innerHTML = "";
+  for (const slug of slugs) {
+    const b = document.createElement("button");
+    b.className = `rail-workspace${slug === rooms.current ? " active" : ""}`;
+    b.textContent = (slug[0] ?? "?").toUpperCase();
+    b.title = slug;
+    b.onclick = () => enterWorkspace(slug);
+    box.append(b);
   }
-  pick.hidden = reachableRooms(rooms).length < 2;
 }
 
 /// Everything on screen belongs to one room, so changing rooms reloads it all.
@@ -834,9 +896,6 @@ async function enterWorkspace(slug: string) {
   renderWorkspaces();
   await loadChannels();
 }
-
-$("workspace-pick").addEventListener("change", (e) =>
-  enterWorkspace((e.target as HTMLSelectElement).value));
 
 async function renderInvitations() {
   const open = await api.invitations().catch(() => []);
@@ -1120,7 +1179,12 @@ async function boot() {
   renderAgents();
   // What each of them is on this machine, said once the room is up. Until it
   // answers a row reads as missing, which is what it was before this existed.
-  refreshAgents().catch(() => {});
+  // The first run asks which agent this person has — after the probe answers,
+  // so the cards open with what the machine actually said, and only once;
+  // after that the panel carries it and setup is re-opened from there.
+  refreshAgents().catch(() => {}).then(() => {
+    if (!settings.isOnboarded()) openOnboarding();
+  });
 
   // An agent that stopped says so once, with whatever it said on the way down.
   // Restarting is offered, never done: the process runs under this person's own

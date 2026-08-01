@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -535,6 +535,31 @@ describe("a day at a time", () => {
     expect(dayLabel("2026-07-31T09:00:00Z", today)).toBe("Today");
     expect(dayLabel("2026-07-30T09:00:00Z", today)).toBe("Yesterday");
     expect(dayLabel("2026-07-24T09:00:00Z", today)).toMatch(/24/);
+  });
+
+  test("a row carries the time of day, in the timezone the record carries", () => {
+    expect(timeLabel("2026-07-31T09:05:00Z")).toBe("09:05");
+    expect(timeLabel("2026-07-31T23:59:59.573+03:00")).toBe("23:59");
+    expect(timeLabel("not a timestamp")).toBe("");
+  });
+});
+
+describe("the first-run setup", () => {
+  const agents = [
+    { name: "claude", label: "Claude", state: "ready" as const, running: false },
+    { name: "codex", label: "Codex", state: "missing" as const, running: false },
+  ];
+
+  test("the one thing a card does follows from its state, not from the drawing", () => {
+    const cards = onboardingCards(agents);
+    expect(cards.map((c) => c.action)).toEqual([ "start", "install" ]);
+    expect(onboardingCards([ { ...agents[0], running: true } ])[0].action).toBe("stop");
+  });
+
+  test("worth finishing once one agent can be addressed", () => {
+    expect(anyReady(onboardingCards(agents))).toBe(true);
+    expect(anyReady(onboardingCards([ agents[1] ]))).toBe(false);
+    expect(anyReady([])).toBe(false);
   });
 });
 

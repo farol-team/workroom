@@ -5,29 +5,85 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
-#app { display: grid; grid-template-columns: 240px 1fr auto; height: 100vh; }
-aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+#app { display: grid; grid-template-columns: auto 260px 1fr auto; height: 100vh; }
+/* Placed explicitly: a hidden child generates no box, and without placement the
+   visible ones flow into the wrong columns — `main` into the sidebar's 260px. */
+#rail { grid-column: 1; }
+#sidebar { grid-column: 2; }
+main { grid-column: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#thread, #memory { grid-column: 4; }
+/* `min-height: 0` because a grid item is `auto` by default and will not shrink
+   below its content — so the pane that scrolls inside it grows past the row
+   instead, and `overflow: hidden` on the body clips what it grew by. Nothing
+   scrolls, and nothing says why. */
+aside { background: var(--panel); border-right: 1px solid var(--line); display: flex;
+  flex-direction: column; min-height: 0; }
 aside#memory { border-right: none; border-left: 1px solid var(--line); width: 320px; overflow-y: auto; }
 aside header, main header { padding: 14px 16px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 aside footer { margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--line);
   display: flex; align-items: center; gap: 8px; }
-nav { padding: 8px; overflow-y: auto; }
+
+/* The rooms this client has a way into, leftmost and narrowest — the outermost
+   thing on screen, the way the room is the outermost thing it knows. */
+#rail { background: #0f1114; border-right: 1px solid var(--line); width: 64px;
+  display: flex; flex-direction: column; align-items: center; padding: 12px 0;
+  gap: 8px; min-height: 0; }
+#rail[hidden] { display: none; }
+#rail-workspaces { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.rail-workspace { width: 36px; height: 36px; border-radius: 50%; padding: 0;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  font-weight: 600; cursor: pointer; }
+.rail-workspace:hover { color: var(--text); }
+.rail-workspace.active { border-color: var(--accent); color: var(--accent); }
+.rail-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.rail-action { width: 36px; height: 36px; border-radius: 50%; padding: 0;
+  background: none; color: var(--muted); border: 1px dashed var(--line);
+  font-weight: 400; cursor: pointer; }
+.rail-action:hover { color: var(--text); border-color: var(--muted); }
+
+/* A section of the sidebar is named the way Slack names one: small, quiet,
+   and above what it groups. */
+.section-head { display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px 2px; color: var(--muted); font-size: 12px;
+  text-transform: uppercase; letter-spacing: .04em; }
+.section-head .ghost { padding: 0 6px; border: none; font-size: 14px; }
+
+/* The person and the way into their agents, at the bottom of the sidebar. */
+#me-card { flex-direction: column; align-items: stretch; gap: 6px; }
+#me-card #who { font-size: 13px; color: var(--text); }
+#agents-open { text-align: left; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+nav { padding: 8px; overflow-y: auto; min-height: 0; }
 nav button { display: block; width: 100%; text-align: left; background: none; border: 0;
   color: var(--muted); padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 nav button:hover { background: #22262e; color: var(--text); }
 nav button.active { background: #2a2f38; color: var(--text); }
-main { display: flex; flex-direction: column; min-width: 0; }
 #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.msg { display: grid; grid-template-columns: 92px 1fr; gap: 12px; font-size: 14px; line-height: 1.5; }
-.msg .from { color: var(--muted); text-align: right; }
+/* A message is a face, a name and what was said — read top to bottom, the way
+   a conversation is scanned, not an IRC gutter. */
+.msg { display: grid; grid-template-columns: 36px 1fr; gap: 10px; font-size: 14px; line-height: 1.5; }
+.msg > .avatar { width: 36px; height: 36px; margin-right: 0; font-size: 13px;
+  border-radius: 8px; align-self: flex-start; }
+.msg-head { display: flex; align-items: baseline; gap: 8px; }
+.msg .from { font-weight: 600; }
 .msg.agent .from { color: var(--agent); }
+.msg-time { color: var(--muted); font-size: 12px; }
+/* An agent is marked as one, next to its owner's name — Alice's agent, not a
+   second Alice. */
+.agent-badge { font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--agent); border: 1px solid var(--agent);
+  border-radius: 4px; padding: 0 4px; }
 .msg .body { white-space: pre-wrap; word-break: break-word; }
 .steps { grid-column: 2; font-size: 12px; color: var(--muted); border-left: 2px solid var(--line);
   padding-left: 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
-#composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
-#composer input { flex: 1; background: #0f1114; border: 1px solid var(--line); color: var(--text);
-  padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+/* The composer is a card set into the room, not a strip of its edge — what is
+   being written is one thing, bounded the way one message is. */
+#composer { display: flex; gap: 8px; margin: 0 16px 16px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 12px; background: #0f1114; }
+#composer:focus-within { border-color: var(--accent); }
+#composer input { flex: 1; background: none; border: none; color: var(--text);
+  padding: 8px 10px; font-size: 14px; outline: none; }
 button { background: var(--accent); color: #14161a; border: 0; padding: 9px 14px;
   border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
 button.ghost { background: none; color: var(--muted); border: 1px solid var(--line); font-weight: 400; }
@@ -38,45 +94,37 @@ button.ghost { background: none; color: var(--muted); border: 1px solid var(--li
 .entry .mark { color: var(--accent); margin-right: 6px; }
 .entry.agent .mark { color: var(--agent); }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
-  border-radius: 12px; padding: 24px; }
+  border-radius: 12px; padding: 24px; min-width: 22rem; }
 dialog::backdrop { background: #000a; }
-dialog input { display: block; width: 260px; margin: 12px 0; background: #0f1114;
-  border: 1px solid var(--line); color: var(--text); padding: 9px 11px; border-radius: 8px; }
+/* Every dialog is the same shape: labelled rows, fields filling the row, and
+   the actions at the bottom right. A field that keeps its native face — the
+   white select was one — reads as broken against the dark panel. */
+dialog input, dialog select { display: block; width: 100%; margin: 0;
+  background: #0f1114; border: 1px solid var(--line); color: var(--text);
+  padding: 9px 11px; border-radius: 8px; font: inherit; font-size: 14px; }
+dialog menu { display: flex; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
 h2 { margin: 0 0 4px; font-size: 16px; }
 
 #composer #destination { align-self: center; white-space: nowrap; font-size: 12px; }
 #composer #destination.to-agent { color: var(--agent); }
 #composer #summon { font-family: inherit; }
 
-.presence { font-size: 12px; color: var(--muted); font-style: italic; padding-left: 104px; }
+.presence { font-size: 12px; color: var(--muted); font-style: italic; padding-left: 46px; }
 .vis select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
 
-.plan { margin-left: 104px; border-left: 2px solid var(--accent); padding: 6px 0 6px 10px;
+.plan { margin-left: 46px; border-left: 2px solid var(--accent); padding: 6px 0 6px 10px;
   font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
 .plan-entry { color: var(--muted); }
 .plan-entry.in_progress { color: var(--text); }
 .plan-entry.completed { color: var(--muted); text-decoration: line-through; }
 
-.offer, .artifact { margin-left: 104px; font-size: 13px; color: var(--muted); }
+.offer, .artifact { margin-left: 46px; font-size: 13px; color: var(--muted); }
 .artifact { padding: 4px 0; }
 
 #session-options { display: flex; gap: 8px; padding: 8px 16px 0; }
 .session-option select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
   border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; max-width: 220px; }
-
-/* The picker only appears when a person has more than one agent, so it must not
-   claim space in the common case. */
-#agent-pick {
-  background: var(--panel);
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font: inherit;
-  font-size: 12px;
-}
-#agent-pick[hidden] { display: none; }
 
 /* A procedure reads differently from a fact, and the panel should say so. */
 aside#memory header.sub { border-top: 1px solid var(--line); margin-top: 8px; }
@@ -157,11 +205,6 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
 .notice { padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--accent);
   font-size: 13px; display: flex; align-items: center; gap: 8px; }
 
-/* Which room's server this is, above its channels. Hidden when there is one,
-   because a picker with a single option is a control that does nothing. */
-#workspace-bar { display: flex; gap: .4rem; align-items: center; padding: 0 .6rem .4rem; }
-#workspace-pick { flex: 1; min-width: 0; }
-#channel-new { margin: .4rem .6rem; text-align: left; }
 #make-form { display: flex; flex-direction: column; gap: .6rem; min-width: 22rem; }
 #make-form label { display: flex; flex-direction: column; gap: .2rem; }
 
@@ -183,3 +226,37 @@ button.template:disabled { cursor: default; opacity: .5; }
 #invite form, #join form { display: flex; flex-direction: column; gap: .6rem; min-width: 24rem; }
 #invite label, #join label { display: flex; flex-direction: column; gap: .2rem; }
 #invite-open div { font-family: monospace; font-size: .85em; padding: .1rem 0; }
+
+/* The agents panel is an errand, so it is a dialog: one row per agent, the
+   machine's answer about its state, and the one thing to do about it. */
+#agents-dialog form { display: flex; flex-direction: column; gap: .6rem; min-width: 26rem; }
+#agents { display: flex; flex-direction: column; gap: 8px; }
+.agent-row { display: flex; align-items: center; gap: 10px; }
+.agent-row .agent-name { font-weight: 600; }
+.agent-row .muted { flex: 1; }
+#agents > code { display: block; font-size: 11px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+
+/* The first run is the whole window's business until it is answered, so it
+   covers the window. */
+#onboarding { position: fixed; inset: 0; z-index: 10; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; }
+#onboarding[hidden] { display: none; }
+.ob-box { width: 34rem; max-width: calc(100vw - 4rem); display: flex;
+  flex-direction: column; gap: 12px; }
+.ob-box h2 { margin: 0; font-size: 20px; }
+#ob-cards { display: flex; flex-direction: column; gap: 8px; }
+.ob-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.ob-card-head { display: flex; align-items: baseline; gap: 8px; flex: 1; }
+.ob-card code { flex: 1; font-size: 11px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.ob-card button { flex: none; }
+button.ob-card.pickable { width: 100%; text-align: left; color: var(--text);
+  font: inherit; font-size: 14px; cursor: pointer; }
+button.ob-card.pickable:hover:not(:disabled) { border-color: var(--muted); }
+button.ob-card.pickable.chosen { border-color: var(--accent); }
+button.ob-card.pickable:disabled { opacity: .5; cursor: default; }
+button.ob-card.pickable strong { flex: 1; }
+.ob-foot { display: flex; align-items: center; justify-content: space-between; }
+.ob-actions { display: flex; gap: 8px; }
