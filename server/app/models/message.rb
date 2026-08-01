@@ -17,6 +17,6 @@ class Message < ApplicationRecord
 
   # Threads are one level deep: a reply to a reply is refused.
   def single_level_threading
-    errors.add(:parent, "вложенность больше одного уровня") if parent&.parent_id.present?
+    errors.add(:parent, "nesting deeper than one level") if parent&.parent_id.present?
   end
 end
