@@ -33,7 +33,10 @@ class RecordStore::ObjectsTest < ActiveSupport::TestCase
   # Content addressing earns its keep here: the same bytes offered twice are one
   # object, so a re-put is an address lookup rather than a second upload.
   test "storing the same content twice stores one object" do
-    content = "written twice"
+    # Fresh bytes, because the store outlives the suite: the Disk service keeps
+    # tmp/storage between runs, and a fixed string would be already-stored on
+    # the second run — the assertion would then pass without proving anything.
+    content = "written twice #{SecureRandom.hex(8)}"
     uploads = 0
     sha = nil
     second = nil
