@@ -18,6 +18,8 @@
              rather than everything they belong to. -->
         <div id="workspace-bar">
           <select id="workspace-pick" title="Workspace"></select>
+          <button type="button" id="workspace-join" class="ghost" title="Join with a code">↓</button>
+          <button type="button" id="workspace-invite" class="ghost" title="Invite somebody">↑</button>
           <button type="button" id="workspace-new" class="ghost" title="New workspace">+</button>
         </div>
         <nav id="channels"></nav>
@@ -76,6 +78,45 @@
         </form>
       </aside>
     </div>
+
+    <!-- Inviting somebody into this workspace. The code is the invitation: it
+         travels out of band, which is what makes redeeming it safe. -->
+    <dialog id="invite">
+      <form method="dialog">
+        <h3>Invite somebody to this workspace</h3>
+        <label>Their address, if you know it
+          <input id="invite-email" type="email" autocomplete="off" placeholder="optional" /></label>
+        <label>Joining as
+          <select id="invite-role">
+            <option value="member">Member</option>
+            <option value="admin">Admin — can invite others</option>
+          </select>
+        </label>
+        <p id="invite-result" class="muted"></p>
+        <menu>
+          <button value="close" formnovalidate>Close</button>
+          <button id="invite-go" value="go">Make an invitation</button>
+        </menu>
+      </form>
+      <hr />
+      <h4>Unused invitations</h4>
+      <div id="invite-open" class="muted"></div>
+    </dialog>
+
+    <!-- The other end of an invitation. Redeeming needs the code and somebody
+         signed in as themselves, which is what makes it the one safe way into
+         a room you did not make. -->
+    <dialog id="join">
+      <form method="dialog">
+        <h3>Join a workspace</h3>
+        <label>The code somebody sent you
+          <input id="join-code" required autocomplete="off" /></label>
+        <menu>
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button value="go">Join</button>
+        </menu>
+      </form>
+    </dialog>
 
     <dialog id="make">
       <form method="dialog" id="make-form">

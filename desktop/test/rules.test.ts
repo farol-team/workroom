@@ -2,7 +2,40 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, enterRoom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, enterRoom, mentionsIn, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+
+describe("mentioning somebody who is not here", () => {
+  const here = [ { handle: "alice", name: "Alice" } ];
+  const workspace = [ { handle: "alice", name: "Alice" }, { handle: "bob", name: "Bob" },
+                      { handle: "carol", name: "Carol" } ];
+
+  test("a mention anywhere in the line counts, because it still names somebody", () => {
+    expect(mentionsIn("could @bob look at this")).toEqual([ "bob" ]);
+    expect(mentionsIn("@bob and @carol")).toEqual([ "bob", "carol" ]);
+    expect(mentionsIn("said it twice @bob @bob")).toEqual([ "bob" ]);
+  });
+
+  test("an address is not a mention", () => {
+    expect(mentionsIn("write to bob@example.test")).toEqual([]);
+  });
+
+  test("somebody in the room is not an offer to add them" , () => {
+    expect(missingFrom("@alice @bob", here, workspace)).toEqual([ { handle: "bob", name: "Bob" } ]);
+  });
+
+  test("the agent is addressed, not invited", () => {
+    // `@agent` and an agent's own name reach an agent. Offering to add one to a
+    // channel would be offering to add a person who does not exist.
+    expect(missingFrom("@agent do this", here, workspace)).toEqual([]);
+    expect(missingFrom("@claude do this", here, workspace, [ { name: "claude" } ])).toEqual([]);
+  });
+
+  test("a name nobody in this workspace answers to is not offered", () => {
+    // The boundary: a handle from another workspace resolves to nobody here,
+    // and the client does not ask the server about a stranger.
+    expect(missingFrom("@mallory", here, workspace)).toEqual([]);
+  });
+});
 
 describe("the rooms this client can reach", () => {
   test("a room is reachable because this client was given a way in, never because it asked", () => {

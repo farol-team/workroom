@@ -164,3 +164,7 @@ aside[hidden] { display: none; }   /* an author display beats the UA [hidden] ru
 #channel-new { margin: .4rem .6rem; text-align: left; }
 #make-form { display: flex; flex-direction: column; gap: .6rem; min-width: 22rem; }
 #make-form label { display: flex; flex-direction: column; gap: .2rem; }
+
+#invite form, #join form { display: flex; flex-direction: column; gap: .6rem; min-width: 24rem; }
+#invite label, #join label { display: flex; flex-direction: column; gap: .2rem; }
+#invite-open div { font-family: monospace; font-size: .85em; padding: .1rem 0; }

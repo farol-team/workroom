@@ -122,6 +122,35 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// Everybody mentioned in a message, as handles.
+///
+/// Anywhere in the line, not only at the start — `parseAddress` is about who
+/// the message is *for*, and this is about who it names. A mention inside a
+/// sentence still means somebody should be able to read it.
+const MENTIONS = /(?:^|[^a-z0-9._@-])@([a-z0-9][a-z0-9._-]*)/gi;
+
+export function mentionsIn(text: string): string[] {
+  return [ ...new Set([ ...text.matchAll(MENTIONS) ].map((m) => m[1].toLowerCase())) ];
+}
+
+/// Who was named and is not in the room. The people already here are not an
+/// offer, and neither is the agent — `@agent` addresses one, it does not invite
+/// a colleague.
+export function missingFrom(
+  text: string,
+  present: Array<{ handle: string }>,
+  workspace: Array<{ handle: string; name: string }>,
+  agents: Array<{ name: string }> = [],
+): Array<{ handle: string; name: string }> {
+  const here = new Set(present.map((p) => p.handle.toLowerCase()));
+  const addressed = new Set([ "agent", ...agents.map((a) => a.name.toLowerCase()) ]);
+
+  return mentionsIn(text)
+    .filter((handle) => !here.has(handle) && !addressed.has(handle))
+    .map((handle) => workspace.find((w) => w.handle.toLowerCase() === handle))
+    .filter((person): person is { handle: string; name: string } => Boolean(person));
+}
+
 /// The rooms this person can reach, and the token for each.
 ///
 /// A token belongs to a membership, so somebody in two workspaces holds two —
