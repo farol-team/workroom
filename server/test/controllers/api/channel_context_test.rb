@@ -82,4 +82,35 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
 
     assert_response :forbidden
   end
+
+  # Opening a room is `show`, and the count it carries is read from the same
+  # store. Translating the transport failure without saying so here would turn a
+  # 500 into a room reporting that it knows nothing — the number people actually
+  # look at, and the failure #99 already cost once.
+  def opening(person = @alice)
+    get api_v1_channel_path(@channel.slug), headers: auth(person)
+    response.parsed_body
+  end
+
+  test "a room whose memory cannot be reached opens without claiming to know nothing" do
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                                   api_key: "unused")
+
+    body = opening
+
+    assert_response :success
+    assert_equal "unavailable", body["memory"]
+    assert_nil body["memory_count"],
+               "zero is a number a person cannot tell from the truth; absent is honest"
+  end
+
+  test "a room whose memory answers opens with the count and says so" do
+    Memory::Store.current = Memory::Local.new
+    Memory::Store.current.write(@channel, title: "Reporting cadence", detail: "Monthly.", trust: "human")
+
+    body = opening
+
+    assert_equal "ok", body["memory"]
+    assert_equal 1, body["memory_count"]
+  end
 end
