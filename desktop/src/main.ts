@@ -503,8 +503,8 @@ async function send(text: string) {
   renderOptions();
 
   let reply = "";
-  const stopAsking = await agents.onAsk((asked) => askPermission(name, asked));
-  const stop = await agents.onUpdate((u: Update) => {
+  const stopAsking = await agents.onAsk(sessionId, (asked) => askPermission(name, asked));
+  const stop = await agents.onUpdate(sessionId, (u: Update) => {
     if (u.kind === "text") reply += u.text;
     // Process: recorded against the run, never pushed at the room.
     else if (u.kind === "thought") api.step(run.id, "thought", u.text.slice(0, 200)).catch(() => {});

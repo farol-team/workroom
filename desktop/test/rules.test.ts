@@ -2,7 +2,25 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+
+describe("routing by session", () => {
+  test("both inbound shapes say which session they belong to", () => {
+    // session/update carries it in params; a permission request carries it in
+    // the request it wraps. Neither was read, so what an agent said was routed
+    // by whoever happened to be listening (#91).
+    expect(sessionOf({ method: "session/update", params: { sessionId: "s1", update: {} } })).toBe("s1");
+    expect(sessionOf({ id: 3, request: { method: "session/request_permission",
+                                         params: { sessionId: "s2" } } })).toBe("s2");
+    expect(sessionOf({ sessionId: "s3" })).toBe("s3");
+  });
+
+  test("a message that names no session belongs to no turn", () => {
+    expect(sessionOf({ method: "session/update", params: { update: {} } })).toBeUndefined();
+    expect(sessionOf({ params: { sessionId: "" } })).toBeUndefined();
+    expect(sessionOf(null)).toBeUndefined();
+  });
+});
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -628,6 +646,19 @@ describe("the agent asking to do something", () => {
   test("anything that is not a permission request is not one", () => {
     expect(permissionAsked({ id: 1, request: { method: "fs/read_text_file", params: {} } })).toBeNull();
     expect(permissionAsked({ id: 1, request: {} })).toBeNull();
+  });
+
+  test("a question says which turn is asking", () => {
+    // Without it, a dialog for one channel's agent is shown as though this
+    // channel's agent had asked — and `agent_permit` answers by request id, so
+    // the person authorises a call they were never shown (#91).
+    const asked = permissionAsked({
+      id: 7,
+      request: { method: "session/request_permission",
+                 params: { sessionId: "s-meetings", options: [] } },
+    })!;
+
+    expect(asked.sessionId).toBe("s-meetings");
   });
 
   test("forgetting one agent does not forget the one whose name starts the same", () => {
