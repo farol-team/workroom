@@ -132,6 +132,18 @@ pub fn mounts_http_mcp(handshake: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the agent says it can close a session. Guarded rather than called
+/// blind, for the same reason the rail is checked before it is mounted: an
+/// agent that never said it could is one whose answer we invented.
+///
+/// The capability is an object, not a flag — its presence is the yes.
+pub fn closes_sessions(handshake: &Value) -> bool {
+    handshake
+        .pointer("/agentCapabilities/sessionCapabilities/close")
+        .or_else(|| handshake.pointer("/sessionCapabilities/close"))
+        .is_some_and(|v| !v.is_null())
+}
+
 /// How this agent says a person logs in, if it says at all. The one actionable
 /// sentence an agent offers before a session can be opened, and it arrives only
 /// here — `session/new` on a logged-out agent answers with an internal error.
@@ -532,6 +544,33 @@ mod tests {
             })),
             "an agent that says no is not an agent that said nothing"
         );
+    }
+
+    #[test]
+    fn an_agent_that_closes_sessions_says_so() {
+        // Measured against @agentclientprotocol/claude-agent-acp 0.64.0. The
+        // capability is an object, not a flag — its presence is the yes.
+        assert!(closes_sessions(&json!({
+            "agentCapabilities": { "sessionCapabilities": {
+                "additionalDirectories": {}, "close": {}, "delete": {},
+                "fork": {}, "list": {}, "resume": {} } }
+        })));
+        assert!(closes_sessions(&json!({
+            "sessionCapabilities": { "close": {}, "fork": {} }
+        })));
+    }
+
+    #[test]
+    fn an_agent_that_did_not_say_it_closes_sessions_is_not_asked_to() {
+        // The deprecated adapter this project baselined advertises fork, list
+        // and resume, and no close. Calling it blind is the same mistake as
+        // mounting a rail on an agent that never said it could hold one.
+        assert!(!closes_sessions(&json!({
+            "agentCapabilities": { "sessionCapabilities": {
+                "fork": {}, "list": {}, "resume": {} } }
+        })));
+        assert!(!closes_sessions(&json!({ "agentCapabilities": {} })));
+        assert!(!closes_sessions(&Value::Null));
     }
 
     #[test]

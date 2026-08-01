@@ -663,13 +663,22 @@ function renderBinding() {
 /// because the person opened it there.
 $("folder").addEventListener("click", async (e) => {
   if (!current) return;
+  const slug = current.slug;
+  const before = boundFolder(slug, bindings);
+
   if ((e as MouseEvent).shiftKey) {
-    bindings = settings.bind(current.slug, null);
+    bindings = settings.bind(slug, null);
     renderBinding();
+    // The session was opened against the old directory and cannot follow it.
+    if (before) await agents.releaseChannel(slug);
     return;
   }
-  const chosen = await chooseFolder({ directory: true, title: `Where # ${current.slug} works` });
-  if (typeof chosen === "string") bindings = settings.bind(current.slug, chosen);
+
+  const chosen = await chooseFolder({ directory: true, title: `Where # ${slug} works` });
+  if (typeof chosen === "string") {
+    bindings = settings.bind(slug, chosen);
+    if (chosen !== before) await agents.releaseChannel(slug);
+  }
   renderBinding();
 });
 

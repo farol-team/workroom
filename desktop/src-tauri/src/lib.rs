@@ -22,7 +22,7 @@ mod workspace;
 
 use std::sync::Arc;
 
-use acp::{auth_hint, mounts_http_mcp, Agent, AgentState};
+use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde_json::{json, Value};
@@ -195,6 +195,30 @@ async fn agent_permit(
     agent
         .answer(&request_id, json!({ "outcome": outcome }))
         .await
+}
+
+/// Close one session, when the agent says it can. Killing the process is not the
+/// same act: a session left open holds its rail registered as an MCP server and
+/// leaves a row in the agent's own storage, for as long as that agent lives.
+///
+/// Returns whether it was closed, so a caller can tell "this agent does not do
+/// that" from "it did". An agent that does not advertise `close` gets what
+/// happened before this existed, which is nothing.
+#[tauri::command]
+async fn agent_close_session(
+    state: State<'_, AgentState>,
+    name: Option<String>,
+    session_id: String,
+) -> Result<bool, String> {
+    let agent = running(&state, name).await?;
+    if !closes_sessions(&agent.handshake().await) {
+        return Ok(false);
+    }
+
+    agent
+        .request("session/close", json!({ "sessionId": session_id }))
+        .await?;
+    Ok(true)
 }
 
 /// Which of this person's agents are running.
@@ -422,6 +446,7 @@ pub fn run() {
             agent_prompt,
             agent_set_config,
             agent_export_session,
+            agent_close_session,
             agent_stop
         ])
         .run(tauri::generate_context!())

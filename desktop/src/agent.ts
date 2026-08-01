@@ -56,14 +56,52 @@ export class Agents {
 
   markRunning(name: string) { this.live.add(name); }
 
+  /// Close a session the agent still holds. Killing the process is not the same
+  /// act — an open session keeps its rail registered as an MCP server and leaves
+  /// a row in the agent's own storage (#95). Answers false where the agent never
+  /// said it could close one, which is not a failure.
+  closeSession(name: string, sessionId: string) {
+    return invoke<boolean>("agent_close_session", { name, sessionId });
+  }
+
+  /// Sessions this agent is holding right now, with the channels they belong to.
+  private held(name: string): Array<[string, string]> {
+    return keysOf(name, this.sessions.keys())
+      .map((key) => [ key, this.sessions.get(key) ] as [string, string])
+      .filter(([ , id ]) => Boolean(id));
+  }
+
   async stop(name?: string) {
+    // Closed before the process is killed, or they are not closed at all. A
+    // failure here is not a reason to keep an agent somebody asked to stop.
+    const closing = name ? this.held(name) : [];
+    await Promise.allSettled(closing.map(([ , id ]) => this.closeSession(name!, id)));
+
     await invoke("agent_stop", { name });
     if (name) {
       this.dropped(name);
     } else {
       this.live.clear();
       this.sessions.clear();
+      this.configs.clear();
     }
+  }
+
+  /// The channel this session was opened for now works somewhere else, so the
+  /// session belongs to nothing. Closing on a channel *switch* would be wrong —
+  /// a session is meant to outlive the window, which is the whole of #81.
+  async releaseChannel(slug: string) {
+    for (const name of [ ...this.live ]) {
+      const key = sessionKey(name, slug);
+      const id = this.sessions.get(key);
+      if (!id) continue;
+
+      await this.closeSession(name, id).catch(() => {});
+      this.sessions.delete(key);
+      this.configs.delete(key);
+      forget(this.remembered, name, slug);
+    }
+    this.persist();
   }
 
   /// One session per agent per channel — the memory scope and the session scope
