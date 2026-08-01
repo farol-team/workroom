@@ -121,7 +121,10 @@ module Memory
 
       assert_equal [ "Quarterly." ], @store.all(@channel).map(&:detail),
                    "the third correction is the same act as the second"
-      assert_equal 1, retrieving { c = @store.count(@channel); c == 1 ? c : nil },
+      # A short deadline on purpose: this is a number that is already right or a
+      # number that is wrong, and waiting out the full retrieval window for the
+      # second kind turns a red run into a stalled one.
+      assert_equal 1, retrieving(seconds: 10) { c = @store.count(@channel); c == 1 ? c : nil },
                    "a room that was told one thing three times knows one thing"
     end
 
@@ -136,16 +139,44 @@ module Memory
     end
 
     # The tiers a write did not state, and the key a title has nothing in it to
-    # give. Both stores answer this identically today, which is the whole reason
-    # it can be one rule — this is the assertion that says so out loud, and the
-    # one that goes red if the move changes what a caller gets back.
+    # give. The second write is the half that matters: a fallback key that is the
+    # same string every time would file two unrelated entries under one name and
+    # supersede the first with the second, which is a room forgetting rather than
+    # being corrected.
     def test_a_write_that_gives_only_a_title_and_a_detail_gets_the_rest
-      entry = @store.write(@channel, title: "?!", detail: "The whole story.")
+      first  = @store.write(@channel, title: "?!", detail: "The whole story.")
+      second = @store.write(@channel, title: "?!", detail: "A different story.")
 
-      assert entry.uri.start_with?(@channel.memory_uri),
-             "#{entry.uri}: a title with no key in it is still filed under the channel"
-      assert_equal "The whole story.", entry.overview, "the orientation tier falls back to the detail"
-      assert_equal "?!", entry.abstract, "and the discovery tier to the title"
+      assert first.uri.start_with?(@channel.memory_uri),
+             "#{first.uri}: a title with no key in it is still filed under the channel"
+      refute_equal first.uri, second.uri,
+                   "a key the title could not give is this write's own, not a constant every write shares"
+      assert_equal 2, @store.all(@channel).size,
+                   "two entries nothing connects, because nothing in their titles does"
+      assert_equal "The whole story.", first.overview, "the orientation tier falls back to the detail"
+      assert_equal "?!", first.abstract, "and the discovery tier to the title"
+    end
+
+    # The one input the two stores answer differently today, and the reason the
+    # policy becomes one: `Memory::Local#write` asks a title that is nil for its
+    # parameterized form and gets a NoMethodError from inside the store, while
+    # `Memory::OpenViking#write` derives a random key and writes a document with
+    # no title in it that nothing can ever find. Neither is an answer a caller
+    # can act on, and a caller that hands over no title is asking for an entry
+    # the room could never name — so both doors refuse it, in the same words.
+    def test_a_write_the_room_could_not_name_is_refused_the_same_way_by_every_store
+      [ nil, "", "   " ].each do |untitled|
+        assert_raises(ArgumentError, "#{untitled.inspect} is not a title") do
+          @store.write(@channel, title: untitled, detail: "Something worth knowing.")
+        end
+
+        assert_raises(ArgumentError, "#{untitled.inspect} is not a title for a skill either") do
+          @store.write_skill(@channel, title: untitled, body: "Something worth doing.")
+        end
+      end
+
+      assert_empty @store.all(@channel), "a write nobody can name is not what the room knows"
+      assert_empty @store.skills(@channel), "and is not how work is done here either"
     end
 
     # --- provenance -----------------------------------------------------------

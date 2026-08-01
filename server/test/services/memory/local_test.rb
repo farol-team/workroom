@@ -31,6 +31,21 @@ class Memory::LocalTest < ActiveSupport::TestCase
     assert_equal [ second ], @channel.memory_entries.current.to_a
   end
 
+  # The contract asks both stores what the room knows after a title is written
+  # again, and both answer "the last thing". Only the row can be asked what
+  # became of the others, and the answer has to be "they are still here" — this
+  # store archives by leaving a superseded row behind, the context database by
+  # moving the file, and a correction that deletes satisfies every portable
+  # assertion there is (Article P6).
+  test "a title written again three times leaves all three versions in the table" do
+    3.times { |i| @store.write(@channel, title: "Cadence", detail: "version #{i}") }
+
+    assert_equal 3, @channel.memory_entries.count, "two of the three are history, not nothing"
+    assert_equal [ "version 2" ], @channel.memory_entries.current.map(&:detail)
+    assert @channel.memory_entries.where(detail: "version 0").first.superseded_at,
+           "what the room used to know says when it stopped being true"
+  end
+
   test "search finds an entry by its detail" do
     @store.write(@channel, title: "Acme", detail: "asked for monthly rollups")
     assert_equal [ "Acme" ], @store.search(@channel, "rollups").map(&:title)
