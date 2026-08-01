@@ -33,7 +33,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../node_modules/@agentclientprotocol/claude-agent-acp/**/*": "agents/claude-agent-acp/",
+      "../node_modules/.bin/claude-agent-acp": "agents/bin/claude-agent-acp"
+    }
   },
   "plugins": {
     "updater": {

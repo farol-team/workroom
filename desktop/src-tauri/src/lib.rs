@@ -31,7 +31,7 @@ use tauri_plugin_opener::OpenerExt;
 use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
-/// Defaults to opencode, which ships a first-party ACP server; any other ACP
+/// Defaults to the adapter that ships with this application; any other ACP
 /// agent works by passing a different command.
 #[tauri::command]
 async fn agent_start(
@@ -41,10 +41,11 @@ async fn agent_start(
     command: Option<String>,
     args: Option<Vec<String>>,
 ) -> Result<Value, String> {
-    let name = name.unwrap_or_else(|| "opencode".into());
-    let command = command.unwrap_or_else(|| "opencode".into());
-    let args = args.unwrap_or_else(|| vec!["acp".into()]);
+    let name = name.unwrap_or_else(|| "claude".into());
+    let command = command.unwrap_or_else(|| "claude-agent-acp".into());
+    let args = args.unwrap_or_default();
 
+    let command = resolve(&app, &command);
     let agent = Agent::launch(app, &name, &command, &args).await?;
     // Starting again under the same name is a restart. The process it replaces
     // is shut down here, or it lingers unaddressable with the user's session open.
@@ -52,6 +53,40 @@ async fn agent_start(
         previous.shutdown().await;
     }
     Ok(json!({ "ok": true, "name": name, "command": command }))
+}
+
+/// Where an agent named by a bare command actually is.
+///
+/// The adapter ships with the application, so `npx` never runs: a package
+/// resolved from the registry at the moment somebody opens a channel is one
+/// that can change between two turns, and the name this project used to name
+/// was deprecated besides (#120).
+///
+/// Looked for in the bundle, then beside the source under `pnpm tauri dev`, and
+/// otherwise left alone — a person naming their own agent means the one on
+/// their PATH, and this must not take that away from them.
+fn resolve(app: &AppHandle, command: &str) -> String {
+    if command.contains(std::path::MAIN_SEPARATOR) {
+        return command.to_string();
+    }
+
+    let shipped = app
+        .path()
+        .resolve(
+            format!("agents/bin/{command}"),
+            tauri::path::BaseDirectory::Resource,
+        )
+        .ok();
+    let beside = std::env::current_dir()
+        .ok()
+        .map(|dir| dir.join("../node_modules/.bin").join(command));
+
+    [shipped, beside]
+        .into_iter()
+        .flatten()
+        .find(|path| path.exists())
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| command.to_string())
 }
 
 /// Open the working directory for this session and remember what was in it.

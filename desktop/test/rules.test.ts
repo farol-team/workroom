@@ -274,9 +274,11 @@ describe("agent definitions", () => {
     expect(none[0].default).toBe(true);
   });
 
-  test("nothing configured is not an error — it is opencode", () => {
+  test("nothing configured is not an error — it is the agent that ships here", () => {
+    // Not one the person is assumed to have installed, and not one fetched from
+    // the registry when they open a channel (#120).
     expect(normalizeAgents([])).toEqual([
-      { name: "opencode", command: "opencode", args: ["acp"], default: true },
+      { name: "claude", command: "claude-agent-acp", args: [], default: true },
     ]);
   });
 });
