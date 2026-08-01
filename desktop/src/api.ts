@@ -82,6 +82,35 @@ export class Api {
     return this.call<Channel>("/channels", { method: "POST", body: JSON.stringify(body) });
   }
 
+  /// Everybody in this workspace, which is what a mention is resolved against.
+  workspaceMembers() {
+    return this.call<Array<{ id: number; name: string; handle: string; role: string }>>(
+      "/workspace/members");
+  }
+
+  addMember(slug: string, handle: string) {
+    return this.call<{ id: number; name: string; handle: string }>(`/channels/${slug}/members`, {
+      method: "POST", body: JSON.stringify({ handle }),
+    });
+  }
+
+  invitations() {
+    return this.call<Array<{ id: number; code: string; email: string | null; role: string;
+                             expires_at: string; invited_by: string }>>("/invitations");
+  }
+
+  invite(email?: string, role = "member") {
+    return this.call<{ code: string; email: string | null; role: string; expires_at: string }>(
+      "/invitations", { method: "POST", body: JSON.stringify({ email, role }) });
+  }
+
+  /// Redeeming is how somebody reaches a room they did not make. It answers
+  /// with that room's token, and nothing else does.
+  acceptInvitation(code: string) {
+    return this.call<{ workspace: { slug: string; name: string }; role: string; token: string }>(
+      `/invitations/${encodeURIComponent(code)}/accept`, { method: "POST" });
+  }
+
   channelTemplates() {
     return this.call<Array<{ key: string; name: string; purpose: string; taken: boolean }>>(
       "/channel-templates");
@@ -122,7 +151,7 @@ export class Api {
   /// Who is in the room. A name and a role, nothing that identifies anyone
   /// elsewhere.
   members(slug: string) {
-    return this.call<Array<{ id: number; name: string; role: string }>>(
+    return this.call<Array<{ id: number; name: string; handle: string; role: string }>>(
       `/channels/${slug}/members`);
   }
 

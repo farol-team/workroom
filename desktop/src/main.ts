@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, activeAgent, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, missingFrom, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
 import { invoke } from "@tauri-apps/api/core";
@@ -583,6 +583,7 @@ $("composer").addEventListener("submit", async (e) => {
   input.value = "";
   refreshDestination();
   await send(text).catch((err) => alert(String(err)));
+  offerToAdd(text).catch(() => {});
 });
 
 /// The one chosen in the panel, if a choice has been made at all.
@@ -813,6 +814,58 @@ async function enterWorkspace(slug: string) {
 $("workspace-pick").addEventListener("change", (e) =>
   enterWorkspace((e.target as HTMLSelectElement).value));
 
+async function renderInvitations() {
+  const open = await api.invitations().catch(() => []);
+  const box = $("invite-open");
+  box.textContent = open.length ? "" : "None.";
+  for (const one of open) {
+    const row = document.createElement("div");
+    row.textContent = `${one.email ?? "anybody"} · ${one.role} · ${one.code}`;
+    box.append(row);
+  }
+}
+
+$("workspace-join").addEventListener("click", async () => {
+  const dialog = $<HTMLDialogElement>("join");
+  const field = $<HTMLInputElement>("join-code");
+  field.value = "";
+  dialog.showModal();
+  await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
+  if (dialog.returnValue !== "go" || !field.value.trim()) return;
+
+  try {
+    const joined = await api.acceptInvitation(field.value.trim());
+    // Redeeming is the third and last place a token for another room arrives.
+    rooms = settings.saveWorkspaces(enterRoom(rooms, joined.workspace.slug, joined.token));
+    await enterWorkspace(joined.workspace.slug);
+    say(`You are in ${joined.workspace.name}.`);
+  } catch (err) {
+    alert(String(err));
+  }
+});
+
+$("workspace-invite").addEventListener("click", async () => {
+  const dialog = $<HTMLDialogElement>("invite");
+  $("invite-result").textContent = "";
+  await renderInvitations();
+  dialog.showModal();
+});
+
+$("invite-go").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const email = $<HTMLInputElement>("invite-email").value.trim();
+  const role = $<HTMLSelectElement>("invite-role").value;
+  try {
+    const made = await api.invite(email || undefined, role);
+    // The code is the invitation. Shown rather than sent: this client has no
+    // way to send mail, and pretending otherwise would lose somebody's invite.
+    $("invite-result").textContent = `Send them this code: ${made.code}`;
+    await renderInvitations();
+  } catch (err) {
+    $("invite-result").textContent = String(err);
+  }
+});
+
 $("workspace-new").addEventListener("click", async () => {
   const asked = await askForOne("New workspace",
     "A room of its own: its own channels, its own memory, and nothing of this one's.");
@@ -841,6 +894,27 @@ $("channel-new").addEventListener("click", async () => {
     alert(String(err));
   }
 });
+
+/// Somebody was named who is not in this room. Offered, never done: adding a
+/// colleague to a channel is a thing a person decides, and this is the one
+/// moment they are thinking about it.
+async function offerToAdd(text: string) {
+  if (!current) return;
+
+  const [ present, workspace ] = await Promise.all([
+    api.members(current.slug).catch(() => []),
+    api.workspaceMembers().catch(() => []),
+  ]);
+
+  for (const person of missingFrom(text, present, workspace, agents.definitions())) {
+    const slug = current.slug;
+    const dismiss = say(`${person.name} is not in #${slug}.`, `Add @${person.handle}`, async () => {
+      await api.addMember(slug, person.handle);
+      dismiss();
+      say(`${person.name} is in #${slug}.`);
+    });
+  }
+}
 
 function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
