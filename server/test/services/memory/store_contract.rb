@@ -102,6 +102,54 @@ module Memory
                       "history is corrected by superseding, never by editing (Article P6)"
     end
 
+    # --- provenance -----------------------------------------------------------
+    #
+    # Article P3 removed the human gate on the strength of provenance being
+    # mandatory, and Article P4 calls an entry nobody can trace a defect. Both
+    # stores answer the question the same way — one points at the run, the other
+    # carries what the run said — so the answer is asserted through the one place
+    # that reads either representation.
+
+    def test_an_entry_an_agent_wrote_says_whose_agent_wrote_it
+      alice = user(name: "Alice")
+      run = agent_run(user: alice, channel: @channel)
+      run.update!(model: "ChatGPT 5.5")
+
+      written = @store.write(@channel, title: "Pricing objection", detail: "Setup cost, not price.",
+                             trust: "agent", author: alice, source: run)
+      who = Memory::Provenance.of(@store.fetch(written.uri))
+
+      assert_equal "agent", who[:kind]
+      assert_equal "Alice", who[:name], "an entry marked agent still belongs to a person (Article P4)"
+      assert_equal "opencode", who[:agent_kind]
+      assert_equal "ChatGPT 5.5", who[:model]
+      assert_equal run.id, who[:run_id], "the entry must lead back to the turn that produced it"
+    end
+
+    def test_an_entry_a_person_wrote_has_an_author_and_no_run
+      alice = user(name: "Alice")
+
+      written = @store.write(@channel, title: "Reporting cadence", detail: "Monthly.",
+                             trust: "human", author: alice)
+      who = Memory::Provenance.of(@store.fetch(written.uri))
+
+      assert_equal({ kind: "human", name: "Alice" }, who,
+                   "a person was not a turn, and having no run is not a missing record")
+    end
+
+    def test_provenance_survives_superseding
+      alice = user(name: "Alice")
+      run = agent_run(user: alice, channel: @channel)
+      written = @store.write(@channel, title: "Cadence", detail: "Weekly.", key: "cadence",
+                             trust: "agent", author: alice, source: run)
+
+      who = Memory::Provenance.of(@store.supersede(written.uri))
+
+      assert_equal "Alice", who[:name]
+      assert_equal run.id, who[:run_id],
+                   "what the room used to know must still say where it came from (Article P6)"
+    end
+
     # --- supersede ------------------------------------------------------------
 
     def test_an_agent_resolving_a_contradiction_supersedes_the_stale_entry
