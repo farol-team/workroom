@@ -596,6 +596,26 @@ function renderAgentPicker() {
 
 $("agent-pick").addEventListener("change", () => { renderAgentPicker(); renderOptions(); });
 
+/// Start one agent and open its session in the room that is on screen. Shared
+/// with the notice an agent leaves when its process ends (#93) — the person
+/// asks for the restart there, the same way they would here.
+async function startAgent(name: string) {
+  $("agent-status").textContent = "starting…";
+  try {
+    await agents.start(name);
+    renderAgentPicker();
+    if (current) {
+      const dir = boundFolder(current.slug, bindings)
+        ?? await agents.workspace(me, name, current.slug);
+      await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
+      renderOptions();
+    }
+  } catch (err) {
+    $("agent-status").textContent = "failed";
+    throw err;
+  }
+}
+
 $("agent-toggle").addEventListener("click", async () => {
   const name = activeAgent();
   if (!name) return;
@@ -604,18 +624,9 @@ $("agent-toggle").addEventListener("click", async () => {
       await agents.stop(name);
       renderAgentPicker();
     } else {
-      $("agent-status").textContent = "starting…";
-      await agents.start(name);
-      renderAgentPicker();
-      if (current) {
-        const dir = boundFolder(current.slug, bindings)
-          ?? await agents.workspace(me, name, current.slug);
-        await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
-        renderOptions();
-      }
+      await startAgent(name);
     }
   } catch (err) {
-    $("agent-status").textContent = "failed";
     alert(`Could not start ${name}.\n\n${String(err)}\n\nInstall it with: npm i -g opencode-ai`);
   }
 });
@@ -781,6 +792,17 @@ async function boot() {
   agents.use(settings.load());
   for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
   renderAgentPicker();
+
+  // An agent that stopped says so once, with whatever it said on the way down.
+  // Restarting is offered, never done: the process runs under this person's own
+  // credentials and respawning it unasked is not ours to decide.
+  await agents.onClosed(({ name, diagnostics }) => {
+    renderAgentPicker();
+    const who = name ?? "The agent";
+    const why = diagnostics.length ? ` It said: ${diagnostics.slice(-3).join(" ")}` : "";
+    if (name) say(`${who} stopped.${why}`, "Start agent", () => startAgent(name));
+    else say(`${who} stopped.${why}`);
+  });
 
   const version = await getVersion().catch(() => "");
   noticeDrift(version, how.version);

@@ -4,7 +4,7 @@
 //! nothing here ever handles a model API key. What crosses this boundary is
 //! control — prompts out, updates in.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -15,6 +15,11 @@ use tokio::process::{Child, ChildStdin};
 use tokio::sync::{oneshot, Mutex};
 
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
+type Diagnostics = Arc<Mutex<VecDeque<String>>>;
+
+/// How much of the agent's stderr is worth keeping. Enough for a stack trace or
+/// a refusal, far short of a session's logging.
+const DIAGNOSTIC_LINES: usize = 50;
 
 /// JSON-RPC 2.0 says an id is a String or a Number. We only ever send numbers,
 /// but what comes back is whatever the agent chose to send, and an agent that
@@ -110,6 +115,9 @@ pub struct Agent {
     /// the handshake is where we find out the rail cannot work, and throwing it
     /// away meant finding out never (#94).
     handshake: Mutex<Value>,
+    /// The last thing it said on stderr. Not work product and not a step, so it
+    /// belongs nowhere in the room — and everywhere a person asks why (#93).
+    diagnostics: Diagnostics,
 }
 
 /// Whether an agent says it can mount an HTTP MCP server — which is the only way
@@ -188,6 +196,7 @@ impl Agent {
     /// Launch the agent and complete the ACP handshake.
     pub async fn launch(
         app: AppHandle,
+        name: &str,
         command: &str,
         args: &[String],
     ) -> Result<Arc<Self>, String> {
@@ -195,19 +204,44 @@ impl Agent {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Kept, not discarded. An agent that starts and then cannot work
+            // says why here — a missing credential, a config it could not read —
+            // and `opencode acp` starts perfectly well having never been logged
+            // in to. Thrown away, that leaves "the agent is online and silent"
+            // and nothing to look at (#93).
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("cannot start `{command}`: {e}"))?;
 
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
+        let stderr = child.stderr.take().ok_or("no stderr")?;
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let diagnostics: Diagnostics = Arc::new(Mutex::new(VecDeque::new()));
+
+        // A tail, not a log: the last thing the agent said, for a person asking
+        // why it is not answering.
+        {
+            let diagnostics = diagnostics.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let mut tail = diagnostics.lock().await;
+                    if tail.len() == DIAGNOSTIC_LINES {
+                        tail.pop_front();
+                    }
+                    tail.push_back(line);
+                }
+            });
+        }
 
         // One reader task owns stdout for the life of the process: replies go to
         // whoever is waiting, notifications become UI events.
         {
             let pending = pending.clone();
+            let closing = diagnostics.clone();
+            let closing_name = name.to_string();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -236,7 +270,14 @@ impl Agent {
                         Inbound::Ignore => {}
                     }
                 }
-                let _ = app.emit("acp://closed", json!({}));
+                // Which agent stopped, and the last thing it said. A name is
+                // the difference between "an agent stopped" and something a
+                // person can act on when several are running.
+                let tail: Vec<String> = closing.lock().await.iter().cloned().collect();
+                let _ = app.emit(
+                    "acp://closed",
+                    json!({ "name": closing_name, "diagnostics": tail }),
+                );
             });
         }
 
@@ -246,6 +287,7 @@ impl Agent {
             next_id: Mutex::new(0),
             child: Mutex::new(child),
             handshake: Mutex::new(Value::Null),
+            diagnostics: diagnostics.clone(),
         });
 
         const PROTOCOL_VERSION: i64 = 1;
@@ -257,7 +299,22 @@ impl Agent {
                     "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false } }
                 }),
             )
-            .await?;
+            .await;
+
+        // A handshake that fails is an agent that started and cannot work.
+        // Whatever it said on the way down is the only thing that explains it —
+        // `cannot start` covers only a binary that was never there.
+        let handshake = match handshake {
+            Ok(reply) => reply,
+            Err(error) => {
+                let tail = agent.diagnostics().await;
+                return Err(if tail.is_empty() {
+                    error
+                } else {
+                    format!("{error}\n\n{command} said:\n{}", tail.join("\n"))
+                });
+            }
+        };
 
         // An agent answering a version we did not ask for is worth saying before
         // the first turn rather than after it behaves oddly. Not fatal: the
@@ -277,6 +334,11 @@ impl Agent {
     /// which cannot be observed from outside — `launch` does not return early.
     pub async fn handshake(&self) -> Value {
         self.handshake.lock().await.clone()
+    }
+
+    /// The last lines the agent wrote to stderr, oldest first.
+    pub async fn diagnostics(&self) -> Vec<String> {
+        self.diagnostics.lock().await.iter().cloned().collect()
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {

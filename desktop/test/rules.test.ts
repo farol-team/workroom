@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("addressing", () => {
   test("a plain message is for the room", () => {
@@ -628,6 +628,17 @@ describe("the agent asking to do something", () => {
   test("anything that is not a permission request is not one", () => {
     expect(permissionAsked({ id: 1, request: { method: "fs/read_text_file", params: {} } })).toBeNull();
     expect(permissionAsked({ id: 1, request: {} })).toBeNull();
+  });
+
+  test("forgetting one agent does not forget the one whose name starts the same", () => {
+    // An agent's process ended, so its sessions are gone with it. `claude` and
+    // `claude-next` are two agents, and matching on the bare name takes both.
+    const keys = [ sessionKey("claude", "general"), sessionKey("claude", "acme"),
+                   sessionKey("claude-next", "general"), sessionKey("opencode", "general") ];
+
+    expect(keysOf("claude", keys)).toEqual([ "claude/general", "claude/acme" ]);
+    expect(keysOf("claude-next", keys)).toEqual([ "claude-next/general" ]);
+    expect(keysOf("nobody", keys)).toEqual([]);
   });
 
   test("a string id survives, because Number(\"perm-1\") answers nobody", () => {

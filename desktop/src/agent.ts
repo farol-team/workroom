@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, mcpServersFor, permissionAsked, recall, remember, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, permissionAsked, recall, remember, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -59,10 +59,7 @@ export class Agents {
   async stop(name?: string) {
     await invoke("agent_stop", { name });
     if (name) {
-      this.live.delete(name);
-      for (const key of [...this.sessions.keys()]) {
-        if (key.startsWith(sessionKey(name, ""))) this.sessions.delete(key);
-      }
+      this.dropped(name);
     } else {
       this.live.clear();
       this.sessions.clear();
@@ -171,5 +168,29 @@ export class Agents {
       const update = translateAcp(ev.payload);
       if (update) handler(update);
     });
+  }
+
+  /// The agent's process ended. Nothing listened for this, so the sidebar went
+  /// on offering an agent that was gone and the next `@agent` failed with "no
+  /// agent is running" in a room that had shown it as available (#93).
+  ///
+  /// Restarting is the person's to ask for. An agent that respawns itself under
+  /// somebody's credentials without being asked is what #69 was careful not to
+  /// do with updates.
+  onClosed(handler: (e: { name?: string; diagnostics: string[] }) => void) {
+    return listen<any>("acp://closed", (ev) => {
+      const name = typeof ev.payload?.name === "string" ? ev.payload.name : undefined;
+      if (name) this.dropped(name);
+      handler({ name, diagnostics: ev.payload?.diagnostics ?? [] });
+    });
+  }
+
+  /// Forget an agent that is no longer running: its name, its sessions and the
+  /// options that belonged to them. A session id outliving its process is a
+  /// resumption that cannot happen.
+  private dropped(name: string) {
+    this.live.delete(name);
+    for (const key of keysOf(name, this.sessions.keys())) this.sessions.delete(key);
+    for (const key of keysOf(name, this.configs.keys())) this.configs.delete(key);
   }
 }
