@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_160001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_170001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -123,6 +123,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_160001) do
     t.index ["workspace_id"], name: "index_channels_on_workspace_id"
   end
 
+  create_table "invitations", force: :cascade do |t|
+    t.datetime "accepted_at"
+    t.bigint "accepted_by_id"
+    t.string "code", null: false
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.datetime "expires_at", null: false
+    t.bigint "invited_by_id", null: false
+    t.string "role", default: "member", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["accepted_by_id"], name: "index_invitations_on_accepted_by_id"
+    t.index ["code"], name: "index_invitations_on_code", unique: true
+    t.index ["invited_by_id"], name: "index_invitations_on_invited_by_id"
+    t.index ["workspace_id"], name: "index_invitations_on_workspace_id"
+  end
+
   create_table "memberships", force: :cascade do |t|
     t.bigint "channel_id", null: false
     t.datetime "created_at", null: false
@@ -192,11 +209,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_160001) do
     t.string "avatar_url"
     t.datetime "created_at", null: false
     t.string "email", null: false
+    t.string "handle", null: false
     t.string "name"
     t.string "provider", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
     t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["handle"], name: "index_users_on_handle", unique: true
     t.index ["provider", "uid"], name: "index_users_on_provider_and_uid", unique: true
   end
 
@@ -239,6 +258,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_160001) do
   add_foreign_key "artifacts", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "artifacts", "workspaces"
   add_foreign_key "channels", "workspaces"
+  add_foreign_key "invitations", "users", column: "accepted_by_id"
+  add_foreign_key "invitations", "users", column: "invited_by_id"
+  add_foreign_key "invitations", "workspaces"
   add_foreign_key "memberships", "channels"
   add_foreign_key "memberships", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "memberships", "users"

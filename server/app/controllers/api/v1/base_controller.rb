@@ -54,6 +54,16 @@ module Api
 
       def render_error(message, status) = render(json: { error: message }, status:)
 
+      # Roles have been on `workspace_memberships` since #134 and checked
+      # nowhere. Inviting somebody into a room is the first thing that needs
+      # them, so this is where they start meaning something.
+      def require_workspace_admin
+        role = current_user.workspace_memberships.find_by(workspace: current_workspace)&.role
+        return if %w[owner admin].include?(role)
+
+        render_error("only an owner or an admin invites people here", :forbidden)
+      end
+
       rescue_from ActiveRecord::RecordNotFound do
         render_error("not found", :not_found)
       end
