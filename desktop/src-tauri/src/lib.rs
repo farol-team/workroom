@@ -61,13 +61,21 @@ async fn agent_start(
 /// resolved from the registry at the moment somebody opens a channel is one
 /// that can change between two turns, and the name this project used to name
 /// was deprecated besides (#120).
-///
-/// Looked for in the bundle, then beside the source under `pnpm tauri dev`, and
-/// otherwise left alone — a person naming their own agent means the one on
-/// their PATH, and this must not take that away from them.
 fn resolve(app: &AppHandle, command: &str) -> String {
+    located(command, &places(app, command))
+}
+
+/// Everywhere a command might be, in the order this application trusts them:
+/// the bundle, then beside the source under `pnpm tauri dev`, then the prefix
+/// this application installs into, and last whatever is on the person's PATH —
+/// somebody naming their own agent means the one they already have, and this
+/// must not take that away from them.
+///
+/// A command given as a path is that path and nothing else. It is the one place
+/// somebody has said exactly what they mean.
+fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
     if command.contains(std::path::MAIN_SEPARATOR) {
-        return command.to_string();
+        return vec![std::path::PathBuf::from(command)];
     }
 
     let shipped = app
@@ -80,13 +88,108 @@ fn resolve(app: &AppHandle, command: &str) -> String {
     let beside = std::env::current_dir()
         .ok()
         .map(|dir| dir.join("../node_modules/.bin").join(command));
+    let ours = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("npm").join("bin").join(command));
+    let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|dir| dir.join(command))
+        .collect::<Vec<_>>();
 
-    [shipped, beside]
+    [shipped, beside, ours]
         .into_iter()
         .flatten()
+        .chain(on_path)
+        .collect()
+}
+
+/// The first of those that is really there.
+fn found(places: &[std::path::PathBuf]) -> Option<String> {
+    places
+        .iter()
         .find(|path| path.exists())
         .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| command.to_string())
+}
+
+/// Where the command is, or the name as it was typed — an agent this side
+/// cannot find is still worth trying to spawn, and the error it gives is the
+/// person's to read.
+fn located(command: &str, places: &[std::path::PathBuf]) -> String {
+    found(places).unwrap_or_else(|| command.to_string())
+}
+
+/// Which of these commands this machine has, and where. Null for one it does
+/// not, which is the whole of what the panel needs to stop claiming an agent
+/// somebody never installed is available.
+#[tauri::command]
+async fn agent_probe(app: AppHandle, commands: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    Ok(commands
+        .iter()
+        .map(|command| found(&places(&app, command)))
+        .collect())
+}
+
+/// What an install did, in enough detail to say why it did not work.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallResult {
+    ok: bool,
+    code: Option<i32>,
+    stdout_tail: String,
+    stderr_tail: String,
+}
+
+/// The end of what a command said. npm's output runs to hundreds of lines and
+/// the reason is at the end of it; the banner at the start is not why it failed.
+const TAIL: usize = 800;
+
+fn tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    let start = text
+        .char_indices()
+        .rev()
+        .take(TAIL)
+        .last()
+        .map_or(0, |(i, _)| i);
+    text[start..].to_string()
+}
+
+/// Fetch one agent, on a press, into a directory this application owns.
+///
+/// The command is the catalog's and is on screen before it runs — nothing is
+/// downloaded and executed as a script, and nothing is installed by an
+/// application that did not say what it was about to do. It goes through the
+/// shell because the prefix is an app data path, which on macOS has a space in
+/// it: split on whitespace it would install two packages and neither of them
+/// where they were meant to go.
+#[tauri::command]
+async fn agent_install(command: String) -> Result<InstallResult, String> {
+    #[cfg(windows)]
+    let mut shell = {
+        let mut shell = tokio::process::Command::new("cmd");
+        shell.args(["/C", &command]);
+        shell
+    };
+    #[cfg(not(windows))]
+    let mut shell = {
+        let mut shell = tokio::process::Command::new("sh");
+        shell.args(["-c", &command]);
+        shell
+    };
+
+    let out = shell
+        .output()
+        .await
+        .map_err(|e| format!("cannot run `{command}`: {e}"))?;
+
+    Ok(InstallResult {
+        ok: out.status.success(),
+        code: out.status.code(),
+        stdout_tail: tail(&out.stdout),
+        stderr_tail: tail(&out.stderr),
+    })
 }
 
 /// Open the working directory for this session and remember what was in it.
@@ -486,6 +589,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sign_in_with_provider,
             agent_start,
+            agent_probe,
+            agent_install,
             agent_permit,
             agent_list,
             agent_workspace,
@@ -512,7 +617,7 @@ pub fn run() {
 #[cfg(test)]
 mod resolution {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("wr-resolve-{}-{}", std::process::id(), name));
@@ -521,7 +626,7 @@ mod resolution {
         dir
     }
 
-    fn binary(dir: &PathBuf, command: &str) -> PathBuf {
+    fn binary(dir: &Path, command: &str) -> PathBuf {
         let path = dir.join(command);
         std::fs::write(&path, b"#!/bin/sh\n").unwrap();
         path
@@ -538,12 +643,10 @@ mod resolution {
         binary(&prefix, "claude-agent-acp");
 
         assert_eq!(
-            found(
-                &[
-                    bundle.join("claude-agent-acp"),
-                    prefix.join("claude-agent-acp")
-                ]
-            ),
+            found(&[
+                bundle.join("claude-agent-acp"),
+                prefix.join("claude-agent-acp")
+            ]),
             Some(shipped.to_string_lossy().into_owned())
         );
     }
