@@ -21,7 +21,6 @@ class Channel < ApplicationRecord
   # Права на skills и память выводятся из пути, а не из таблицы грантов.
   # viking://resources/channels/<slug>/ is the room's own knowledge.
   def skills_uri  = "#{memory_uri}skills/"
-  def memory_root = memory_uri
 
   private
 
