@@ -61,32 +61,147 @@ async fn agent_start(
 /// resolved from the registry at the moment somebody opens a channel is one
 /// that can change between two turns, and the name this project used to name
 /// was deprecated besides (#120).
-///
-/// Looked for in the bundle, then beside the source under `pnpm tauri dev`, and
-/// otherwise left alone — a person naming their own agent means the one on
-/// their PATH, and this must not take that away from them.
 fn resolve(app: &AppHandle, command: &str) -> String {
-    if command.contains(std::path::MAIN_SEPARATOR) {
-        return command.to_string();
-    }
+    located(command, &places(app, command))
+}
 
-    let shipped = app
-        .path()
-        .resolve(
-            format!("agents/bin/{command}"),
-            tauri::path::BaseDirectory::Resource,
-        )
-        .ok();
-    let beside = std::env::current_dir()
-        .ok()
-        .map(|dir| dir.join("../node_modules/.bin").join(command));
+/// Everywhere a command might be, for the machine this is running on.
+fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
+    candidates(
+        command,
+        directories(
+            app.path()
+                .resolve("agents/bin", tauri::path::BaseDirectory::Resource)
+                .ok(),
+            std::env::current_dir()
+                .ok()
+                .map(|dir| dir.join("../node_modules/.bin")),
+            app.path().app_data_dir().ok(),
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
+        ),
+    )
+}
 
-    [shipped, beside]
+/// The directories a bare command is looked for in, in the order this
+/// application trusts them: the bundle, then beside the source under
+/// `pnpm tauri dev`, then the prefix `agent_install` fetches into — which is
+/// `npm/bin` under the app data directory, because that is where
+/// `npm install --prefix` leaves what it installed — and last whatever is on
+/// the person's own PATH. Somebody naming an agent they already have means
+/// that one, and this must not take it away from them.
+fn directories(
+    bundle: Option<std::path::PathBuf>,
+    beside: Option<std::path::PathBuf>,
+    app_data: Option<std::path::PathBuf>,
+    on_path: Vec<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    let ours = app_data.map(|dir| dir.join("npm").join("bin"));
+
+    [bundle, beside, ours]
         .into_iter()
         .flatten()
+        .chain(on_path)
+        .collect()
+}
+
+/// Where that command would be in each of them.
+///
+/// A command given as a path is that path and nothing else: it is the one place
+/// somebody has said exactly what they mean, and looking up its last segment
+/// would run something they did not name.
+fn candidates(command: &str, dirs: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    if command.contains(std::path::MAIN_SEPARATOR) {
+        return vec![std::path::PathBuf::from(command)];
+    }
+    dirs.into_iter().map(|dir| dir.join(command)).collect()
+}
+
+/// The first of those that is really there.
+fn found(places: &[std::path::PathBuf]) -> Option<String> {
+    places
+        .iter()
         .find(|path| path.exists())
         .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| command.to_string())
+}
+
+/// Where the command is, or the name as it was typed — an agent this side
+/// cannot find is still worth trying to spawn, and the error it gives is the
+/// person's to read.
+fn located(command: &str, places: &[std::path::PathBuf]) -> String {
+    found(places).unwrap_or_else(|| command.to_string())
+}
+
+/// Which of these commands this machine has, and where. Null for one it does
+/// not, which is the whole of what the panel needs to stop claiming an agent
+/// somebody never installed is available.
+#[tauri::command]
+async fn agent_probe(app: AppHandle, commands: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    Ok(commands
+        .iter()
+        .map(|command| found(&places(&app, command)))
+        .collect())
+}
+
+/// What an install did, in enough detail to say why it did not work.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallResult {
+    ok: bool,
+    code: Option<i32>,
+    stdout_tail: String,
+    stderr_tail: String,
+}
+
+/// The end of what a command said. npm's output runs to hundreds of lines and
+/// the reason is at the end of it; the banner at the start is not why it failed.
+const TAIL: usize = 800;
+
+fn tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    let start = text
+        .char_indices()
+        .rev()
+        .take(TAIL)
+        .last()
+        .map_or(0, |(i, _)| i);
+    text[start..].to_string()
+}
+
+/// Fetch one agent, on a press, into a directory this application owns.
+///
+/// The command is the catalog's and is on screen before it runs — nothing is
+/// downloaded and executed as a script, and nothing is installed by an
+/// application that did not say what it was about to do. It goes through the
+/// shell because the prefix is an app data path, which on macOS has a space in
+/// it: split on whitespace it would install two packages and neither of them
+/// where they were meant to go.
+#[tauri::command]
+async fn agent_install(command: String) -> Result<InstallResult, String> {
+    #[cfg(windows)]
+    let mut shell = {
+        let mut shell = tokio::process::Command::new("cmd");
+        shell.args(["/C", &command]);
+        shell
+    };
+    #[cfg(not(windows))]
+    let mut shell = {
+        let mut shell = tokio::process::Command::new("sh");
+        shell.args(["-c", &command]);
+        shell
+    };
+
+    let out = shell
+        .output()
+        .await
+        .map_err(|e| format!("cannot run `{command}`: {e}"))?;
+
+    Ok(InstallResult {
+        ok: out.status.success(),
+        code: out.status.code(),
+        stdout_tail: tail(&out.stdout),
+        stderr_tail: tail(&out.stderr),
+    })
 }
 
 /// Open the working directory for this session and remember what was in it.
@@ -486,6 +601,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sign_in_with_provider,
             agent_start,
+            agent_probe,
+            agent_install,
             agent_permit,
             agent_list,
             agent_workspace,
@@ -507,6 +624,175 @@ pub fn run() {
             eprintln!("WorkRoom could not start: {error}");
             std::process::exit(1);
         });
+}
+
+#[cfg(test)]
+mod resolution {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-resolve-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn binary(dir: &Path, command: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(command);
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        path
+    }
+
+    /// Where `npm install --prefix <data>/npm` leaves what it fetched.
+    fn installed_in(data: &Path) -> PathBuf {
+        data.join("npm").join("bin")
+    }
+
+    /// A machine, as this side is given one: what the bundle holds, what sits
+    /// beside the source, the app data directory, and the person's own PATH.
+    /// Everything below goes through the same chain the running application
+    /// builds — a test that hands `found` a list it ordered itself asserts only
+    /// that the list it wrote is in the order it wrote it.
+    fn chain(
+        command: &str,
+        bundle: Option<&Path>,
+        data: Option<&Path>,
+        on_path: Vec<PathBuf>,
+    ) -> Vec<PathBuf> {
+        candidates(
+            command,
+            directories(
+                bundle.map(Path::to_path_buf),
+                None,
+                data.map(Path::to_path_buf),
+                on_path,
+            ),
+        )
+    }
+
+    #[test]
+    fn our_own_prefix_is_looked_in_after_the_bundle_and_before_the_path() {
+        // The one directory this card adds, pinned by where it is and where it
+        // sits. `npm install --prefix P` puts its binaries in `P/bin`, so
+        // anything else here is a directory nothing will ever be found in.
+        let dirs = directories(
+            Some(PathBuf::from("/bundle/agents/bin")),
+            None,
+            Some(PathBuf::from("/data")),
+            vec![PathBuf::from("/usr/local/bin")],
+        );
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/bundle/agents/bin"),
+                PathBuf::from("/data/npm/bin"),
+                PathBuf::from("/usr/local/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_adapter_in_the_bundle_wins_over_one_somebody_installed() {
+        // It ships with this application and is the version this client was
+        // tested against. An install into our own prefix is a fallback, not a
+        // replacement for what came in the bundle.
+        let bundle = temp("bundle");
+        let data = temp("data");
+        let shipped = binary(&bundle, "claude-agent-acp");
+        binary(&installed_in(&data), "claude-agent-acp");
+
+        assert_eq!(
+            found(&chain(
+                "claude-agent-acp",
+                Some(&bundle),
+                Some(&data),
+                vec![]
+            )),
+            Some(shipped.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn an_agent_in_our_own_prefix_is_found_though_it_is_not_on_path() {
+        // What `agent_install` fetches goes into a directory this application
+        // owns and nothing else on the machine knows about. Not looking there
+        // means an agent somebody just installed still reads as missing.
+        let bundle = temp("empty-bundle");
+        let data = temp("own-data");
+        let elsewhere = temp("their-path");
+        let installed = binary(&installed_in(&data), "opencode");
+
+        assert_eq!(
+            found(&chain(
+                "opencode",
+                Some(&bundle),
+                Some(&data),
+                vec![elsewhere]
+            )),
+            Some(installed.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn an_agent_the_person_already_has_is_theirs_and_not_ours() {
+        // Last in the chain, and it must still be reached: somebody who has
+        // opencode on their PATH is not offered an install for it.
+        let data = temp("no-installs");
+        let theirs = temp("on-their-path");
+        let already = binary(&theirs, "opencode");
+
+        assert_eq!(
+            found(&chain("opencode", None, Some(&data), vec![theirs])),
+            Some(already.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn a_command_nobody_has_is_left_as_it_was_typed() {
+        // A person naming their own agent means the one they have, and this
+        // must not take that away from them by answering for it.
+        let data = temp("nothing-installed");
+        let nowhere = temp("nowhere");
+        let looked = chain("kimi-acp", None, Some(&data), vec![nowhere]);
+
+        assert_eq!(found(&looked), None);
+        assert_eq!(located("kimi-acp", &looked), "kimi-acp");
+    }
+
+    #[test]
+    fn a_command_given_as_a_path_is_that_path_and_nothing_else() {
+        // The one place somebody has said exactly what they mean. Looking for
+        // its last segment in our own prefix would run something else entirely.
+        let elsewhere = temp("elsewhere");
+        let named = binary(&elsewhere, "opencode");
+
+        assert_eq!(
+            candidates(&named.to_string_lossy(), vec![temp("ignored")]),
+            vec![named]
+        );
+    }
+
+    #[test]
+    fn a_failed_install_is_reported_with_the_end_of_what_it_said() {
+        // npm's output runs to hundreds of lines and the reason is at the end
+        // of it. Keeping the start reports the banner and drops the cause.
+        let noise = "x".repeat(TAIL * 2);
+        let said = format!("{noise}\nE404 Not Found - GET https://registry.npmjs.org/nope\n");
+
+        let end = tail(said.as_bytes());
+        assert!(end.ends_with("E404 Not Found - GET https://registry.npmjs.org/nope"));
+        assert!(end.chars().count() <= TAIL);
+    }
+
+    #[test]
+    fn what_an_install_said_is_not_cut_through_a_character() {
+        let said = "é".repeat(TAIL * 2);
+
+        assert!(tail(said.as_bytes()).ends_with('é'));
+    }
 }
 
 #[cfg(test)]

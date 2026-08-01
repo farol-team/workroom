@@ -1,7 +1,9 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
+import { installCommand, profileFor } from "./agents/catalog";
 import { invoke } from "@tauri-apps/api/core";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { check } from "@tauri-apps/plugin-updater";
 import { getVersion } from "@tauri-apps/api/app";
 import * as settings from "./settings";
@@ -366,7 +368,7 @@ function offerTranscript(runId: number, name: string, sessionId: string) {
 function renderOptions() {
   const box = $("session-options");
   box.innerHTML = "";
-  const name = activeAgent();
+  const name = chosenAgent();
   if (!current || !name || !agents.isRunning(name)) return;
 
   for (const option of selectable(agents.configFor(name, current.slug))) {
@@ -565,7 +567,7 @@ $("input").addEventListener("input", refreshDestination);
 $("summon").addEventListener("click", () => {
   const input = $<HTMLInputElement>("input");
   if (!parseAddress(input.value, agents.definitions()).addressed) {
-    input.value = `@${activeAgent() ?? "agent"} ${input.value}`;
+    input.value = `@${chosenAgent() ?? "agent"} ${input.value}`;
   }
   input.focus();
   refreshDestination();
@@ -581,42 +583,135 @@ $("composer").addEventListener("submit", async (e) => {
   await send(text).catch((err) => alert(String(err)));
 });
 
-/// Which agent the controls act on: the one picked, or the default.
-function activeAgent(): string | undefined {
-  const picked = $<HTMLSelectElement>("agent-pick")?.value;
-  return picked || defaultAgent(agents.definitions());
-}
+/// The one chosen in the panel, if a choice has been made at all.
+let picked: string | undefined;
+const chosenAgent = () => activeAgent(agents.definitions(), picked);
 
-function renderAgentPicker() {
-  const pick = $<HTMLSelectElement>("agent-pick");
-  const chosen = pick.value;
-  pick.innerHTML = "";
+/// What a row is doing right now, when it is doing something. Held here rather
+/// than written into the row, because every render rebuilds it.
+const busy = new Map<string, string>();
+
+/// Where installs go: a directory this application owns, and the same one the
+/// bridge looks in. An agent installed anywhere else would read as missing the
+/// moment it finished installing.
+let prefix = "";
+
+/// One row per agent: what it is called, the state it is really in, and the
+/// single thing to do about it. The state is the machine's answer — an agent
+/// reported as ready that is not there is worse than no panel at all.
+function renderAgents() {
+  const box = $("agents");
+  box.innerHTML = "";
+  const chosen = chosenAgent();
+
   for (const def of agents.definitions()) {
-    const el = document.createElement("option");
-    el.value = def.name;
-    el.textContent = agents.isRunning(def.name) ? `${def.name} ●` : def.name;
-    pick.append(el);
-  }
-  pick.value = chosen && agents.definitions().some((d) => d.name === chosen)
-    ? chosen : (defaultAgent(agents.definitions()) ?? "");
-  pick.hidden = agents.definitions().length < 2;
+    const profile = profileFor(def.name);
+    const state = agents.stateOf(def.name);
+    const running = agents.isRunning(def.name);
+    const command = profile && prefix && state === "missing"
+      ? installCommand(profile, prefix) : null;
 
-  const name = activeAgent();
-  const on = !!name && agents.isRunning(name);
-  $("agent-status").textContent = on ? "ready" : "off";
-  $("agent-toggle").textContent = on ? `Stop ${name}` : `Start ${name ?? "agent"}`;
+    const row = document.createElement("div");
+    row.className = "agent-row";
+
+    // The name is how one of them is chosen — what the picker was for, and the
+    // one thing the panel that replaced it did not carry over. Three agents are
+    // listed for everybody now, so two running at once is ordinary, and the
+    // second one's session options were reachable only by stopping the first.
+    const name = document.createElement("button");
+    name.className = "agent-name";
+    name.style.cssText = "background: none; border: 0; padding: 0; font: inherit; cursor: pointer;"
+      + `color: var(${def.name === chosen ? "--accent" : "--text"});`;
+    name.textContent = profile?.label ?? def.name;
+    name.title = `${[ def.command, ...def.args ].join(" ")} — press to address this one`;
+    name.onclick = () => { picked = def.name; renderAgents(); renderOptions(); };
+
+    const said = document.createElement("span");
+    said.className = "muted";
+    said.textContent = busy.get(def.name) ?? (running ? "running" : state);
+
+    const action = document.createElement("button");
+    action.className = "ghost";
+    action.disabled = busy.has(def.name);
+    if (command) {
+      action.textContent = "Install";
+      action.onclick = () => { installAgent(def.name).catch((err) => alert(String(err))); };
+    } else {
+      action.textContent = running ? "Stop" : "Start";
+      action.onclick = () => { toggleAgent(def.name).catch((err) => alert(String(err))); };
+    }
+
+    row.append(name, said, action);
+    box.append(row);
+
+    // The exact command, before it runs. An application that installs something
+    // without saying what it is about to run has asked for trust it has not
+    // earned — and the answer to "what did that do to my machine" is on screen.
+    if (command) {
+      const shown = document.createElement("code");
+      shown.className = "muted";
+      shown.textContent = command;
+      shown.title = command;
+      box.append(shown);
+    }
+  }
 }
 
-$("agent-pick").addEventListener("change", () => { renderAgentPicker(); renderOptions(); });
+/// Ask the machine which of these agents it actually has. Their state is what
+/// the panel is for, and a guess would be worse than the silence it replaced.
+async function refreshAgents() {
+  await agents.probe(agents.definitions().map((d) => d.command));
+  renderAgents();
+}
+
+/// Fetch one agent, on an explicit press. One npm command into a prefix this
+/// application owns — nothing else on the machine is touched, and a failure
+/// says what npm said rather than that something went wrong.
+async function installAgent(name: string) {
+  const profile = profileFor(name);
+  const command = profile && prefix ? installCommand(profile, prefix) : null;
+  if (!command) return;
+
+  busy.set(name, "installing…");
+  renderAgents();
+  try {
+    const out = await agents.install(command);
+    if (!out.ok) {
+      alert(`${profile!.label} was not installed.\n\n${command}\n\n`
+        + `${out.stderrTail || out.stdoutTail || `npm exited ${out.code}`}`);
+    }
+  } finally {
+    busy.delete(name);
+    // Whether it worked is the machine's to say, not the exit code's.
+    await refreshAgents();
+  }
+}
+
+async function toggleAgent(name: string) {
+  picked = name;
+  if (agents.isRunning(name)) {
+    await agents.stop(name);
+    renderAgents();
+    return;
+  }
+  try {
+    await startAgent(name);
+  } catch (err) {
+    alert(`Could not start ${name}.\n\n${String(err)}`);
+  }
+}
 
 /// Start one agent and open its session in the room that is on screen. Shared
 /// with the notice an agent leaves when its process ends (#93) — the person
 /// asks for the restart there, the same way they would here.
 async function startAgent(name: string) {
-  $("agent-status").textContent = "starting…";
+  picked = name;
+  busy.set(name, "starting…");
+  renderAgents();
   try {
     await agents.start(name);
-    renderAgentPicker();
+    busy.delete(name);
+    renderAgents();
     if (current) {
       const dir = boundFolder(current.slug, bindings)
         ?? await agents.workspace(me, name, current.slug);
@@ -624,25 +719,11 @@ async function startAgent(name: string) {
       renderOptions();
     }
   } catch (err) {
-    $("agent-status").textContent = "failed";
+    busy.delete(name);
+    renderAgents();
     throw err;
   }
 }
-
-$("agent-toggle").addEventListener("click", async () => {
-  const name = activeAgent();
-  if (!name) return;
-  try {
-    if (agents.isRunning(name)) {
-      await agents.stop(name);
-      renderAgentPicker();
-    } else {
-      await startAgent(name);
-    }
-  } catch (err) {
-    alert(`Could not start ${name}.\n\n${String(err)}\n\nInstall it with: npm i -g opencode-ai`);
-  }
-});
 
 // A local view preference, not a property of the session. The record is
 // complete either way; this only decides how much of it is on screen.
@@ -812,17 +893,21 @@ async function boot() {
 
   // Agents already running from an earlier window of this session stay
   // addressable — the registry is the process's, not this view's. If the bridge
-  // does not answer, the picker is briefly wrong, which is better than a room
+  // does not answer, the panel is briefly wrong, which is better than a room
   // that never appeared.
   agents.use(settings.load());
   for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
-  renderAgentPicker();
+  prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
+  renderAgents();
+  // What each of them is on this machine, said once the room is up. Until it
+  // answers a row reads as missing, which is what it was before this existed.
+  refreshAgents().catch(() => {});
 
   // An agent that stopped says so once, with whatever it said on the way down.
   // Restarting is offered, never done: the process runs under this person's own
   // credentials and respawning it unasked is not ours to decide.
   await agents.onClosed(({ name, diagnostics }) => {
-    renderAgentPicker();
+    renderAgents();
     const who = name ?? "The agent";
     const why = diagnostics.length ? ` It said: ${diagnostics.slice(-3).join(" ")}` : "";
     if (name) say(`${who} stopped.${why}`, "Start agent", () => startAgent(name));

@@ -14,11 +14,11 @@
           <span id="who" class="muted"></span>
         </header>
         <nav id="channels"></nav>
-        <footer>
-          <select id="agent-pick" title="Which of your agents" hidden></select>
-          <button id="agent-toggle">Start agent</button>
-          <span id="agent-status" class="muted">off</span>
-        </footer>
+        <!-- One row per agent, so an agent you did not guess the name of is
+             not one you do not have. Laid out here because the footer is a
+             row and this is a list. The name in a row is also how one of them
+             is chosen — the picker this replaced. -->
+        <footer id="agents" style="flex-direction: column; align-items: stretch;"></footer>
       </aside>
 
       <main>

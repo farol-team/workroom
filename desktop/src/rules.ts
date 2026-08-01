@@ -1,6 +1,8 @@
 // The client's decision logic, kept out of main.ts so it can be exercised
 // without a window. Everything here decides something; nothing here draws.
 
+import { BASELINE } from "./agents/catalog";
+
 /// An agent answers only when its owner addresses it. Parsed before the message
 /// is posted, so the marker never reaches the channel body.
 export const ADDRESS = /^\s*@agent\b[:,]?\s*/i;
@@ -41,6 +43,17 @@ export function defaultAgent(agents: AgentDef[]): string | undefined {
   return (agents.find((a) => a.default) ?? agents[0])?.name;
 }
 
+/// Which agent the controls act on: the one chosen, while it is still one this
+/// person has, and otherwise the default. Choosing is separate from addressing
+/// — `@agent` always means the default, and this is what the session options
+/// and the summon button follow.
+///
+/// A name nothing answers to is not a choice, so a definition that went away
+/// hands the controls back to the default rather than to nothing.
+export function activeAgent(agents: AgentDef[], chosen?: string): string | undefined {
+  return agents.some((a) => a.name === chosen) ? chosen : defaultAgent(agents);
+}
+
 /// The adapter ships with this application, so a person who has configured
 /// nothing has an agent that is certainly there — rather than one they are
 /// assumed to have installed, or one downloaded when they open a channel (#120).
@@ -53,6 +66,12 @@ export const FALLBACK_AGENT: AgentDef = {
 
 /// Definitions come from a file a person edits, so they arrive malformed. Two
 /// defaults is a coin toss over who answers `@agent`; none is a dead `@agent`.
+///
+/// Whatever survives, the agents this project supports are named beside it.
+/// An agent you did not guess the name of is one you do not have: without this
+/// the two that are not bundled exist only for somebody who already knew to
+/// write them down. Naming one installs nothing — it is listed, with the state
+/// it is really in.
 export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   const seen = new Set<string>();
   const clean: AgentDef[] = [];
@@ -66,7 +85,13 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
     clean.push({ name, command, args: d.args ?? [], ...(d.default ? { default: true } : {}) });
   }
 
-  if (!clean.length) return [{ ...FALLBACK_AGENT }];
+  // Appended, never imposed: a person running opencode from a checkout keeps
+  // their own command for it, and keeps `@agent` pointing where they put it.
+  for (const profile of BASELINE) {
+    if (seen.has(profile.name)) continue;
+    seen.add(profile.name);
+    clean.push({ name: profile.name, command: profile.command, args: [ ...profile.args ] });
+  }
 
   const first = clean.findIndex((d) => d.default);
   return clean.map((d, i) => {
