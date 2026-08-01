@@ -627,9 +627,54 @@ mod resolution {
     }
 
     fn binary(dir: &Path, command: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
         let path = dir.join(command);
         std::fs::write(&path, b"#!/bin/sh\n").unwrap();
         path
+    }
+
+    /// Where `npm install --prefix <data>/npm` leaves what it fetched.
+    fn installed_in(data: &Path) -> PathBuf {
+        data.join("npm").join("bin")
+    }
+
+    /// A machine, as this side is given one: what the bundle holds, what sits
+    /// beside the source, the app data directory, and the person's own PATH.
+    /// Everything below goes through the same chain the running application
+    /// builds — a test that hands `found` a list it ordered itself asserts only
+    /// that the list it wrote is in the order it wrote it.
+    fn chain(command: &str, bundle: Option<&Path>, data: Option<&Path>, on_path: Vec<PathBuf>) -> Vec<PathBuf> {
+        candidates(
+            command,
+            directories(
+                bundle.map(Path::to_path_buf),
+                None,
+                data.map(Path::to_path_buf),
+                on_path,
+            ),
+        )
+    }
+
+    #[test]
+    fn our_own_prefix_is_looked_in_after_the_bundle_and_before_the_path() {
+        // The one directory this card adds, pinned by where it is and where it
+        // sits. `npm install --prefix P` puts its binaries in `P/bin`, so
+        // anything else here is a directory nothing will ever be found in.
+        let dirs = directories(
+            Some(PathBuf::from("/bundle/agents/bin")),
+            None,
+            Some(PathBuf::from("/data")),
+            vec![PathBuf::from("/usr/local/bin")],
+        );
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/bundle/agents/bin"),
+                PathBuf::from("/data/npm/bin"),
+                PathBuf::from("/usr/local/bin"),
+            ]
+        );
     }
 
     #[test]
@@ -638,15 +683,17 @@ mod resolution {
         // tested against. An install into our own prefix is a fallback, not a
         // replacement for what came in the bundle.
         let bundle = temp("bundle");
-        let prefix = temp("prefix");
+        let data = temp("data");
         let shipped = binary(&bundle, "claude-agent-acp");
-        binary(&prefix, "claude-agent-acp");
+        binary(&installed_in(&data), "claude-agent-acp");
 
         assert_eq!(
-            found(&[
-                bundle.join("claude-agent-acp"),
-                prefix.join("claude-agent-acp")
-            ]),
+            found(&chain(
+                "claude-agent-acp",
+                Some(&bundle),
+                Some(&data),
+                vec![]
+            )),
             Some(shipped.to_string_lossy().into_owned())
         );
     }
@@ -654,26 +701,61 @@ mod resolution {
     #[test]
     fn an_agent_in_our_own_prefix_is_found_though_it_is_not_on_path() {
         // What `agent_install` fetches goes into a directory this application
-        // owns and nothing else knows about. Not looking there means an agent
-        // somebody just installed still reads as missing.
+        // owns and nothing else on the machine knows about. Not looking there
+        // means an agent somebody just installed still reads as missing.
         let bundle = temp("empty-bundle");
-        let prefix = temp("own-prefix");
-        let installed = binary(&prefix, "opencode");
+        let data = temp("own-data");
+        let elsewhere = temp("their-path");
+        let installed = binary(&installed_in(&data), "opencode");
 
         assert_eq!(
-            found(&[bundle.join("opencode"), prefix.join("opencode")]),
+            found(&chain(
+                "opencode",
+                Some(&bundle),
+                Some(&data),
+                vec![elsewhere]
+            )),
             Some(installed.to_string_lossy().into_owned())
         );
     }
 
     #[test]
-    fn a_command_nobody_has_is_left_as_it_was_typed() {
-        // A person naming their own agent means the one on their PATH, and this
-        // must not take that away from them.
-        let nowhere = temp("nowhere");
+    fn an_agent_the_person_already_has_is_theirs_and_not_ours() {
+        // Last in the chain, and it must still be reached: somebody who has
+        // opencode on their PATH is not offered an install for it.
+        let data = temp("no-installs");
+        let theirs = temp("on-their-path");
+        let already = binary(&theirs, "opencode");
 
-        assert_eq!(found(&[nowhere.join("kimi-acp")]), None);
-        assert_eq!(located("kimi-acp", &[nowhere.join("kimi-acp")]), "kimi-acp");
+        assert_eq!(
+            found(&chain("opencode", None, Some(&data), vec![theirs])),
+            Some(already.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn a_command_nobody_has_is_left_as_it_was_typed() {
+        // A person naming their own agent means the one they have, and this
+        // must not take that away from them by answering for it.
+        let data = temp("nothing-installed");
+        let nowhere = temp("nowhere");
+        let looked = chain("kimi-acp", None, Some(&data), vec![nowhere]);
+
+        assert_eq!(found(&looked), None);
+        assert_eq!(located("kimi-acp", &looked), "kimi-acp");
+    }
+
+    #[test]
+    fn a_command_given_as_a_path_is_that_path_and_nothing_else() {
+        // The one place somebody has said exactly what they mean. Looking for
+        // its last segment in our own prefix would run something else entirely.
+        let elsewhere = temp("elsewhere");
+        let named = binary(&elsewhere, "opencode");
+
+        assert_eq!(
+            candidates(&named.to_string_lossy(), vec![temp("ignored")]),
+            vec![named]
+        );
     }
 
     #[test]
