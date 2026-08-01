@@ -20,7 +20,32 @@ module Memory
       @given = store
     end
 
-    def context_for(_channel, limit: 20)  = raise NotImplementedError
+    # What gets pushed into an agent session when somebody enters a channel.
+    # Overviews only — the detail tier is fetched through the rail if needed.
+    #
+    # Written once rather than per store: this is how an agent reads what the
+    # room knows, and it says nothing about where the entries were held. Both
+    # stores carried the same twenty lines, letter for letter, and a change to
+    # what every session opens with had two places to remember. A store with a
+    # better rendering of its own is free to override it; neither has one.
+    def context_for(channel, limit: 20)
+      entries = all(channel, limit: limit)
+      return nil if entries.empty?
+
+      lines = entries.map do |e|
+        "#{e.trust == 'human' ? '•' : '◦'} #{e.title}\n  #{e.overview.presence || e.abstract}"
+      end
+
+      <<~TEXT
+        What this room knows (#{channel.name}):
+
+        #{lines.join("\n")}
+
+        • stated by a person   ◦ inferred by an agent
+        Ask for detail by URI when a task needs it.
+      TEXT
+    end
+
     def search(_channel, _query, limit: 10) = raise NotImplementedError
 
     # Everything the room currently knows, most trusted first. Not search with

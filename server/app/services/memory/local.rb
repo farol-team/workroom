@@ -3,27 +3,6 @@ module Memory
   # context database: abstract for discovery, overview for orientation,
   # detail on demand.
   class Local < Store
-    # What gets pushed into an agent session when someone enters a channel.
-    # Overviews only — the detail tier is fetched through the rail if needed.
-    def context_for(channel, limit: 20)
-      entries = all(channel, limit: limit)
-      return nil if entries.empty?
-
-      lines = entries.map do |e|
-        mark = e.trust == "human" ? "•" : "◦"
-        "#{mark} #{e.title}\n  #{e.overview.presence || e.abstract}"
-      end
-
-      <<~TEXT
-        What this room knows (#{channel.name}):
-
-        #{lines.join("\n")}
-
-        • stated by a person   ◦ inferred by an agent
-        Ask for detail by URI when a task needs it.
-      TEXT
-    end
-
     # Everything an entry says, as one string to match against.
     HAYSTACK = "concat_ws(' ', title, abstract, overview, detail)".freeze
 

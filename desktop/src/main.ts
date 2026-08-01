@@ -182,24 +182,28 @@ function addStepLine(runId: number, label: string) {
   runSteps.set(runId, [...(runSteps.get(runId) ?? []), label]);
 }
 
+/// One line of a panel: a mark, a title, and the overview under it. Memory and
+/// skills are listed the same way and marked differently, because a fact and a
+/// procedure are read the same way and must not be mistaken for each other.
+function entryEl(into: string, mark: string, title: string, overview: string | null, extra = "") {
+  const el = document.createElement("div");
+  el.className = `entry ${extra}`;
+  el.innerHTML = `<div class="t"><span class="mark">${mark}</span></div><div class="o"></div>`;
+  el.querySelector(".t")!.append(title);
+  el.querySelector<HTMLElement>(".o")!.textContent = overview ?? "";
+  $(into).append(el);
+}
+
 async function renderMemory() {
   if (!current) return;
   const entries = await api.memory(current.slug);
   $("memory-uri").textContent = current.memory_uri;
   $("memory-list").innerHTML = "";
   for (const e of entries) {
-    const el = document.createElement("div");
-    el.className = `entry ${e.trust}`;
-    el.innerHTML = `<div class="t"><span class="mark">${e.trust === "human" ? "●" : "○"}</span></div>
-                    <div class="o"></div>`;
-    el.querySelector(".t")!.append(e.title);
-    el.querySelector<HTMLElement>(".o")!.textContent = e.overview ?? "";
-    $("memory-list").append(el);
+    entryEl("memory-list", e.trust === "human" ? "●" : "○", e.title, e.overview ?? null, e.trust);
   }
 }
 
-/// Procedures, alongside what the room knows but never mixed into it. A fact
-/// goes stale and a procedure does not, and a reader has to be able to tell.
 /// Who is in the room, so a name in the timeline is a colleague rather than a
 /// stranger.
 async function renderMembers() {
@@ -217,17 +221,14 @@ async function renderMembers() {
   }
 }
 
+/// Procedures, alongside what the room knows but never mixed into it. A fact
+/// goes stale and a procedure does not, and a reader has to be able to tell.
 async function renderSkills() {
   if (!current) return;
   const skills = await api.skills(current.slug);
   $("skill-list").innerHTML = "";
   for (const s of skills) {
-    const el = document.createElement("div");
-    el.className = "entry skill";
-    el.innerHTML = `<div class="t"><span class="mark">▸</span></div><div class="o"></div>`;
-    el.querySelector(".t")!.append(s.title);
-    el.querySelector<HTMLElement>(".o")!.textContent = s.overview ?? "";
-    $("skill-list").append(el);
+    entryEl("skill-list", "▸", s.title, s.overview ?? null, "skill");
   }
 }
 
@@ -292,8 +293,6 @@ function showPlan(runId: number, entries: PlanEntry[]) {
   box.scrollTop = box.scrollHeight;
 }
 
-/// Attaching is a decision made with the work in front of you, so it is an
-/// action on the finished run rather than a setting chosen once in the abstract.
 /// What the run wrote in its working directory, offered one file at a time.
 /// Offered, not uploaded: work product belongs to the channel (Article D3), but
 /// what leaves this machine stays the person's decision.
@@ -308,24 +307,11 @@ async function offerProduced(runId: number, workspace: string) {
     el.className = "offer";
     el.append(document.createTextNode(`${file.path} · ${Math.ceil(file.bytes / 1024)} kB `));
 
-    const button = document.createElement("button");
-    button.className = "ghost";
-    button.textContent = "Share with the channel";
-    button.onclick = async () => {
-      button.disabled = true;
-      button.textContent = "Sharing…";
-      try {
-        const body = await agents.read(workspace, file.path);
-        await api.attachBytes(runId, file.path, body, contentTypeFor(file.path));
-        el.remove();
-      } catch (err) {
-        button.disabled = false;
-        button.textContent = "Share with the channel";
-        alert(String(err));
-      }
-    };
-
-    el.append(button);
+    el.append(ghostButton("Share with the channel", "Sharing…", async () => {
+      const body = await agents.read(workspace, file.path);
+      await api.attachBytes(runId, file.path, body, contentTypeFor(file.path));
+      el.remove();
+    }));
     box.append(el);
   }
   if (omitted) {
@@ -337,30 +323,19 @@ async function offerProduced(runId: number, workspace: string) {
   box.scrollTop = box.scrollHeight;
 }
 
+/// Attaching is a decision made with the work in front of you, so it is an
+/// action on the finished run rather than a setting chosen once in the abstract.
 function offerTranscript(runId: number, name: string, sessionId: string) {
   const box = $("messages");
   const el = document.createElement("div");
   el.className = "offer";
 
-  const button = document.createElement("button");
-  button.className = "ghost";
-  button.textContent = "Attach transcript";
-  button.onclick = async () => {
-    button.disabled = true;
-    button.textContent = "Attaching…";
-    try {
-      const body = await agents.exportSession(name, sessionId);
-      if (!body) { el.textContent = "This agent keeps no transcript."; return; }
-      await api.attachArtifact(runId, transcriptName(runId, new Date()), body);
-      el.remove();
-    } catch (err) {
-      button.disabled = false;
-      button.textContent = "Attach transcript";
-      alert(String(err));
-    }
-  };
-
-  el.append(button);
+  el.append(ghostButton("Attach transcript", "Attaching…", async () => {
+    const body = await agents.exportSession(name, sessionId);
+    if (!body) { el.textContent = "This agent keeps no transcript."; return; }
+    await api.attachArtifact(runId, transcriptName(runId, new Date()), body);
+    el.remove();
+  }));
   box.append(el);
   box.scrollTop = box.scrollHeight;
 }
@@ -1029,18 +1004,30 @@ function say(text: string, action?: string, run?: () => Promise<void>): () => vo
   const el = document.createElement("div");
   el.className = "notice";
   el.append(document.createTextNode(`${text} `));
-  if (action && run) {
-    const button = document.createElement("button");
-    button.className = "ghost";
-    button.textContent = action;
-    button.onclick = async () => {
-      button.disabled = true;
-      try { await run(); } catch (err) { button.disabled = false; alert(String(err)); }
-    };
-    el.append(button);
-  }
+  if (action && run) el.append(ghostButton(action, action, run));
   $("notices").append(el);
   return () => el.remove();
+}
+
+/// A button for something that can fail. While it runs it says so and cannot be
+/// pressed again; if it fails it says why and can be pressed again. Every offer
+/// and every notice wanted the same six lines, and each wrote its own.
+function ghostButton(label: string, busy: string, work: () => Promise<void>): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "ghost";
+  button.textContent = label;
+  button.onclick = async () => {
+    button.disabled = true;
+    button.textContent = busy;
+    try {
+      await work();
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = label;
+      alert(String(err));
+    }
+  };
+  return button;
 }
 
 async function boot() {

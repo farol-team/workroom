@@ -473,9 +473,6 @@ async fn agent_new_session(
     }
 }
 
-/// Send a turn. What the room knows, and what was just said in it, are prepended
-/// here rather than stored in the agent — both belong to the channel, and every
-/// session starts from them.
 /// Change one of the session's options — the model, the mode, whatever the
 /// agent offers. Returns the full updated list, which is what the agent sends
 /// back, so the client never has to guess what took effect.
@@ -496,6 +493,9 @@ async fn agent_set_config(
         .await
 }
 
+/// Send a turn. What the room knows, and what was just said in it, are prepended
+/// here rather than stored in the agent — both belong to the channel, and every
+/// session starts from them.
 #[tauri::command]
 async fn agent_prompt(
     state: State<'_, AgentState>,

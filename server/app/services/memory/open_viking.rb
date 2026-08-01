@@ -73,24 +73,6 @@ module Memory
       entry
     end
 
-    def context_for(channel, limit: 20)
-      entries = all(channel, limit: limit)
-      return nil if entries.empty?
-
-      lines = entries.map do |e|
-        "#{e.trust == 'human' ? '•' : '◦'} #{e.title}\n  #{e.overview.presence || e.abstract}"
-      end
-
-      <<~TEXT
-        What this room knows (#{channel.name}):
-
-        #{lines.join("\n")}
-
-        • stated by a person   ◦ inferred by an agent
-        Ask for detail by URI when a task needs it.
-      TEXT
-    end
-
     # Retrieval by meaning rather than by substring — the reason for this store
     # existing. The channel is the search root, so scope stays structural.
     def search(channel, query, limit: 10)

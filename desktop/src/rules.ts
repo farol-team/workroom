@@ -54,16 +54,6 @@ export function activeAgent(agents: AgentDef[], chosen?: string): string | undef
   return agents.some((a) => a.name === chosen) ? chosen : defaultAgent(agents);
 }
 
-/// The adapter ships with this application, so a person who has configured
-/// nothing has an agent that is certainly there — rather than one they are
-/// assumed to have installed, or one downloaded when they open a channel (#120).
-///
-/// Naming any other command still works; that is what the definitions file is
-/// for, and `opencode acp` remains a one-line entry in it.
-export const FALLBACK_AGENT: AgentDef = {
-  name: "claude", command: "claude-agent-acp", args: [], default: true,
-};
-
 /// Definitions come from a file a person edits, so they arrive malformed. Two
 /// defaults is a coin toss over who answers `@agent`; none is a dead `@agent`.
 ///
