@@ -170,8 +170,22 @@ export interface Asked {
   /// As the agent sent it. JSON-RPC allows a string here, and `Number("abc")`
   /// is NaN — an answer addressed to nobody, which is a turn that never ends.
   id: unknown;
+  /// Which turn is asking. Without it a dialog for one channel's agent is shown
+  /// as though this channel's agent had asked, and the person authorises a call
+  /// they were never shown (#91).
+  sessionId?: string;
   title: string;
   options: Array<{ id: string; name: string; kind?: string }>;
+}
+
+/// Which session an ACP message belongs to. Both `session/update` and
+/// `session/request_permission` carry it and neither was read, so what an agent
+/// said was routed by who happened to be listening.
+export function sessionOf(event: unknown): string | undefined {
+  const e = event as { sessionId?: unknown; params?: { sessionId?: unknown };
+                       request?: { params?: { sessionId?: unknown } } };
+  const found = e?.params?.sessionId ?? e?.request?.params?.sessionId ?? e?.sessionId;
+  return typeof found === "string" && found ? found : undefined;
 }
 
 export function permissionAsked(event: unknown): Asked | null {
@@ -182,6 +196,7 @@ export function permissionAsked(event: unknown): Asked | null {
   return {
     // Passed through untouched, all the way back to the agent's stdin.
     id: e.id,
+    sessionId: sessionOf(event),
     title: params.toolCall?.title ?? "The agent is asking to do something",
     options: (params.options ?? []).map((o: any) => ({
       id: String(o.optionId), name: String(o.name ?? o.optionId), kind: o.kind,

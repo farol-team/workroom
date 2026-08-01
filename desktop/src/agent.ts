@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, permissionAsked, recall, remember, sessionKey, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -192,13 +192,55 @@ export class Agents {
     return invoke("agent_cancel", { name, sessionId });
   }
 
+  /// One dispatcher owns both inbound events and hands each message to the turn
+  /// that owns its session id. Registering a listener per turn meant every turn
+  /// heard every session: two channels working at once spliced each other's
+  /// answers together, and a permission dialog for one agent was shown as
+  /// though the other had asked (#91).
+  private updating = new Map<string, (u: Update) => void>();
+  private asking = new Map<string, (a: Asked) => void>();
+  private dispatching?: Promise<void>;
+
+  private async dispatch() {
+    this.dispatching ??= (async () => {
+      await listen<any>("acp://notify", (ev) => {
+        const update = translateAcp(ev.payload);
+        if (!update) return;
+        const session = sessionOf(ev.payload);
+        const to = session ? this.updating.get(session) : undefined;
+        if (to) to(update);
+        else this.unclaimed("update", session, ev.payload);
+      });
+
+      await listen<any>("acp://ask", (ev) => {
+        const asked = permissionAsked(ev.payload);
+        if (!asked) return;
+        const to = asked.sessionId ? this.asking.get(asked.sessionId) : undefined;
+        if (to) to(asked);
+        // Not dropped. The agent is blocked on this and always will be, and a
+        // question nobody can see is the hang #92 exists to make visible.
+        else this.unclaimed("permission request", asked.sessionId, ev.payload);
+      });
+    })();
+    return this.dispatching;
+  }
+
+  /// A message for a session nobody is running. Worth recording rather than
+  /// dropping silently — it means a turn ended while its agent was still
+  /// talking, or a session outlived the code that opened it.
+  private unclaimed(kind: string, session: string | undefined, payload: unknown) {
+    this.strays.push({ kind, session, payload, at: new Date().toISOString() });
+    if (this.strays.length > 50) this.strays.shift();
+  }
+
+  readonly strays: Array<{ kind: string; session?: string; payload: unknown; at: string }> = [];
+
   /// The agent asking to do something. It is blocked until somebody answers,
   /// so this is the one event that must not be dropped.
-  onAsk(handler: (asked: Asked) => void) {
-    return listen<any>("acp://ask", (ev) => {
-      const asked = permissionAsked(ev.payload);
-      if (asked) handler(asked);
-    });
+  async onAsk(sessionId: string, handler: (asked: Asked) => void) {
+    await this.dispatch();
+    this.asking.set(sessionId, handler);
+    return () => { this.asking.delete(sessionId); };
   }
 
   /// The person's answer. No option id means they declined to choose, which the
@@ -207,12 +249,12 @@ export class Agents {
     return invoke("agent_permit", { name, requestId, optionId });
   }
 
-  /// Translate ACP notifications into something the room can display.
-  onUpdate(handler: (u: Update) => void) {
-    return listen<any>("acp://notify", (ev) => {
-      const update = translateAcp(ev.payload);
-      if (update) handler(update);
-    });
+  /// Translate ACP notifications into something the room can display, for the
+  /// one turn they belong to.
+  async onUpdate(sessionId: string, handler: (u: Update) => void) {
+    await this.dispatch();
+    this.updating.set(sessionId, handler);
+    return () => { this.updating.delete(sessionId); };
   }
 
   /// The agent's process ended. Nothing listened for this, so the sidebar went
