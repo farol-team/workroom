@@ -50,6 +50,13 @@ jobs:
       - name: Signatures
         run: pnpm audit signatures
 
+      # The agent the demo runs on, started and asked. Not compared against the
+      # committed table: `authMethods` reflects whether the machine running it
+      # is logged in, and a runner never is. What this asserts is that it still
+      # starts and still speaks the protocol (#111).
+      - name: Agent bench
+        run: pnpm bench:capabilities
+
       - name: Test
         run: pnpm test
       - name: Typecheck
