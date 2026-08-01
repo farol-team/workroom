@@ -2,7 +2,42 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, enterRoom, loadRooms, reachableRooms, tokenForRoom, activeAgent, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, orAfter, permissionAsked, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+
+describe("the rooms this client can reach", () => {
+  test("a room is reachable because this client was given a way in, never because it asked", () => {
+    // An endpoint that hands over a token for another room would hand it to an
+    // agent too — an agent holds the same token the client does. So the store
+    // is what arrived at sign-in or at creation, and nothing else.
+    let rooms = loadRooms(null);
+    expect(reachableRooms(rooms)).toEqual([]);
+
+    rooms = enterRoom(rooms, "acme", "tok-acme");
+    expect(rooms.current).toBe("acme");
+    expect(tokenForRoom(rooms, "acme")).toBe("tok-acme");
+  });
+
+  test("switching to a room with no token does not switch", () => {
+    const rooms = enterRoom(enterRoom(loadRooms(null), "acme", "tok"), "globex");
+
+    expect(rooms.current).toBe("acme");
+    expect(tokenForRoom(rooms, "globex")).toBeUndefined();
+  });
+
+  test("what was stored is where this person was", () => {
+    const saved = JSON.stringify(enterRoom(enterRoom(loadRooms(null), "a", "1"), "b", "2"));
+
+    const rooms = loadRooms(saved);
+    expect(rooms.current).toBe("b");
+    expect(reachableRooms(rooms)).toEqual([ "a", "b" ]);
+  });
+
+  test("a corrupt file costs the person their place, not their account", () => {
+    expect(loadRooms("{not json")).toEqual({ tokens: {} });
+    // A current room with no token is not a room this client can open.
+    expect(loadRooms(JSON.stringify({ current: "gone", tokens: {} })).current).toBeUndefined();
+  });
+});
 
 describe("routing by session", () => {
   test("both inbound shapes say which session they belong to", () => {

@@ -1,7 +1,7 @@
 // What agents this person has, kept on this machine. Definitions are commands,
 // never credentials — an agent authenticates itself (Article P2).
 
-import { normalizeAgents, type AgentDef, type Bindings } from "./rules";
+import { loadRooms, normalizeAgents, type AgentDef, type Bindings, type Rooms } from "./rules";
 
 const KEY = "workroom.agents";
 const BINDINGS = "workroom.bindings";
@@ -42,4 +42,18 @@ export function bind(slug: string, folder: string | null): Bindings {
   else delete all[slug];
   localStorage.setItem(BINDINGS, JSON.stringify(all));
   return all;
+}
+
+const ROOMS = "workroom.rooms";
+
+/// Where this person is, and what reaches the rooms they have been given a way
+/// into. Not a cache of what the server knows — a token nobody handed this
+/// client cannot appear here (see `Rooms`).
+export function loadWorkspaces(): Rooms {
+  return loadRooms(localStorage.getItem(ROOMS));
+}
+
+export function saveWorkspaces(rooms: Rooms): Rooms {
+  localStorage.setItem(ROOMS, JSON.stringify(rooms));
+  return rooms;
 }

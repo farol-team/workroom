@@ -122,6 +122,43 @@ export function sessionKey(agent: string, slug: string): string {
   return `${agent}/${slug}`;
 }
 
+/// The rooms this person can reach, and the token for each.
+///
+/// A token belongs to a membership, so somebody in two workspaces holds two —
+/// and switching means having the other one already. It is never fetched: an
+/// endpoint that hands over a token for another room would hand it to an agent
+/// too, since an agent holds the same token the client does. So a token is here
+/// because this client was given it, by signing in or by making the room.
+export interface Rooms { current?: string; tokens: Record<string, string> }
+
+export function loadRooms(raw: string | null): Rooms {
+  try {
+    const parsed = JSON.parse(raw ?? "{}");
+    const tokens = parsed?.tokens && typeof parsed.tokens === "object" ? parsed.tokens : {};
+    const current = typeof parsed?.current === "string" ? parsed.current : undefined;
+    return { current: current && tokens[current] ? current : undefined, tokens };
+  } catch {
+    // A corrupt file should cost the person their place, not their account.
+    return { tokens: {} };
+  }
+}
+
+export function enterRoom(rooms: Rooms, slug: string, token?: string): Rooms {
+  const tokens = token ? { ...rooms.tokens, [slug]: token } : rooms.tokens;
+  return tokens[slug] ? { current: slug, tokens } : rooms;
+}
+
+export function tokenForRoom(rooms: Rooms, slug: string): string | undefined {
+  return rooms.tokens[slug];
+}
+
+/// The rooms this client can actually open. A room somebody belongs to but has
+/// no token for is not one of them — it needs signing in again, and saying so
+/// is better than a switch that silently does nothing.
+export function reachableRooms(rooms: Rooms): string[] {
+  return Object.keys(rooms.tokens).sort();
+}
+
 /// Which cached keys belong to one agent. Sessions and their options are filed
 /// under agent and channel, so forgetting an agent means forgetting those — and
 /// not those of an agent whose name merely begins the same way, which is what

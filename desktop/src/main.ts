@@ -1,5 +1,5 @@
 import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, activeAgent, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
+import { StepLedger, WorkingSignal, activeAgent, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
 import { invoke } from "@tauri-apps/api/core";
@@ -29,7 +29,9 @@ let held: Message[] = [];      // every message of the open channel
 let openThread: number | null = null;
 const ON_SCREEN = 200;
 const AT_MOST_OFFERED = 12;   // an offer nobody can read is worse than no offer
-let bindings = settings.loadBindings();   // a room with ten thousand messages is not ten thousand elements
+let bindings = settings.loadBindings();
+/// Where this person is, and what reaches the rooms they have a way into.
+let rooms = settings.loadWorkspaces();   // a room with ten thousand messages is not ten thousand elements
 
 function renderChannels() {
   $("channels").innerHTML = "";
@@ -742,6 +744,104 @@ $("memory-toggle").addEventListener("click", () => {
   if (!panel.hidden) { renderMemory(); renderSkills(); renderMembers(); }
 });
 
+
+/// Ask for a name and an address. One dialog, because making a room and making
+/// a channel ask the same two questions.
+function askForOne(title: string, note: string): Promise<{ slug: string; name: string } | null> {
+  const dialog = $<HTMLDialogElement>("make");
+  $("make-title").textContent = title;
+  $("make-note").textContent = note;
+  const name = $<HTMLInputElement>("make-name");
+  const slug = $<HTMLInputElement>("make-slug");
+  name.value = "";
+  slug.value = "";
+
+  // The address is derived while it is untouched, and left alone once it is
+  // not — somebody who typed one meant it.
+  let typed = false;
+  slug.oninput = () => { typed = true; };
+  name.oninput = () => {
+    if (!typed) slug.value = name.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  };
+
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "go" && slug.value ? { slug: slug.value, name: name.value } : null);
+    }, { once: true });
+  });
+}
+
+/// Every channel of the room this token names, and the first one opened. Called
+/// at boot and again whenever the room changes, because everything on screen
+/// belongs to one of them.
+async function loadChannels() {
+  channels = await api.channels();
+  renderChannels();
+  if (channels.length) await open(channels[0].slug);
+}
+
+function renderWorkspaces() {
+  const pick = $<HTMLSelectElement>("workspace-pick");
+  pick.innerHTML = "";
+  for (const slug of reachableRooms(rooms)) {
+    const option = document.createElement("option");
+    option.value = slug;
+    option.textContent = slug;
+    option.selected = slug === rooms.current;
+    pick.append(option);
+  }
+  pick.hidden = reachableRooms(rooms).length < 2;
+}
+
+/// Everything on screen belongs to one room, so changing rooms reloads it all.
+async function enterWorkspace(slug: string) {
+  const token = tokenForRoom(rooms, slug);
+  if (!token) {
+    say(`This client has no way into ${slug}. Sign in again to reach it.`);
+    return;
+  }
+  rooms = settings.saveWorkspaces(enterRoom(rooms, slug));
+  api.useToken(token);
+  // Sessions belong to the agent and the channel of the room that opened them.
+  await agents.stop().catch(() => {});
+  current = null;
+  renderWorkspaces();
+  await loadChannels();
+}
+
+$("workspace-pick").addEventListener("change", (e) =>
+  enterWorkspace((e.target as HTMLSelectElement).value));
+
+$("workspace-new").addEventListener("click", async () => {
+  const asked = await askForOne("New workspace",
+    "A room of its own: its own channels, its own memory, and nothing of this one's.");
+  if (!asked) return;
+
+  try {
+    const made = await api.createWorkspace(asked.slug, asked.name);
+    // The only place a token for another room legitimately arrives.
+    rooms = settings.saveWorkspaces(enterRoom(rooms, made.slug, made.token));
+    await enterWorkspace(made.slug);
+    say(`${made.name} is yours. It opened with general, random and meetings.`);
+  } catch (err) {
+    alert(String(err));
+  }
+});
+
+$("channel-new").addEventListener("click", async () => {
+  const asked = await askForOne("New channel", "Everybody in this workspace can find it.");
+  if (!asked) return;
+
+  try {
+    const made = await api.createChannel({ slug: asked.slug, name: asked.name });
+    await loadChannels();
+    await open(made.slug);
+  } catch (err) {
+    alert(String(err));
+  }
+});
+
 function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
   const el = $("folder");
@@ -885,11 +985,16 @@ async function boot() {
   me = user.email;
   $("who").textContent = user.name;
 
+  // Signing in is where a token for a room arrives. The other place is making
+  // one; there is deliberately no third, because a token fetched for another
+  // room would be fetchable by an agent holding this one.
+  const [ mine ] = await api.workspaces().catch(() => []);
+  if (mine) rooms = settings.saveWorkspaces(enterRoom(rooms, mine.slug, api.token));
+  renderWorkspaces();
+
   // The room first. It is the product, and everything below is a detail of the
   // toolbar that can arrive late without anybody minding.
-  channels = await api.channels();
-  renderChannels();
-  if (channels.length) await open(channels[0].slug);
+  await loadChannels();
 
   // Agents already running from an earlier window of this session stay
   // addressable — the registry is the process's, not this view's. If the bridge
