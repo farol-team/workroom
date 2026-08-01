@@ -7,7 +7,13 @@ module Api
       before_action :require_channel_access!
 
       def index
-        render json: Memory::Store.current.skills(channel!).map { |s| serialize(s) }
+        store = Memory::Store.current
+        skills = store.skills(channel!)
+        # As in the memory listing: an array is empty both for a channel that has
+        # agreed on nothing and for a store that never answered, and only one of
+        # those is worth a person's time to fix (#146).
+        response.set_header("X-Memory", store.available? ? "ok" : "unavailable")
+        render json: skills.map { |s| serialize(s) }
       end
 
       def create
