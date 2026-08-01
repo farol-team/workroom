@@ -16,10 +16,8 @@ servers:
     - 51.250.10.118
 
 proxy:
-  # Served over plain HTTP by address while workroom.farol.team still points
-  # elsewhere. A certificate cannot be issued for a name that does not resolve
-  # here, so `ssl` and `host` wait for the DNS record. See docs/DEPLOYING.md.
-  ssl: false
+  ssl: true
+  host: workroom.farol.team
   # The client holds a long-lived websocket per open channel. Without this the
   # proxy closes it after a minute and the room stops being live for anybody
   # who is reading rather than typing.
@@ -53,9 +51,6 @@ env:
     # arrives with its own database and schema; see test/config/queue_config_test.rb.
     RAILS_ENV: production
     STORAGE_REGION: ru-central1
-    # Reached by address, with no certificate to redirect to. This comes out the
-    # moment `proxy.ssl` goes back on above — the two belong together.
-    WORKROOM_INSECURE_HTTP: true
   secret:
     - SECRET_KEY_BASE
     - DATABASE_URL
