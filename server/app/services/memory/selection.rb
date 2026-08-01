@@ -8,11 +8,6 @@ module Memory
   # production is a decision worth testing, and an initializer cannot be tested
   # without booting a second application.
   class Selection
-    # Deliberately exact rather than truthy. "1", "yes" and "on" are what a
-    # person types when they are guessing, and this variable exists precisely so
-    # that PostgreSQL in production is stated rather than stumbled into.
-    MEANT_IT = "true"
-
     def initialize(env = ENV)
       @env = env
     end
@@ -29,20 +24,18 @@ module Memory
       # it is the difference between an image that cannot be built and a server
       # that will not start misconfigured.
       return Local if @env["SECRET_KEY_BASE_DUMMY"].present?
-      return Local if @env["WORKROOM_MEMORY_IN_POSTGRES"] == MEANT_IT
 
       raise <<~MESSAGE
         No context store is configured, and this is production.
 
         What every room knows would be written to PostgreSQL, which works and
-        retrieves by substring rather than by meaning — and nothing would say so.
-        A server cannot tell a choice from an omission, so it refuses the
-        omission.
+        retrieves by substring rather than by meaning.
 
-        Set OPENVIKING_URL (and OPENVIKING_API_KEY), or say plainly that
-        PostgreSQL is what you meant:
+        That fallback is why the suite runs against no external service and why
+        bin/prototype runs with no credentials. It is not a way to run a
+        workspace, and there is no variable that makes it one.
 
-            WORKROOM_MEMORY_IN_POSTGRES=true
+        Set OPENVIKING_URL and OPENVIKING_API_KEY.
       MESSAGE
     end
 

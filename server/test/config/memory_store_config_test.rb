@@ -5,10 +5,11 @@ require "test_helper"
 # PostgreSQL without saying so. That happened — the first deploy of this server
 # came up exactly that way, and was caught by looking rather than by being told.
 #
-# The fallback itself is right: it is why bin/prototype runs with no credentials
-# and why the suite runs in CI against no external service. What was wrong is
-# that production could not tell "PostgreSQL was chosen" from "the variable was
-# forgotten".
+# The fallback itself is right where it belongs: it is why bin/prototype runs
+# with no credentials and why the suite runs in CI against no external service.
+# Neither of those is production, and production is no longer offered it — a
+# store that retrieves by substring is not a way to run a workspace, so the
+# refusal has no way out rather than a stated one.
 class MemoryStoreConfigTest < ActiveSupport::TestCase
   # The initializer runs under to_prepare with the real environment, so the
   # decision is extracted and exercised directly. Testing it through boot would
@@ -32,25 +33,22 @@ class MemoryStoreConfigTest < ActiveSupport::TestCase
     end
   end
 
-  test "a production server that forgets its context store refuses to start" do
+  test "a production server without a context store refuses to start" do
     error = assert_raises(RuntimeError) { choose("RAILS_ENV" => "production") }
 
     assert_match "OPENVIKING_URL", error.message,
       "the refusal must name the variable that is missing, or it sends somebody reading source"
-    assert_match "WORKROOM_MEMORY_IN_POSTGRES", error.message,
-      "and name the way out, or the only way to deploy without a store is to guess"
   end
 
-  test "choosing PostgreSQL in production is possible only by saying so" do
-    assert_equal Memory::Local,
-      choose("RAILS_ENV" => "production", "WORKROOM_MEMORY_IN_POSTGRES" => "true"),
-      "an operator who means it must be able to say so"
-
-    assert_raises(RuntimeError) do
-      choose("RAILS_ENV" => "production", "WORKROOM_MEMORY_IN_POSTGRES" => "1")
-    end
-    assert_raises(RuntimeError) do
-      choose("RAILS_ENV" => "production", "WORKROOM_MEMORY_IN_POSTGRES" => "yes")
+  test "PostgreSQL in production cannot be chosen, by any spelling" do
+    # The way out was real, and is gone. A deploy that still carries the
+    # variable must get the same refusal as one that carries nothing: silently
+    # honouring a removed setting is how a workspace lands on the wrong store a
+    # second time, and this time it would have been asked for.
+    %w[true 1 yes on].each do |spelling|
+      assert_raises RuntimeError, "WORKROOM_MEMORY_IN_POSTGRES=#{spelling} must not be a way to run a workspace" do
+        choose("RAILS_ENV" => "production", "WORKROOM_MEMORY_IN_POSTGRES" => spelling)
+      end
     end
   end
 

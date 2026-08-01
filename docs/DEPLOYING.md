@@ -58,18 +58,12 @@ export OPENVIKING_URL="http://workroom-context:8000"
 export OPENVIKING_API_KEY="..."
 ```
 
-Without it, what every room knows would be kept in PostgreSQL — which works,
-and retrieves by substring rather than by meaning. That is a legitimate choice
-and an illegitimate accident, and a server cannot tell them apart, so it
-refuses the accident. If PostgreSQL is genuinely what you want in production,
-say so:
-
-```bash
-export WORKROOM_MEMORY_IN_POSTGRES=true
-```
-
-Exactly `true`. `1` and `yes` are what people type when they are guessing, and
-this variable exists so the choice is stated rather than stumbled into.
+Without it, what every room knows would be kept in PostgreSQL — which works, and
+retrieves by substring rather than by meaning. That fallback is why the suite
+runs against no external service and why `bin/prototype` runs with no
+credentials. It is not a way to run a workspace, and there is no variable that
+makes it one: a production server without a context store refuses to start, and
+the only answer is to configure one.
 
 ## What a first deploy does, and does not
 
