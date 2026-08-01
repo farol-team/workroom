@@ -161,7 +161,7 @@ export class Agents {
 
   /// The person's answer. No option id means they declined to choose, which the
   /// protocol calls cancelled.
-  permit(name: string, requestId: number, optionId: string | null) {
+  permit(name: string, requestId: unknown, optionId: string | null) {
     return invoke("agent_permit", { name, requestId, optionId });
   }
 

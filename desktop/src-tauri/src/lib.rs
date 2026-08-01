@@ -181,7 +181,10 @@ async fn sign_in_with_provider(app: AppHandle, server: String) -> Result<String,
 async fn agent_permit(
     state: State<'_, AgentState>,
     name: Option<String>,
-    request_id: u64,
+    // The id as the agent sent it. Coercing it to a number here is how a string
+    // id became a question nobody answered (#96) — the agent is blocked on that
+    // exact token, not on our reading of it.
+    request_id: Value,
     option_id: Option<String>,
 ) -> Result<(), String> {
     let agent = running(&state, name).await?;
@@ -190,7 +193,7 @@ async fn agent_permit(
         None => json!({ "outcome": "cancelled" }),
     };
     agent
-        .answer(request_id, json!({ "outcome": outcome }))
+        .answer(&request_id, json!({ "outcome": outcome }))
         .await
 }
 

@@ -629,6 +629,20 @@ describe("the agent asking to do something", () => {
     expect(permissionAsked({ id: 1, request: { method: "fs/read_text_file", params: {} } })).toBeNull();
     expect(permissionAsked({ id: 1, request: {} })).toBeNull();
   });
+
+  test("a string id survives, because Number(\"perm-1\") answers nobody", () => {
+    // JSON-RPC allows a string id. Coerced to a number it becomes NaN, the
+    // answer quotes null, and the agent waits for the rest of the session (#96).
+    const stringy = { id: "perm-1", request: { method: "session/request_permission",
+      params: { options: [ { optionId: "yes", name: "Allow once" } ] } } };
+
+    expect(permissionAsked(stringy)!.id).toBe("perm-1");
+  });
+
+  test("the id goes back exactly as it came, whatever it was", () => {
+    expect(permissionAsked({ ...ask, id: 0 })!.id).toBe(0);
+    expect(permissionAsked({ ...ask, id: "0" })!.id).toBe("0");
+  });
 });
 
 describe("a step somebody will read", () => {
