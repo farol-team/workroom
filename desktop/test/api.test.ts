@@ -29,12 +29,24 @@ class FakeSocket implements CableSocket {
 const opened = () => FakeSocket.opened.length;
 const last = () => FakeSocket.opened[FakeSocket.opened.length - 1];
 
-function start() {
+function start(answer: () => void | Promise<void> = () => {}) {
   const events: any[] = [];
-  const resync = vi.fn();
+  const resync = vi.fn(answer);
   const api = new Api("http://127.0.0.1:3000", "tok");
   const live = api.live("meetings", (e) => events.push(e), resync, FakeSocket);
   return { events, resync, live };
+}
+
+/// A server that answers the socket before it answers anything else — the state a
+/// machine is in for a moment after it comes back.
+const refused = () => Promise.reject(new Error("502 Bad Gateway"));
+
+/// Drop, wait, and open again, which is where a catch-up is asked for. Async
+/// because a refused one is answered on a microtask, not on the timer.
+async function droppedAndBack() {
+  last().dropped();
+  await vi.advanceTimersByTimeAsync(1000);
+  last().connected();
 }
 
 /// One drop and the wait that answers it, so a test can walk the backoff out to
@@ -180,6 +192,47 @@ describe("catching up after an outage", () => {
     expect(resync).not.toHaveBeenCalled();   // the socket exists, nothing is subscribed yet
 
     last().connected();
+    expect(resync).toHaveBeenCalledTimes(1);
+  });
+
+  // The one failure that matters here: the socket is back but the rest of the
+  // server is not, the catch-up is refused, and letting that go would leave the
+  // room exactly as far behind as it was — the outage the reconnect just healed.
+  test("is asked again when the server refuses it", async () => {
+    let refuse = true;
+    const { resync } = start(() => (refuse ? ((refuse = false), refused()) : Promise.resolve()));
+    last().connected();
+    await droppedAndBack();
+    expect(resync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(resync).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(resync).toHaveBeenCalledTimes(2);   // that one was answered; nothing left to ask
+  });
+
+  test("waits longer after every refusal, as a dropped socket does", async () => {
+    const { resync } = start(refused);
+    last().connected();
+    await droppedAndBack();
+
+    for (const [wait, asked] of [[1000, 2], [2000, 3], [4000, 4]]) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(resync).toHaveBeenCalledTimes(asked - 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(resync).toHaveBeenCalledTimes(asked);
+    }
+  });
+
+  test("is not asked again once the caller has left the room", async () => {
+    const { live, resync } = start(refused);
+    last().connected();
+    await droppedAndBack();
+
+    live.close();                              // the refusal is still in flight
+    await vi.advanceTimersByTimeAsync(60_000);
+
     expect(resync).toHaveBeenCalledTimes(1);
   });
 });
