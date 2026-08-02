@@ -295,6 +295,288 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
     })
 }
 
+/// One git question asked of a folder. `None` covers both "this is not a
+/// repository" and "git could not say" — a caller warning about what a folder
+/// *might* do has nothing to warn about in either case.
+fn git_answer(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let answer = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if answer.is_empty() {
+        None
+    } else {
+        Some(answer)
+    }
+}
+
+/// What the room is about to let an agent work in, said before it works there
+/// (#203): where the folder comes from, what it calls its mainline, and
+/// whether merging to that mainline ships something.
+#[derive(serde::Serialize)]
+pub struct RepoInfo {
+    pub remote: Option<String>,
+    pub default_branch: Option<String>,
+    pub deploys_on_push: bool,
+}
+
+/// Read the three facts off a folder. Null-safe by construction: a folder
+/// that is not a repository answers every question with nothing.
+pub fn repo_info(dir: &Path) -> RepoInfo {
+    let remote = git_answer(dir, &["remote", "get-url", "origin"]);
+    // origin/HEAD names the mainline only once somebody has fetched; before
+    // that the checkout's own branch is the best answer there is. Asked with
+    // symbolic-ref rather than rev-parse: a repository with no commits yet
+    // still has an unborn branch, and rev-parse cannot name one. A detached
+    // HEAD answers neither, which is correct — it is not a branch.
+    let default_branch = git_answer(
+        dir,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .map(|head| head.trim_start_matches("origin/").to_string())
+    .or_else(|| git_answer(dir, &["symbolic-ref", "--short", "HEAD"]));
+
+    // A cheap heuristic, and named as one: a GitHub workflow whose text
+    // mentions both `push` and the default branch is read as "merging ships
+    // it". Deliberately not a YAML parse — the warning this feeds is advice
+    // to protect a branch, where a false positive costs somebody a checklist
+    // they should have anyway and a false negative costs the warning, so it
+    // errs toward saying yes.
+    let deploys_on_push = default_branch.as_ref().is_some_and(|branch| {
+        let Ok(entries) = fs::read_dir(dir.join(".github/workflows")) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let path = entry.path();
+            let is_workflow = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "yml" || ext == "yaml");
+            is_workflow
+                && fs::read_to_string(&path)
+                    .is_ok_and(|body| body.contains("push") && body.contains(branch.as_str()))
+        })
+    });
+
+    RepoInfo {
+        remote,
+        default_branch,
+        deploys_on_push,
+    }
+}
+
+/// The room's repository, cloned into the folder the room works in (#203).
+///
+/// A non-empty directory is refused rather than merged into: cloning into
+/// somebody's existing work does not clone, it litters — and what the person
+/// then sees is their folder with extra files in it and no way to tell which
+/// were already theirs. Re-cloning a folder that already holds the repository
+/// is #204's concern; here "already something there" earns a sentence, never
+/// a deletion.
+pub fn clone_repository(url: &str, dir: &Path) -> Result<(), String> {
+    // The url is the room's setting — server data another member typed, run
+    // on this machine. No shell, so no injection; but a "url" that starts
+    // with a dash is a flag to git (`--upload-pack` executes a command), and
+    // flags are not the room's to set (#203).
+    if url.starts_with('-') {
+        return Err("a repository address does not start with a dash".to_string());
+    }
+    if let Some(parent) = dir.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    let non_empty = fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    if non_empty {
+        return Err(format!(
+            "{} is not empty — bind it as the existing folder instead, or empty it yourself",
+            dir.display()
+        ));
+    }
+
+    let out = std::process::Command::new("git")
+        .args(["clone", "--", url])
+        .arg(dir)
+        .output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    if !out.status.success() {
+        // git's own words: "repository not found" means more than "failed".
+        let said = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if said.is_empty() {
+            format!("git clone exited with {}", out.status)
+        } else {
+            said
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod repo_info_tests {
+    //! The three facts, against real repositories: a fake remote, a fake
+    //! workflow file, and a clone that must not destroy anything.
+
+    use super::*;
+    use std::io::Write;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-repo-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn repository(name: &str) -> PathBuf {
+        let dir = temp(name);
+        run(&dir, &["init", "-q", "-b", "main", "."]);
+        run(&dir, &["config", "user.email", "a@b"]);
+        run(&dir, &["config", "user.name", "a"]);
+        run(
+            &dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://example.test/acme/widgets.git",
+            ],
+        );
+        dir
+    }
+
+    #[test]
+    fn a_repository_says_where_it_came_from_and_what_it_calls_mainline() {
+        let dir = repository("named");
+
+        let info = repo_info(&dir);
+
+        assert_eq!(
+            info.remote.as_deref(),
+            Some("https://example.test/acme/widgets.git")
+        );
+        // Nothing was fetched, so origin/HEAD does not exist yet; the local
+        // checkout's branch is the answer then.
+        assert_eq!(info.default_branch.as_deref(), Some("main"));
+        assert!(!info.deploys_on_push);
+    }
+
+    #[test]
+    fn a_workflow_that_ships_on_push_to_the_mainline_is_said_to_deploy() {
+        let dir = repository("deploys");
+        fs::create_dir_all(dir.join(".github/workflows")).unwrap();
+        fs::write(
+            dir.join(".github/workflows/deploy.yml"),
+            "on:\n  push:\n    branches: [main]\njobs:\n  ship:\n    runs-on: ubuntu-latest\n",
+        )
+        .unwrap();
+
+        assert!(repo_info(&dir).deploys_on_push);
+    }
+
+    #[test]
+    fn a_workflow_for_another_branch_does_not_warn() {
+        // Shipping a release branch on push is not shipping the mainline.
+        let dir = repository("other-branch");
+        fs::create_dir_all(dir.join(".github/workflows")).unwrap();
+        fs::write(
+            dir.join(".github/workflows/deploy.yaml"),
+            "on:\n  push:\n    branches: [release]\njobs:\n  ship:\n    runs-on: ubuntu-latest\n",
+        )
+        .unwrap();
+
+        assert!(!repo_info(&dir).deploys_on_push);
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_repository_says_nothing() {
+        let dir = temp("plain");
+
+        let info = repo_info(&dir);
+
+        assert!(info.remote.is_none());
+        assert!(info.default_branch.is_none());
+        assert!(!info.deploys_on_push);
+    }
+
+    #[test]
+    fn a_clone_lands_where_it_was_asked() {
+        let source = repository("source");
+        let mut f = fs::File::create(source.join("README.md")).unwrap();
+        f.write_all(b"# widgets\n").unwrap();
+        run(&source, &["add", "-A"]);
+        run(&source, &["commit", "-qm", "init"]);
+
+        // A directory that does not exist yet, under one that does not either:
+        // the parents are the command's to make.
+        let into = temp("target").join("deep").join("widgets");
+        clone_repository(&source.to_string_lossy(), &into).unwrap();
+
+        assert!(into.join(".git").exists());
+        assert_eq!(
+            fs::read_to_string(into.join("README.md")).unwrap(),
+            "# widgets\n"
+        );
+    }
+
+    #[test]
+    fn a_clone_refuses_to_litter_an_existing_folder() {
+        let dir = temp("occupied");
+        fs::write(dir.join("mine.txt"), "already here").unwrap();
+
+        let error = clone_repository("https://example.test/nope.git", &dir).unwrap_err();
+
+        assert!(error.contains("not empty"), "{error}");
+        assert_eq!(
+            fs::read_to_string(dir.join("mine.txt")).unwrap(),
+            "already here"
+        );
+    }
+
+    #[test]
+    fn a_clone_that_git_refused_reports_gits_own_words() {
+        let into = temp("unreachable").join("nope");
+
+        let error = clone_repository("https://example.test/no/such-repo.git", &into).unwrap_err();
+
+        assert!(!error.is_empty());
+        assert!(
+            !into.exists(),
+            "a refused clone leaves nothing behind to trip over"
+        );
+    }
+
+    #[test]
+    fn a_repository_address_is_not_a_flag() {
+        // The url is the room's setting — server data another member typed.
+        // `git clone --upload-pack=<cmd>` runs the command; nobody's setting
+        // gets to do that on this machine.
+        let into = temp("dash").join("nope");
+
+        let error = clone_repository("--upload-pack=touch /tmp/pwned", &into).unwrap_err();
+
+        assert!(error.contains("dash"), "{error}");
+        assert!(!into.exists());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

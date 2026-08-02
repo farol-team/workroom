@@ -3,6 +3,7 @@ import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms,
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
+import { createChannelSettings, type RepoInfo } from "./channel-settings";
 import { showOnboarding } from "./onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -61,6 +62,25 @@ const panel = createAgentsPanel({
   },
   onTrouble: (message) => alert(message),
   currentChannel: () => current,
+});
+
+/// The room's setting and this machine's folder choice, in one dialog (#203).
+const channelSettings = createChannelSettings({
+  currentChannel: () => current,
+  workspaceSlug: () => rooms.current ?? null,
+  updateChannel: (slug, url) => api.updateChannel(slug, url),
+  bindings: () => bindings,
+  bind: (slug, folder) => { bindings = settings.bind(slug, folder); },
+  chooseFolder: (title) => chooseFolder({ directory: true, title }) as Promise<string | null>,
+  derivedFolder: () => agents.workspace(rooms.current!, current!.slug),
+  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
+  repoInfo: (path) => invoke<RepoInfo>("agent_repo_info", { path }),
+  releaseChannel: (slug) => agents.releaseChannel(slug),
+  applied: (updated) => {
+    current = current ? { ...current, ...updated } : updated;
+    renderBinding();
+  },
+  copyText: (text) => navigator.clipboard.writeText(text),
 });
 
 function renderChannels() {
@@ -203,6 +223,13 @@ async function open(slug: string) {
     if (e.type === "elsewhere" && e.channel !== current?.slug) {
       const c = channels.find((x) => x.slug === e.channel);
       if (c) { c.message_count = (c.message_count ?? 0) + 1; renderChannels(); }
+    }
+    if (e.type === "channel" && e.channel?.slug === current?.slug) {
+      // The room's setting changed — saved here through the dialog, or on
+      // another machine. Either way what is on screen follows the room (#203).
+      current = { ...current!, ...e.channel };
+      channelSettings.refresh(e.channel);
+      renderBinding();
     }
   }, () => catchUp(slug));
 }
@@ -601,12 +628,16 @@ function renderBinding() {
 /// Binding is deliberate. An agent in somebody's real repository can change
 /// anything in it — which is normal for a coding agent, and normal precisely
 /// because the person opened it there.
+///
+/// The picker itself moved into the channel settings dialog (#203), where the
+/// choice sits beside the repository it refers to; the shift-click unbind
+/// stayed, because taking a binding back is one gesture, not a dialog.
 $("folder").addEventListener("click", async (e) => {
   if (!current) return;
   const slug = current.slug;
-  const before = boundFolder(slug, bindings);
 
   if ((e as MouseEvent).shiftKey) {
+    const before = boundFolder(slug, bindings);
     bindings = settings.bind(slug, null);
     renderBinding();
     // The session was opened against the old directory and cannot follow it.
@@ -614,13 +645,11 @@ $("folder").addEventListener("click", async (e) => {
     return;
   }
 
-  const chosen = await chooseFolder({ directory: true, title: `Where # ${slug} works` });
-  if (typeof chosen === "string") {
-    bindings = settings.bind(slug, chosen);
-    if (chosen !== before) await agents.releaseChannel(slug);
-  }
-  renderBinding();
+  channelSettings.open();
 });
+
+/// The room's name is the other door into the same settings.
+$("channel-name").addEventListener("click", () => channelSettings.open());
 
 $("thread-close").addEventListener("click", () => timeline.closeThread());
 

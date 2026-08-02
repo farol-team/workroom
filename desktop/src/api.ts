@@ -12,6 +12,9 @@ export interface Message {
 export interface Channel {
   id: number; slug: string; name: string; purpose: string | null;
   visibility: string; memory_uri: string;
+  /// Which repository the room's work lives in (#203). Null is most rooms:
+  /// a meetings channel is not a codebase.
+  repository_url?: string | null;
   message_count: number;
 }
 
@@ -139,6 +142,15 @@ export class Api {
 
   channel(slug: string) {
     return this.call<Channel & { messages: Message[] }>(`/channels/${slug}`);
+  }
+
+  /// The room's one setting (#203). Blank clears it — the server writes NULL,
+  /// and a change is journaled and told to the room from there. Members only:
+  /// a setting is not a read.
+  updateChannel(slug: string, repositoryUrl: string | null) {
+    return this.call<Channel>(`/channels/${slug}`, {
+      method: "PATCH", body: JSON.stringify({ repository_url: repositoryUrl }),
+    });
   }
 
   /// What a room said while nobody was listening (#180). The cable replays

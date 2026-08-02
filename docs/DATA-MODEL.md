@@ -32,6 +32,13 @@ visibility.
 data rather than deriving it from the slug, so a channel can be renamed without orphaning
 what it knows, and a region can be re-pointed without a code change.
 
+`repository_url` names the repository the room's work lives in (#203). It is a fact of the
+room rather than of anybody's machine — a colleague joining the channel should land in the
+same checkout — and it is nullable because most rooms have no repository: a `meetings`
+channel is not a codebase, and clearing the setting writes NULL back so "no repository" and
+"never asked" stay the same value. A change is journaled as `kind=channel.updated`, naming
+the field, the old and new values, and who changed it.
+
 **`messages`** — belongs to a channel, has a polymorphic `author`, and an optional `parent`.
 
 The author is a `User` or an `AgentRun` — never a "bot user". Attributing an agent's message
