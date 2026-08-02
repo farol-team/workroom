@@ -164,7 +164,9 @@ module Rail
         # the journal because the git mirror replays envelopes and the store has
         # moved on by the time it does. A correction carries a reason instead —
         # it is the one thing a supersession knows.
-        record("remember", uri: entry.uri, title: args[:title], detail: entry.detail, run: run)
+        journaled = record("remember", uri: entry.uri, title: args[:title], detail: entry.detail, run: run)
+        annotate(journaled, action: "remember", uri: entry.uri, title: args[:title],
+                 detail: entry.detail, run: run)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
@@ -173,10 +175,12 @@ module Rail
         target = args[:uri].to_s
         return [ :error, "no capability at #{target}" ] unless target.start_with?(@channel.memory_uri)
 
+        run = working_run
         entry = store.supersede(target, reason: args[:reason])
         return [ :error, "nothing current at #{target}" ] unless entry
 
-        record("supersede", uri: entry.uri, reason: args[:reason], run: working_run)
+        journaled = record("supersede", uri: entry.uri, reason: args[:reason], run: run)
+        annotate(journaled, action: "supersede", uri: entry.uri, reason: args[:reason], run: run)
         [ :ok, "Superseded #{entry.uri}" ]
       end
     end
@@ -186,12 +190,23 @@ module Rail
     # one that was refused. The entry names the uri rather than a row id: the
     # rail writes to whichever store is configured, and only the uri means the
     # same thing in both. Who and which turn ride along, because an entry
-    # nobody can trace back is a defect (Article P4).
+    # nobody can trace back is a defect (Article P4). Returns the appended
+    # record: its seq and hash are the lineage the store is told next.
     def record(action, uri:, run:, **rest)
       RecordStore::Append.call(
         channel: @channel, kind: "memory", subject: nil,
         payload: { action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id }.merge(rest)
       )
+    end
+
+    # Lineage flows write → append → annotate, so the sidecar never claims a
+    # record that does not exist (#213). The store keeps it beside the entry —
+    # a reader of the entry finds the record of it, and the journal stays the
+    # source of truth the sidecar only indexes.
+    def annotate(journaled, action:, uri:, run:, **rest)
+      store.annotate(uri, action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id,
+                     seq: journaled.seq, entry_hash: journaled.entry_hash,
+                     recorded_at: journaled.created_at, **rest)
     end
   end
 end

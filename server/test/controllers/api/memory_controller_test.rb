@@ -133,6 +133,35 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_content
   end
 
+  # The person wrote and the server witnessed it, so the store is told the
+  # journal lineage of what it now holds — the same sidecar a write through
+  # the rail carries (#213). The lineage the controller hands over is the
+  # subject here; what the OpenViking adapter does with it is pinned in
+  # open_viking_test.rb against the wire.
+  test "what a person records is annotated with the journal lineage" do
+    # The seam is swapped process-wide, like everywhere else in this file: a
+    # request runs in its own execution context, and a store pinned to this
+    # thread's `Current` never reaches the controller.
+    store = Memory::Local.new
+    annotations = []
+    store.define_singleton_method(:annotate) { |uri, **lineage| annotations << [ uri, lineage ] }
+
+    with_store(store) do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+           headers: auth(@alice).merge(@json)
+      assert_response :created
+    end
+
+    record = @channel.channel_records.order(:seq).last
+    assert_equal 1, annotations.length, "a write the server witnessed is annotated"
+    uri, lineage = annotations.first
+    assert_equal response.parsed_body["uri"], uri
+    assert_equal record.seq, lineage[:seq]
+    assert_equal record.entry_hash, lineage[:entry_hash]
+    assert_equal "written", lineage[:action]
+  end
+
   private
 
   def with_store(store)
