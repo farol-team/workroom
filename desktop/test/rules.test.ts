@@ -1101,10 +1101,14 @@ function aShell(over: Record<string, unknown> = {}) {
 /// reports that one request failed.
 const blockingDialog = vi.fn();
 
+interface Edges { server?: any; bridge?: any; shell?: any }
+
 /// One window, opened as a person opens it: the document index.html ships,
-/// the sign-in dialog answered, the room loaded.
+/// the sign-in dialog answered, the room loaded. `atSignIn` runs while that
+/// dialog is still up, which is the only moment some of its buttons exist.
 async function openTheClient(
-  { server = aServer(), bridge = aBridge(), shell = aShell() } = {},
+  { server = aServer(), bridge = aBridge(), shell = aShell() }: Edges = {},
+  atSignIn?: () => Promise<void>,
 ) {
   document.body.innerHTML = room;
   localStorage.clear();
@@ -1116,6 +1120,7 @@ async function openTheClient(
   vi.resetModules();
   await import("../src/main");
   await settle();
+  if (atSignIn) await atSignIn();
   document.querySelector<HTMLDialogElement>("#signin")!.close("ok");
   await settle();
   return { server, bridge, shell };
@@ -1128,12 +1133,38 @@ const submit = (id: string) =>
 
 afterEach(() => { blockingDialog.mockClear(); vi.unstubAllGlobals(); });
 
+describe("a client whose edges all answer", () => {
+  test("says nothing, so a notice below means something failed", async () => {
+    // The control the rest of this section rests on. Without it, an
+    // unconditional notice at boot would satisfy every expectation below.
+    await openTheClient();
+
+    expect(el("channel-name").textContent).toBe("# meetings");
+    expect(notices()).toBe("");
+    expect(blockingDialog).not.toHaveBeenCalled();
+  });
+
+  test("clears the composer the moment a message is sent", async () => {
+    // The optimistic clear stays. Keeping the text on failure must not be
+    // bought by waiting for the server before the composer empties — that
+    // trades a lost sentence for a composer that lags the room.
+    const { server } = await openTheClient();
+    el<HTMLInputElement>("input").value = "what did we agree about pricing?";
+
+    submit("composer");
+    await settle();
+
+    expect(server.post).toHaveBeenCalled();
+    expect(el<HTMLInputElement>("input").value).toBe("");
+  });
+});
+
 describe("what the room says when something goes wrong", () => {
   test("a send that does not go through keeps what the person typed", async () => {
     // The composer clears optimistically, which is right — and until now the
     // failure took the sentence with it. Somebody who learns that lesson starts
     // copying every message before pressing Send.
-    await openTheClient({
+    const { server } = await openTheClient({
       server: aServer({ post: vi.fn(async () => { throw new Error("500 the server said no"); }) }),
     });
     el<HTMLInputElement>("input").value = "what did we agree about pricing?";
@@ -1141,65 +1172,234 @@ describe("what the room says when something goes wrong", () => {
     submit("composer");
     await settle();
 
+    expect(server.post).toHaveBeenCalled();
     expect(el<HTMLInputElement>("input").value).toBe("what did we agree about pricing?");
     expect(notices()).toContain("the server said no");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("a reply that does not go through is said in the room", async () => {
-    await openTheClient({
+  test("a reply that does not go through keeps it too", async () => {
+    // A reply is a send. The panel clears its box the same way the room does,
+    // so it loses the same sentence, and fixing one of the two is fixing half
+    // a defect.
+    const { server } = await openTheClient({
       server: aServer({ post: vi.fn(async () => { throw new Error("500 the thread is gone"); }) }),
     });
     document.querySelector<HTMLButtonElement>("#messages .reply-action")!.click();
-    el<HTMLInputElement>("thread-input").value = "agreed";
+    el<HTMLInputElement>("thread-input").value = "agreed, and I will write it up";
 
     submit("thread-composer");
     await settle();
 
+    expect(server.post).toHaveBeenCalled();
+    expect(el<HTMLInputElement>("thread-input").value).toBe("agreed, and I will write it up");
     expect(notices()).toContain("the thread is gone");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("an agent that will not start says so in the room", async () => {
-    const { bridge } = await openTheClient({
-      bridge: aBridge({
+  /// Every other surface that can fail: the edge that refuses, the press a
+  /// person makes, and what has to be readable in the room afterwards. Table
+  /// rather than a test each, because the expectation is the same sentence
+  /// sixteen times — and `attempted` is what keeps a green honest, since a
+  /// drive that never reached the failing call would also leave the strip
+  /// empty and no dialog behind.
+  const operational: Array<{
+    what: string;
+    edges: () => Edges;
+    drive: (edges: Edges) => Promise<void>;
+    attempted: (edges: any) => unknown;
+    said: string;
+  }> = [
+    {
+      what: "an agent that will not start",
+      edges: () => ({ bridge: aBridge({
         isRunning: () => false,
         start: vi.fn(async () => { throw new Error("claude exited 1"); }),
-      }),
-    });
+      }) }),
+      // The row's second button is its one action, which for a ready agent
+      // that is not running says Start.
+      drive: async () => {
+        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.start,
+      said: "claude exited 1",
+    },
+    {
+      what: "an install npm refused",
+      edges: () => ({ bridge: aBridge({
+        definitions: () => [ { name: "codex", command: "codex-acp", args: [] } ],
+        isRunning: () => false,
+        stateOf: () => "missing",
+        install: vi.fn(async () => ({ ok: false, code: 1, stdoutTail: "", stderrTail: "npm: not found" })),
+      }) }),
+      drive: async () => {
+        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.install,
+      said: "npm: not found",
+    },
+    {
+      what: "a skill the room did not accept",
+      edges: () => ({ server: aServer({
+        writeSkill: vi.fn(async () => { throw new Error("422 the title is taken"); }),
+      }) }),
+      drive: async () => {
+        el("memory-toggle").click();
+        await settle();
+        el<HTMLInputElement>("skill-title").value = "Running a client call";
+        el<HTMLTextAreaElement>("skill-body").value = "Agenda out the day before.";
+        submit("skill-form");
+        await settle();
+      },
+      attempted: (edges) => edges.server.writeSkill,
+      said: "the title is taken",
+    },
+    {
+      what: "a code that opens no room",
+      edges: () => ({ server: aServer({
+        acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
+      }) }),
+      drive: async () => {
+        el("workspace-join").click();
+        await settle();
+        el<HTMLInputElement>("join-code").value = "abc-123";
+        el<HTMLDialogElement>("join").close("go");
+        await settle();
+      },
+      attempted: (edges) => edges.server.acceptInvitation,
+      said: "that code is spent",
+    },
+    {
+      what: "a workspace that was not made",
+      edges: () => ({ server: aServer({
+        createWorkspace: vi.fn(async () => { throw new Error("409 that name is taken"); }),
+      }) }),
+      drive: async () => {
+        el("workspace-new").click();
+        await settle();
+        el<HTMLInputElement>("make-name").value = "Globex";
+        el<HTMLInputElement>("make-slug").value = "globex";
+        el<HTMLDialogElement>("make").close("go");
+        await settle();
+      },
+      attempted: (edges) => edges.server.createWorkspace,
+      said: "that name is taken",
+    },
+    {
+      what: "a channel that was not made",
+      edges: () => ({ server: aServer({
+        createChannel: vi.fn(async () => { throw new Error("422 that address is in use"); }),
+      }) }),
+      drive: async () => {
+        el("channel-new").click();
+        await settle();
+        el<HTMLInputElement>("make-name").value = "Pricing";
+        el<HTMLInputElement>("make-slug").value = "pricing";
+        el<HTMLDialogElement>("make").close("go");
+        await settle();
+      },
+      attempted: (edges) => edges.server.createChannel,
+      said: "that address is in use",
+    },
+    {
+      what: "an answer the agent would not take",
+      edges: () => ({ bridge: aBridge({
+        permit: vi.fn(async () => { throw new Error("the session is gone"); }),
+      }) }),
+      drive: async (edges: any) => {
+        el<HTMLInputElement>("input").value = "@claude run the tests";
+        submit("composer");
+        await settle();
+        // The ask, as the agent raises it mid-turn, through the callback the
+        // client registered for exactly that.
+        edges.bridge.onAsk.mock.calls[0][1]({
+          id: 1, title: "Run the tests?", options: [ { id: "yes", name: "Yes" } ],
+        });
+        document.querySelector<HTMLButtonElement>("#messages .offer.ask button")!.click();
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.permit,
+      said: "the session is gone",
+    },
+    {
+      what: "a session option that would not change",
+      edges: () => ({ bridge: aBridge({
+        configFor: () => [ { id: "model", name: "Model", type: "select", currentValue: "haiku",
+                             options: [ { value: "haiku", name: "Haiku" },
+                                        { value: "opus", name: "Opus" } ] } ],
+        setConfig: vi.fn(async () => { throw new Error("that option is gone"); }),
+      }) }),
+      drive: async () => {
+        const select = document.querySelector<HTMLSelectElement>("#session-options select")!;
+        select.value = "opus";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.setConfig,
+      said: "that option is gone",
+    },
+    {
+      what: "an offer whose action fails",
+      edges: () => ({ server: aServer({
+        workspaceMembers: vi.fn(async () => [ { id: 2, name: "Bob", handle: "bob", role: "member" } ]),
+        addMember: vi.fn(async () => { throw new Error("403 not yours to add"); }),
+      }) }),
+      // Every offer and every notice shares one button (`ghostButton`), so this
+      // is all of them.
+      drive: async () => {
+        el<HTMLInputElement>("input").value = "@bob can you look at this";
+        submit("composer");
+        await settle();
+        document.querySelector<HTMLButtonElement>("#notices button")!.click();
+        await settle();
+      },
+      attempted: (edges) => edges.server.addMember,
+      said: "not yours to add",
+    },
+  ];
 
-    // The row's second button is its one action, which for a ready agent that
-    // is not running says Start.
-    document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
-    await settle();
+  test.each(operational)("$what is said in the room, not in a dialog", async (one) => {
+    const edges = await openTheClient(one.edges());
 
-    expect(bridge.start).toHaveBeenCalled();
-    expect(notices()).toContain("claude exited 1");
+    await one.drive(edges);
+
+    expect(one.attempted(edges)).toHaveBeenCalled();
+    expect(notices()).toContain(one.said);
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("a skill the room did not accept says so in the room", async () => {
-    await openTheClient({
-      server: aServer({ writeSkill: vi.fn(async () => { throw new Error("422 the title is taken"); }) }),
-    });
-    el("memory-toggle").click();
-    await settle();
-    el<HTMLInputElement>("skill-title").value = "Running a client call";
-    el<HTMLTextAreaElement>("skill-body").value = "Agenda out the day before.";
+  test("a browser sign-in that fails is said in the room", async () => {
+    // The one failure that happens with a modal already on screen — and the
+    // notice strip is behind it, in the room this person cannot see yet. It
+    // still goes there: the dialog closes when they are through, and a native
+    // dialog on top of a dialog is the worst of both.
+    const { shell } = await openTheClient(
+      { server: aServer({ methods: vi.fn(async () => ({ development: true, provider: true, version: "0.1.0" })) }),
+        shell: aShell({ invoke: vi.fn(async () => { throw new Error("the browser said no"); }) }) },
+      async () => { el("signin-provider").click(); await settle(); },
+    );
 
-    submit("skill-form");
-    await settle();
-
-    expect(notices()).toContain("the title is taken");
+    expect(shell.invoke).toHaveBeenCalled();
+    expect(notices()).toContain("the browser said no");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
   test("nothing in the client reaches for a native dialog", async () => {
     // A source-level sweep, and one on purpose: sixteen call sites is more
     // windows than a suite should open to say one thing, and the thing being
-    // said is about all of them. The room has somewhere to put a notice from
-    // the first paint — `#notices` is in the document index.html ships — so
-    // there is no failure left with nowhere to be said.
+    // said is about all of them at once.
+    //
+    // Stricter than the PLAN, deliberately — it kept alerts for "boot-fatal
+    // cases where no room exists yet", and there is no such case: `#notices`
+    // is in the document index.html ships (index.html:51), so the strip is
+    // there before the first fetch is made. This spec is the contract; that
+    // line of the plan is amended by it.
+    //
+    // What it cannot see is a call site that answers by saying nothing at all.
+    // That is what the examples above are for, and why each of them names the
+    // words the person must end up reading.
     const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
 
     expect(source.match(/\balert\(/g) ?? []).toEqual([]);
@@ -1207,40 +1407,53 @@ describe("what the room says when something goes wrong", () => {
 });
 
 describe("the start-up says which part of it failed", () => {
-  test("sign-in that is refused is not the server being unreachable", async () => {
+  /// Three stages, three messages, and each must name its own and only its
+  /// own. One message listing all three would be true, useless, and exactly
+  /// what `boot().catch(…)` says today: sign-in refused, a room that will not
+  /// load and a bridge that is not answering are three different mornings, and
+  /// only the person can act on the difference.
+  const STAGE = { signIn: /signing in/i, channels: /channel/i, bridge: /bridge/i };
+
+  test("a sign-in that is refused names signing in, and nothing else", async () => {
     await openTheClient({
       server: aServer({ signIn: vi.fn(async () => { throw new Error("401 no account here"); }) }),
     });
 
-    expect(notices()).toMatch(/sign/i);
-    expect(notices()).not.toMatch(/cannot reach the server/i);
+    expect(notices()).toMatch(STAGE.signIn);
+    expect(notices()).not.toMatch(STAGE.channels);
+    expect(notices()).not.toMatch(STAGE.bridge);
+    expect(notices()).toContain("401 no account here");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("channels that do not load say that the channels did not load", async () => {
+  test("channels that do not load name the channels, and nothing else", async () => {
     await openTheClient({
-      server: aServer({ channels: vi.fn(async () => { throw new Error("503 no channels"); }) }),
+      server: aServer({ channels: vi.fn(async () => { throw new Error("503 nothing came back"); }) }),
     });
 
-    // Signed in, and said so: the stage that failed is the one after it.
+    // Signed in, and the window says so: the stage that failed is the next one.
     expect(el("who").textContent).toBe("Alice");
-    expect(notices()).toMatch(/channel/i);
-    expect(notices()).not.toMatch(/cannot reach the server/i);
+    expect(notices()).toMatch(STAGE.channels);
+    expect(notices()).not.toMatch(STAGE.signIn);
+    expect(notices()).not.toMatch(STAGE.bridge);
+    expect(notices()).toContain("503 nothing came back");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("a bridge that does not answer costs the toolbar, never the room", async () => {
+  test("a bridge that does not answer names the bridge, and costs the toolbar only", async () => {
     // The agents panel is a detail of the toolbar; the room is the product. A
     // silent native side used to take the whole window down with it and blame
     // the server for it.
     await openTheClient({
-      shell: aShell({ appDataDir: vi.fn(async () => { throw new Error("no bridge"); }) }),
+      shell: aShell({ appDataDir: vi.fn(async () => { throw new Error("no answer from this machine"); }) }),
     });
 
     expect(el("channel-name").textContent).toBe("# meetings");
     expect(document.querySelectorAll("#messages .msg").length).toBe(1);
-    expect(notices()).toMatch(/agent|bridge/i);
-    expect(notices()).not.toMatch(/cannot reach the server/i);
+    expect(notices()).toMatch(STAGE.bridge);
+    expect(notices()).not.toMatch(STAGE.signIn);
+    expect(notices()).not.toMatch(STAGE.channels);
+    expect(notices()).toContain("no answer from this machine");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
@@ -1254,31 +1467,37 @@ describe("a turn that fails at the end", () => {
   const saidByTheAgent = (server: { agentSay: { mock: { calls: unknown[][] } } }) =>
     server.agentSay.mock.calls.map((call) => String(call[1]));
 
-  test("the agent's failure is the agent's, and ours is ours", async () => {
-    // Two failures arrive at the same catch and are not the same event. When
-    // the agent fails, the run failed and the room should read that. When the
-    // agent answered and this client could not post the answer, writing "Agent
-    // error" into the room attributes our failure to somebody else's run —
-    // which is the one thing the record must not do (Article D3). The run
-    // finishes as what it was, and the person hears about the reply where they
-    // are looking.
-    const refused = await openTheClient({
+  test("an agent that failed is the agent's failure, and the run failed", async () => {
+    // The half that already reads true, kept as the control for the half that
+    // does not: the distinction is only worth anything if this stays as it is.
+    const { server } = await openTheClient({
       bridge: aBridge({ prompt: vi.fn(async () => { throw new Error("the model refused"); }) }),
     });
+
     await ask();
 
-    expect(saidByTheAgent(refused.server).join()).toContain("the model refused");
-    expect(refused.server.finishRun).toHaveBeenCalledWith(7, "failed");
+    expect(saidByTheAgent(server).join()).toContain("the model refused");
+    expect(server.finishRun).toHaveBeenCalledWith(7, "failed");
+  });
 
-    const unposted = await openTheClient({
+  test("a reply that could not be posted is ours, not the agent's error", async () => {
+    // The agent answered. What failed was this client putting the answer into
+    // the room — and writing that into the room as "Agent error" attributes our
+    // failure to somebody else's run, which is the one thing the record must
+    // not do (Article D3). The run finishes as what it was, and the person is
+    // told, in the room, that the answer they are waiting for did not land.
+    const { server } = await openTheClient({
       server: aServer({ agentSay: vi.fn(async () => { throw new Error("500 not written"); }) }),
     });
+
     await ask();
 
-    expect(saidByTheAgent(unposted.server)).toContain("here you go");
-    expect(saidByTheAgent(unposted.server).some((body) => /agent error/i.test(body))).toBe(false);
-    expect(unposted.server.finishRun).toHaveBeenCalledWith(7, "succeeded");
-    expect(notices()).toMatch(/repl/i);
+    expect(saidByTheAgent(server)).toContain("here you go");
+    expect(saidByTheAgent(server).some((body) => /agent error/i.test(body))).toBe(false);
+    expect(server.finishRun).toHaveBeenCalledWith(7, "succeeded");
+    expect(notices()).toMatch(/reply/i);
+    expect(notices()).toContain("500 not written");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
+
