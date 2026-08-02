@@ -67,8 +67,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal "#{@channel.memory_uri}acme-wants-monthly-reporting", front["uri"]
     assert_equal "human", front["trust"]
     assert_equal "Alice", front["author"]
-    assert_match(/Z\z/, front["recorded"], "in UTC, because when must not depend on who asks")
-    assert_in_delta entry.created_at, Time.iso8601(front["recorded"]), 5
+    assert_match(/^recorded: ["']?\d{4}-\d\d-\d\dT[\d:.]+Z/, body,
+                 "in UTC, because when must not depend on who asks")
+    assert_in_delta entry.created_at, front["recorded"].to_time, 5
     assert_includes body, "Acme wants monthly reporting"
   end
 
@@ -200,14 +201,22 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # An agent's write is not the person's own assertion and must not read as one
   # (Article P4). The turn it came from is in the address, so `git log --author`
   # finds a run's work.
+  #
+  # The action is "remember" because that is the only word the rail writes — an
+  # export that recognises the person's "written" alone drops every entry an
+  # agent ever made and still looks complete.
   test "what an agent recorded names the run it came from" do
     run = agent_run(user: @alice, channel: @channel)
 
-    memory(title: "Pricing objection", trust: "agent", author: @alice, run:)
+    memory(title: "Pricing objection", action: "remember", trust: "agent", author: @alice, run:)
     RecordStore::GitExport.call(@channel, path: @path)
 
+    assert_equal 1, shas.length, "an agent's write is an entry the mirror holds like any other"
     assert_equal "Alice's agent <agent+#{run.id}@workroom.local>", author_of(shas.last)
-    assert_equal "agent", front_matter(read("memory/pricing-objection.md"))["trust"]
+
+    front = front_matter(read("memory/pricing-objection.md"))
+    assert_equal "agent", front["trust"]
+    assert_equal "#{@channel.memory_uri}pricing-objection", front["uri"]
   end
 
   # Author is whoever the entry came from; committer is the export itself, for
@@ -215,7 +224,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # loses the one the mirror can actually vouch for.
   test "every commit is committed by the export, whoever authored it" do
     message(body: "shall we meet Tuesday")
-    memory(title: "Pricing objection", trust: "agent", author: @alice,
+    memory(title: "Pricing objection", action: "remember", trust: "agent", author: @alice,
            run: agent_run(user: @alice, channel: @channel))
 
     RecordStore::GitExport.call(@channel, path: @path)
@@ -303,10 +312,13 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
                                payload: MessageSerializer.call(written).as_json)
     end
 
-    def memory(title:, trust: "human", author: @alice, run: nil)
+    # One write, two actions. A person writing here journals "written"; the rail
+    # journals "remember", and there is no third writer — so an export that
+    # knows only one of the two words exports half the memory a room holds.
+    def memory(title:, action: "written", trust: "human", author: @alice, run: nil)
       RecordStore::Append.call(
         channel: @channel, kind: "memory", subject: nil,
-        payload: { "action" => "written", "uri" => "#{@channel.memory_uri}#{title.parameterize}",
+        payload: { "action" => action, "uri" => "#{@channel.memory_uri}#{title.parameterize}",
                    "title" => title, "trust" => trust, "author_id" => author.id,
                    "run_id" => run&.id }
       )
@@ -362,9 +374,12 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
     def month_of(entry) = entry.created_at.utc.strftime("%Y-%m")
 
+    # Parsed as yaml rather than split on the first colon: front matter that only
+    # this suite can read is not front matter. The mirror exists to be opened by
+    # the tools people already have.
     def front_matter(text)
       block = text[/\A---\n(.*?)\n---\n/m, 1]
       assert_not_nil block, "the file opens with no front matter"
-      block.lines.to_h { |line| line.split(":", 2).then { |key, value| [ key.strip, value.to_s.strip ] } }
+      YAML.safe_load(block, permitted_classes: [ Time, Date ])
     end
 end
