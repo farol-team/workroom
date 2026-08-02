@@ -5,6 +5,8 @@ import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
 import { createProvision, type FolderState } from "./provision";
+import { createHumanGate, type HumanChangeSet } from "./human-changes";
+import { createReviewDialog } from "./review-changes";
 import { showOnboarding } from "./onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -105,6 +107,67 @@ const provision = createProvision({
   clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
   isOpen: (slug) => current?.slug === slug,
   openSettings: () => channelSettings.open(),
+});
+
+/// Runs executing right now. While one is, the gate does not measure: the
+/// run's own work is not the person's unreviewed changes (#207).
+let activeRuns = 0;
+
+/// The local agent, asked a local question (#207). No run is started and
+/// nothing is posted: the room never learns the question was asked, because
+/// the summary orients the person in their own unreviewed work — it is not a
+/// turn, and charging the room for it would be a lie about who asked. Null
+/// whenever asking is impossible: no agent running, or one mid-run that
+/// should not be handed a second question.
+function localQuestion(): ((question: string, context: string) => Promise<string>) | null {
+  if (!current || activeRuns > 0) return null;
+  const name = defaultAgent(agents.definitions());
+  if (!name || !agents.isRunning(name)) return null;
+  const channel = current;
+  return async (question, context) => {
+    const workspace = boundFolder(channel.slug, bindings)
+      ?? await agents.workspace(rooms.current!, channel.slug);
+    const sessionId = await agents.sessionFor(name, channel.slug, workspace,
+                                              api.rail(channel.slug));
+    let reply = "";
+    const stop = await agents.onUpdate(sessionId, (u: Update) => {
+      if (u.kind === "text") reply += u.text;
+    });
+    try {
+      await agents.prompt(name, sessionId, question, context, null);
+    } finally {
+      stop();
+    }
+    return reply.trim();
+  };
+}
+
+/// The review dialog: the gate's Review and Commit buttons lead here.
+const reviewDialog = createReviewDialog({
+  fileDiff: (dir, path) => invoke<string>("agent_file_diff", { dir, path }),
+  commit: (dir, paths, message) => invoke<string>("agent_commit", { dir, paths, message }),
+  gitInit: (dir) => invoke<void>("agent_git_init", { dir }),
+  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
+  personName: () => $("who").textContent || "you",
+  askAgent: localQuestion,
+  resolve: (how, sha) => humanGate.resolve(how, sha),
+  recheck: () => { if (current) humanGate.check(current); },
+});
+
+/// Work the person wrote outside any run pauses runs until it is reviewed.
+/// The banner and the feed row are this machine's; the room is never told.
+const humanGate = createHumanGate({
+  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
+  stash: (dir) => invoke<void>("agent_stash", { dir }),
+  folderFor: async (channel) => boundFolder(channel.slug, bindings)
+    ?? await invoke<string>("agent_derived_path",
+      { workspace: rooms.current!, channel: channel.slug }),
+  runActive: () => activeRuns > 0,
+  isOpen: (slug) => current?.slug === slug,
+  // Every Review and Commit button lands in the dialog; the resolutions
+  // come back through `resolve` above, so both doors end the same cycle.
+  openReview: (changes, folder) => reviewDialog.open(changes, folder),
+  onChange: () => renderBinding(),
 });
 
 function renderChannels() {
@@ -288,6 +351,9 @@ async function open(slug: string) {
   // machine making the channel's folder ready, not something the room waits
   // on (#204).
   provision.consider(full);
+  // Opening a room is one of the moments the person's unreviewed work is
+  // most likely to be sitting in its folder (#207).
+  humanGate.check(full);
 
   renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
@@ -362,6 +428,7 @@ async function send(text: string) {
                                             api.rail(current.slug), store);
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
+  activeRuns += 1;
   panel.renderOptions();
 
   // A workspace that is a repository has standing rules of its own (#205),
@@ -410,9 +477,13 @@ async function send(text: string) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
   } finally {
+    activeRuns -= 1;
     stopTurn();
     stop();
     stopAsking();
+    // The turn's end is the third moment: whatever the person wrote while it
+    // ran is now visible to the gate (#207).
+    if (current) humanGate.check(current);
   }
 }
 
@@ -441,7 +512,12 @@ $("composer").addEventListener("submit", async (e) => {
   const input = $<HTMLInputElement>("input");
   const text = input.value.trim();
   if (!text) return;
+  // A run is work on the folder, and unreviewed work there pauses it (#207).
+  // Refused does not mean discarded: the message stays typed, the reason is
+  // said, and a plain message to the room was never the gate's concern.
+  if (humanGate.refuse(parseAddress(text, agents.definitions()).addressed)) return;
   input.value = "";
+  $("gate-refused").textContent = "";
   refreshDestination();
   await send(text).catch((err) => alert(String(err)));
   offerToAdd(text).catch(() => {});
@@ -482,6 +558,12 @@ $("memory-toggle").addEventListener("click", () => {
   const memory = $("memory");
   memory.hidden = !memory.hidden;
   if (!memory.hidden) { renderMemory(); renderSkills(); renderMembers(); }
+});
+
+// Coming back to the window is the other moment: the person has been
+// working somewhere, and that somewhere may be this folder (#207).
+window.addEventListener("focus", () => {
+  if (current) humanGate.check(current);
 });
 
 
@@ -712,6 +794,10 @@ function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
   const el = $("folder");
   el.textContent = folder ? folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/") : "Use a folder…";
+  // The gate's count rides the folder button: unreviewed work is about this
+  // folder, so that is where the number belongs (#207).
+  const pending = humanGate.pending();
+  if (pending) el.textContent += ` · ${pending}`;
   el.title = folder
     ? `${folder} — this channel's agent works here. Click to change, shift-click to unbind.`
     : "Bind this channel to a folder you already have";
@@ -842,7 +928,8 @@ async function boot() {
   const { user } = signedInThroughBrowser
     ? await api.whoAmI()
     : await api.signIn($<HTMLInputElement>("email").value.trim());
-  $("who").textContent = user.name;
+  const myName = user.name;
+  $("who").textContent = myName;
 
   // Signing in is where a token for a room arrives. The other place is making
   // one; there is deliberately no third, because a token fetched for another

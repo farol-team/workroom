@@ -72,6 +72,23 @@ window.__TAURI_INTERNALS__ = {
         branch: "main", commits: 2, stat: "3 files changed, 40 insertions(+)",
         on_default: true } });
     }
+    // The gate (#207) asks on channel open, so staging its answers is the
+    // whole state: a repository with work outside the line. The review
+    // dialog builds on it, adding the diff one row expands to.
+    if ((wanted === "human-gate" || wanted === "review-changes")
+        && command === "agent_derived_path") {
+      return Promise.resolve("~/WorkRoom/workroom/marketing");
+    }
+    if ((wanted === "human-gate" || wanted === "review-changes")
+        && command === "agent_human_changes") {
+      return Promise.resolve({ files: [ { path: "notes.md", bytes: 128 },
+                                        { path: "src/main.rs", bytes: 2048 } ],
+                               branch: "main", is_repo: true });
+    }
+    if (wanted === "review-changes" && command === "agent_file_diff") {
+      return Promise.resolve("diff --git a/notes.md b/notes.md\n--- a/notes.md\n"
+        + "+++ b/notes.md\n@@ -1 +1,2 @@\n weekly notes\n+added line");
+    }
     return new Promise(() => {});
   },
   transformCallback: (callback) => callback,
@@ -107,6 +124,32 @@ if (wanted) {
       window.__workroom.timeline.offerProduced(1, "/tmp/staged");
       return;
     }
+    if (wanted === "review-changes") {
+      // Open the review, then expand the first file. The outer observer is
+      // done the moment this branch runs — leaving it connected re-runs the
+      // branch on every mutation, and each re-run re-clicks the file head,
+      // whose toggle *is* a mutation: an endless churn that pegs the page.
+      self.disconnect();
+      let reviewObserver;
+      const openReview = () => {
+        const row = document.querySelector(".gate-row");
+        if (!row) return;
+        const review = [ ...row.querySelectorAll("button") ]
+          .find((b) => b.textContent === "Review");
+        if (!review) return;
+        review.click();
+        const head = document.querySelector(".rc-file-head");
+        if (!head || !document.getElementById("review-changes")?.open) return;
+        reviewObserver.disconnect();
+        head.click();
+      };
+      reviewObserver = new MutationObserver(openReview);
+      reviewObserver.observe(document.documentElement,
+        { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
+      openReview();
+      return;
+    }
+
     if (!target || !document.querySelector("#messages .msg")) return;
     self.disconnect();
     target.click();

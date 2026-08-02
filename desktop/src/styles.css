@@ -302,3 +302,28 @@ button.ob-card.pickable:disabled { opacity: .5; cursor: default; }
 button.ob-card.pickable strong { flex: 1; }
 .ob-foot { display: flex; align-items: center; justify-content: space-between; }
 .ob-actions { display: flex; gap: 8px; }
+
+/* Runs paused: slim, above the composer, quiet — the gate informs, the feed
+   row carries the ways out (#207). The [hidden] guard is load-bearing: a
+   display rule here would beat the attribute and the banner would never hide. */
+#gate { display: flex; gap: 8px; align-items: center; margin: 0 16px 8px;
+  padding: 6px 12px; border: 1px solid var(--accent); border-radius: 8px;
+  font-size: 12px; color: var(--muted); }
+#gate[hidden] { display: none; }
+#gate #gate-summary { flex: 1; }
+#gate-refused { margin: -4px 16px 8px; }
+
+/* The review dialog (#207): one row per file, the diff under it. A file head
+   is a row, not a button-face — the house dialog shape is labelled rows. */
+#review-changes { min-width: 32rem; max-width: 44rem; }
+.rc-file-head { display: block; width: 100%; text-align: left; background: none;
+  border: none; border-bottom: 1px solid var(--line); color: var(--text);
+  font: inherit; font-size: 13px; padding: 8px 2px; cursor: pointer; }
+.rc-file-head:hover { color: var(--accent); }
+.rc-diff { margin: 6px 0 10px; padding: 10px 12px; background: #0f1114;
+  border: 1px solid var(--line); border-radius: 8px; font-size: 12px;
+  line-height: 1.45; max-height: 16rem; overflow: auto; white-space: pre-wrap;
+  word-break: break-word; color: var(--muted); }
+#rc-summary { border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 8px 0; line-height: 1.45; }
+#rc-commit-row { margin: 8px 0; }
