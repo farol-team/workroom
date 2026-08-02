@@ -797,41 +797,172 @@ mod resolution {
 
 #[cfg(test)]
 mod off_the_runtime {
+    //! Two things about the commands that read a disk, neither of which can be
+    //! reached by calling them.
+    //!
+    //! A `#[tauri::command]` taking `State` cannot be invoked from a test —
+    //! there is no way to build one without a running application — so what
+    //! these commands do with the workspace is written as functions a test can
+    //! call, in `workspace`. That only means anything if the commands actually
+    //! go through those functions and keep no second copy of the logic, which
+    //! is the first assertion here. The second is the card itself: the work
+    //! reaches the blocking pool before anything touches a disk. Both are read
+    //! off the source, because a command that blocks and one that does not
+    //! return the same value — the difference is visible only to everything
+    //! else waiting on the runtime.
+
     /// The commands that walk a directory somebody bound, or shell out to git
     /// inside it. On a real repository that is thousands of entries and a
     /// `git status` besides, and an async command doing it inline holds a
-    /// runtime worker for the whole of it — which is the ACP bridge answering
-    /// nothing, mid-turn, for as long as the walk takes.
-    ///
-    /// Asserted against the source because there is nothing else to look at: a
-    /// command that blocks and one that does not return the same value, and the
-    /// difference is only visible to everything else waiting on the runtime.
+    /// runtime worker for the whole of it — the ACP bridge answering nothing,
+    /// mid-turn, for as long as the walk takes.
     const BLOCKING: &[&str] = &["agent_workspace", "agent_produced", "agent_read"];
 
-    /// What one command does, from its signature to the brace that closes it.
+    /// Every way a command body reaches a disk or asks git. None of these may
+    /// appear before the handoff: a `spawn_blocking` that runs beside the walk
+    /// rather than around it has moved nothing off the runtime.
+    const TOUCHES_A_DISK: &[&str] = &[
+        "fs::",
+        "canonicalize(",
+        "workspace::snapshot(",
+        "workspace::git_changes(",
+        "workspace::baseline(",
+        "workspace::offer(",
+    ];
+
+    /// Each command, the function it must hand the workspace to, and what it
+    /// must therefore no longer be doing itself. Leaving the old inline copy in
+    /// place is how a suite goes green over a defect that is still there.
+    const DELEGATES: &[(&str, &str, &[&str])] = &[
+        (
+            "agent_workspace",
+            "workspace::baseline(",
+            &["workspace::snapshot(", ".lock()", ".insert("],
+        ),
+        (
+            "agent_produced",
+            "workspace::offer(",
+            &[
+                "workspace::snapshot(",
+                "workspace::git_changes(",
+                "workspace::produced(",
+                ".lock()",
+            ],
+        ),
+    ];
+
+    fn source() -> String {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+            .unwrap()
+    }
+
+    /// What one command does, from its signature to the brace that closes it,
+    /// with the commentary taken out — a command that only mentions the
+    /// blocking pool in a comment has not moved anything onto it.
     fn body(source: &str, name: &str) -> String {
         let start = source
             .find(&format!("async fn {name}("))
             .unwrap_or_else(|| panic!("`{name}` is not a command in this file"));
         let rest = &source[start..];
         let end = rest.find("\n}\n").expect("a command that ends");
-        rest[..end].to_string()
+        rest[..end]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
     fn the_commands_that_touch_the_filesystem_hand_it_to_the_blocking_pool() {
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
-        )
-        .unwrap();
+        let source = source();
 
         for name in BLOCKING {
-            assert!(
-                body(&source, name).contains("spawn_blocking"),
-                "`{name}` does its filesystem work on the runtime itself, holding a worker \
-                 for as long as the directory takes to read"
-            );
+            let body = body(&source, name);
+            let Some(handoff) = body.find("spawn_blocking(") else {
+                panic!(
+                    "`{name}` does its filesystem work on the runtime itself, holding a worker \
+                     for as long as the directory takes to read"
+                );
+            };
+            for call in TOUCHES_A_DISK {
+                if let Some(at) = body.find(*call) {
+                    assert!(
+                        at > handoff,
+                        "`{name}` reaches `{call}` before it reaches the blocking pool, so that \
+                         part still runs on the runtime"
+                    );
+                }
+            }
         }
+    }
+
+    #[test]
+    fn the_commands_wire_and_the_workspace_decides() {
+        let source = source();
+
+        for (name, delegate, kept_inline) in DELEGATES {
+            let body = body(&source, name);
+            assert!(
+                body.contains(*delegate),
+                "`{name}` never calls `{delegate}`, so what the tests for it prove is not on the \
+                 path this command takes"
+            );
+            for inline in kept_inline.iter() {
+                assert!(
+                    !body.contains(*inline),
+                    "`{name}` still does `{inline}` itself — a second copy of the line between \
+                     turns, in the one place no test can reach it"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod reading_a_produced_file {
+    //! The one workspace command a test can call: it takes no state, only the
+    //! two strings the panel sends. Its body is about to move inside a closure,
+    //! and the check that a path cannot climb out of its own workspace is the
+    //! kind of thing that survives a move by accident or not at all.
+
+    use super::*;
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-read-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn a_produced_file_comes_back_as_it_was_written() {
+        let dir = temp("plain");
+        std::fs::write(dir.join("report.md"), "findings").unwrap();
+
+        let body = agent_read(dir.to_string_lossy().into_owned(), "report.md".into())
+            .await
+            .unwrap();
+
+        assert_eq!(BASE64.decode(body).unwrap(), b"findings");
+    }
+
+    #[tokio::test]
+    async fn a_path_that_climbs_out_of_the_workspace_is_not_this_sessions_to_read() {
+        // The agent names the path, and the panel passes it through. A session
+        // that can read a sibling's directory by writing `..` is not scoped by
+        // anything.
+        let dir = temp("escape");
+        std::fs::create_dir_all(dir.join("inside")).unwrap();
+        std::fs::write(dir.join("secret.env"), "TOKEN=secret").unwrap();
+
+        let error = agent_read(
+            dir.join("inside").to_string_lossy().into_owned(),
+            "../secret.env".into(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("outside the workspace"), "{error}");
     }
 }
 

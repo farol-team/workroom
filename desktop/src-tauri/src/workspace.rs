@@ -477,6 +477,18 @@ mod the_offer_a_turn_leaves {
         write(&dir, "node_modules/left-pad/index.js", "junk");
 
         assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        // And again, because a bound repository holds no line between turns and
+        // this is the one place "offered once" deliberately does not hold: the
+        // file is still uncommitted, so git still calls it changed, and the
+        // room is offered it again next turn. Two turns racing here are told
+        // the same true thing rather than one of them being told a stale one.
+        // Written down because the difference is invisible otherwise, and the
+        // next person to read the race specs will wonder why it stops here.
+        assert_eq!(
+            paths(&offer(&shots, &dir).unwrap()),
+            vec!["report.md"],
+            "git answers every turn, and answers the same until the work is committed"
+        );
     }
 }
 
