@@ -325,6 +325,60 @@ async fn agent_folder_state(dir: String) -> Result<workspace::FolderState, Strin
         .map_err(|e| format!("looking at the folder did not finish: {e}"))
 }
 
+/// Work in the folder that no run did (#207). Read-only: the line is the
+/// turn's to move, and the gate that asks this question asks it again on
+/// every focus, every open and every turn's end.
+#[tauri::command]
+async fn agent_human_changes(
+    app: AppHandle,
+    dir: String,
+) -> Result<workspace::HumanChanges, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::human_changes(&app.state::<Workspaces>(), std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("reading the folder did not finish: {e}"))?
+}
+
+/// Set the person's unreviewed work aside so a run can start from a clean
+/// tree (#207). The button says how to bring it back; git keeps it.
+#[tauri::command]
+async fn agent_stash(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::stash(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("stashing did not finish: {e}"))?
+}
+
+/// A plain folder becomes a repository when the person says so (#207).
+/// Idempotent, and deliberately remote-less.
+#[tauri::command]
+async fn agent_git_init(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::git_init(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("init did not finish: {e}"))?
+}
+
+/// One file's changes, for the review dialog (#207). The dialog asks one row
+/// at a time, as the person expands them.
+#[tauri::command]
+async fn agent_file_diff(dir: String, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || workspace::file_diff(std::path::Path::new(&dir), &path))
+        .await
+        .map_err(|e| format!("reading the diff did not finish: {e}"))?
+}
+
+/// The reviewed changes, committed as the machine's own git identity (#207).
+/// No configuration is written here: if git cannot name the author, its own
+/// error is the dialog's to show.
+#[tauri::command]
+async fn agent_commit(dir: String, paths: Vec<String>, message: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::commit(std::path::Path::new(&dir), &paths, &message)
+    })
+    .await
+    .map_err(|e| format!("committing did not finish: {e}"))?
+}
+
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
@@ -663,6 +717,11 @@ pub fn run() {
             agent_clone,
             agent_derived_path,
             agent_folder_state,
+            agent_human_changes,
+            agent_stash,
+            agent_git_init,
+            agent_file_diff,
+            agent_commit,
             agent_read,
             agent_new_session,
             agent_load_session,
@@ -904,6 +963,29 @@ mod what_the_commands_delegate {
             "workspace::folder_state(",
             &["create_dir_all"],
         ),
+        // The gate's three (#207): read the person's work without moving the
+        // line, and the two tree changes a button can ask for. A second copy
+        // of any of them in a command body would be logic no test can see.
+        (
+            "agent_human_changes",
+            "workspace::human_changes(",
+            &[".insert("],
+        ),
+        ("agent_stash", "workspace::stash(", &["create_dir_all"]),
+        (
+            "agent_git_init",
+            "workspace::git_init(",
+            &["create_dir_all"],
+        ),
+        // The review dialog's two (#207 part B): what one file's changes
+        // look like, and the commit that lands them. Same rule: the command
+        // wires, the workspace decides.
+        (
+            "agent_file_diff",
+            "workspace::file_diff(",
+            &["create_dir_all"],
+        ),
+        ("agent_commit", "workspace::commit(", &["create_dir_all"]),
     ];
 
     fn source() -> String {

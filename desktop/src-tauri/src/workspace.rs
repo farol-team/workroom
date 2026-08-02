@@ -387,6 +387,184 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
     })
 }
 
+/// The person's unreviewed work in a folder, as the gate sees it (#207).
+#[derive(serde::Serialize)]
+pub struct HumanChanges {
+    pub files: Vec<Produced>,
+    pub branch: Option<String>,
+    pub is_repo: bool,
+}
+
+/// What changed outside any run: the current porcelain minus the line's own
+/// dirt. Read-only, deliberately — the line is the turn's to move (#202), and
+/// a gate that consumed what it saw would ask its question exactly once.
+/// Without a line, everything dirty counts: nothing was ever measured, so
+/// nothing is the turn's.
+///
+/// Outside a repository the gate itself never fires — `is_repo: false` and
+/// the client does not pause anything. But the files are listed all the
+/// same, since part B's review dialog is also the upgrade path: a plain
+/// folder that gains a history starts by showing what would be in it (#207).
+pub fn human_changes(shots: &Workspaces, dir: &Path) -> Result<HumanChanges, String> {
+    let Some(changed) = git_changes(dir) else {
+        let state = shots
+            .0
+            .lock()
+            .map_err(|_| "workspace state is poisoned".to_string())?;
+        let after = snapshot(dir);
+        let before = match state.get(dir) {
+            Some(Baseline::Fs(line)) => line.clone(),
+            _ => Snapshot::default(),
+        };
+        drop(state);
+        let files = produced(&before, &after)
+            .into_iter()
+            .map(|path| {
+                let bytes = after.get(&path).map(|(size, _)| *size).unwrap_or(0);
+                Produced {
+                    path: path.to_string_lossy().into_owned(),
+                    bytes,
+                }
+            })
+            .collect();
+        return Ok(HumanChanges {
+            files,
+            branch: None,
+            is_repo: false,
+        });
+    };
+
+    let state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    let files = match state.get(dir) {
+        Some(Baseline::Git(line)) => changed
+            .into_iter()
+            .filter(|path| !line.dirty.contains(path))
+            .collect(),
+        _ => changed,
+    };
+    drop(state);
+
+    let branch = git_answer(dir, &["symbolic-ref", "--short", "HEAD"]);
+    let files = files
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::metadata(dir.join(&path)).map(|m| m.len()).unwrap_or(0);
+            Produced { path, bytes }
+        })
+        .collect();
+    Ok(HumanChanges {
+        files,
+        branch,
+        is_repo: true,
+    })
+}
+
+/// One git command that changes the tree, run for a person who pressed a
+/// button. git's own stderr is the error text: "stash" failing has reasons
+/// the person recognises, and a paraphrase would only hide them.
+fn git_tree_change(dir: &Path, args: &[&str]) -> Result<(), String> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    if !out.status.success() {
+        let said = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if said.is_empty() {
+            format!("git {} exited with {}", args[0], out.status)
+        } else {
+            said
+        });
+    }
+    Ok(())
+}
+
+/// The person's unreviewed work, set aside with a name that says who put it
+/// there (#207). `git stash pop` brings it back, which is exactly what the
+/// button's suffix says. Nothing to stash is a success: the work is as gone
+/// as it would be after one.
+pub fn stash(dir: &Path) -> Result<(), String> {
+    git_tree_change(
+        dir,
+        &["stash", "push", "-u", "-m", "workroom: human changes"],
+    )
+}
+
+/// A folder becomes a repository when a person says so. Idempotent — init in
+/// an existing repository is a no-op — and deliberately remote-less: where it
+/// pushes is a later decision, not this one's.
+pub fn git_init(dir: &Path) -> Result<(), String> {
+    git_tree_change(dir, &["init"])
+}
+
+/// How much of a new file the review shows before saying "and more". Enough
+/// to know what the file is; the rest is on disk one click away.
+const NEW_FILE_PREVIEW_LINES: usize = 200;
+
+/// One file's changes, as the review dialog shows them (#207).
+///
+/// A tracked file answers with `git diff -- <path>` — the worktree against
+/// the index, deliberately not more: the gate's question is "what did the
+/// person just write", and work already staged was gathered deliberately
+/// once. An untracked file has no diff, so it is shown as what it is — a new
+/// file, its content capped with the cap said. Confined to the folder the
+/// way `agent_read` is: a path that climbs out is not reviewed.
+pub fn file_diff(dir: &Path, path: &str) -> Result<String, String> {
+    let root = dir.canonicalize().map_err(|e| e.to_string())?;
+    let file = root.join(path).canonicalize().map_err(|e| e.to_string())?;
+    if !file.starts_with(&root) {
+        return Err(format!("{path} is outside the workspace"));
+    }
+
+    let tracked = std::process::Command::new("git")
+        .args(["ls-files", "--error-unmatch", "--", path])
+        .current_dir(&root)
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+
+    if tracked {
+        let out = std::process::Command::new("git")
+            .args(["diff", "--", path])
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("cannot run git: {e}"))?;
+        let diff = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        // A tracked file with no worktree diff was staged, not edited since:
+        // said, because an empty answer reads as broken.
+        return Ok(if diff.is_empty() {
+            "no unstaged changes — the file's changes are already staged".into()
+        } else {
+            diff
+        });
+    }
+
+    let body = fs::read_to_string(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let lines: Vec<&str> = body.lines().take(NEW_FILE_PREVIEW_LINES + 1).collect();
+    let mut shown = format!(
+        "new file — every line is added (showing {} lines)\n",
+        lines.len().min(NEW_FILE_PREVIEW_LINES)
+    );
+    shown.push_str(&lines[..lines.len().min(NEW_FILE_PREVIEW_LINES)].join("\n"));
+    Ok(shown)
+}
+
+/// The reviewed changes, committed under the machine's own git identity
+/// (#207). No configuration is ever written here: whose name goes on a
+/// commit is the person's git setup, and its absence comes back as git's own
+/// error for the dialog to show. Answers with the new commit's short sha.
+pub fn commit(dir: &Path, paths: &[String], message: &str) -> Result<String, String> {
+    let mut add = vec!["add", "--"];
+    add.extend(paths.iter().map(String::as_str));
+    git_tree_change(dir, &add)?;
+    git_tree_change(dir, &["commit", "-m", message])?;
+    git_answer(dir, &["rev-parse", "--short", "HEAD"])
+        .ok_or_else(|| "the commit landed but HEAD could not be named".to_string())
+}
+
 /// One git question asked of a folder. `None` covers both "this is not a
 /// repository" and "git could not say" — a caller warning about what a folder
 /// *might* do has nothing to warn about in either case.
@@ -1459,5 +1637,304 @@ mod commit_aware_offer_tests {
             "{}",
             committed.stat
         );
+    }
+}
+
+#[cfg(test)]
+mod human_changes_tests {
+    //! The person's work, seen from outside the run (#207). The line is the
+    //! turn's; everything past it is the person's, and reading it never moves
+    //! the line.
+
+    use super::*;
+    use std::io::Write;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-human-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+    }
+
+    fn repository(name: &str) -> PathBuf {
+        let dir = temp(name);
+        run(&dir, &["init", "-q", "-b", "main", "."]);
+        run(&dir, &["config", "user.email", "a@b"]);
+        run(&dir, &["config", "user.name", "a"]);
+        write(&dir, "src.rs", "fn main() {}");
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-qm", "init"]);
+        dir
+    }
+
+    #[test]
+    fn only_work_past_the_line_counts_as_the_persons() {
+        let dir = repository("past-the-line");
+        write(&dir, "before.md", "dirty before the line");
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        write(&dir, "after.md", "written after the line");
+
+        let got = human_changes(&shots, &dir).unwrap();
+        let paths: Vec<&str> = got.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["after.md"],
+            "the line's own dirt is the turn's baseline, not a change"
+        );
+        assert!(got.is_repo);
+        assert_eq!(got.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn without_a_line_everything_dirty_counts() {
+        let dir = repository("no-line");
+        write(&dir, "one.md", "x");
+        write(&dir, "two.md", "y");
+        let shots = Workspaces::default();
+
+        let got = human_changes(&shots, &dir).unwrap();
+
+        assert_eq!(
+            got.files.len(),
+            2,
+            "nothing was ever measured, so nothing is excluded"
+        );
+    }
+
+    #[test]
+    fn reading_changes_never_moves_the_line() {
+        let dir = repository("read-only");
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+        write(&dir, "work.md", "x");
+
+        human_changes(&shots, &dir).unwrap();
+        let again = human_changes(&shots, &dir).unwrap();
+
+        assert_eq!(
+            again.files.len(),
+            1,
+            "a gate that consumed what it saw would stop gating"
+        );
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_repository_is_not_gated_but_is_listed() {
+        // The gate never fires here — `is_repo` is the client's signal for
+        // that — but the files are named all the same: the review dialog is
+        // the upgrade path, and "make it a git repo" starts by showing what
+        // would gain a history (#207 part B).
+        let dir = temp("plain");
+        write(&dir, "notes.md", "x");
+        let shots = Workspaces::default();
+
+        let got = human_changes(&shots, &dir).unwrap();
+
+        assert!(!got.is_repo);
+        assert_eq!(got.files.len(), 1);
+        assert_eq!(got.files[0].path, "notes.md");
+    }
+
+    #[test]
+    fn a_stash_sets_the_work_aside_where_it_can_be_brought_back() {
+        let dir = repository("stashed");
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+        write(&dir, "wip.md", "half a thought");
+
+        stash(&dir).unwrap();
+
+        let after = human_changes(&shots, &dir).unwrap();
+        assert!(after.files.is_empty(), "stashed work is out of the tree");
+        let list = std::process::Command::new("git")
+            .args(["stash", "list"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let list = String::from_utf8_lossy(&list.stdout);
+        assert!(list.contains("workroom: human changes"), "{list}");
+    }
+
+    #[test]
+    fn a_stash_with_nothing_to_stash_is_not_an_error() {
+        let dir = repository("nothing-to-stash");
+
+        stash(&dir).unwrap();
+    }
+
+    #[test]
+    fn init_makes_a_plain_folder_a_repository_the_gate_can_read() {
+        let dir = temp("becomes-a-repo");
+        write(&dir, "notes.md", "x");
+        let shots = Workspaces::default();
+        assert!(!human_changes(&shots, &dir).unwrap().is_repo);
+
+        git_init(&dir).unwrap();
+        git_init(&dir).unwrap(); // idempotent: asking twice is not an error
+
+        assert!(human_changes(&shots, &dir).unwrap().is_repo);
+    }
+}
+
+#[cfg(test)]
+mod review_dialog_tests {
+    //! What the review dialog shows and does (#207 part B): one file's
+    //! changes, and a commit of exactly the paths the person confirmed.
+
+    use super::*;
+    use std::io::Write;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-review-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+    }
+
+    fn repository(name: &str) -> PathBuf {
+        let dir = temp(name);
+        run(&dir, &["init", "-q", "-b", "main", "."]);
+        run(&dir, &["config", "user.email", "a@b"]);
+        run(&dir, &["config", "user.name", "a"]);
+        write(&dir, "src.rs", "fn main() {}\n");
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-qm", "init"]);
+        dir
+    }
+
+    #[test]
+    fn a_tracked_files_diff_is_the_worktree_against_the_index() {
+        let dir = repository("diff");
+        write(&dir, "src.rs", "fn main() {}\nfn more() {}\n");
+
+        let diff = file_diff(&dir, "src.rs").unwrap();
+
+        assert!(diff.contains("+fn more() {}"), "{diff}");
+        assert!(diff.contains("src.rs"), "{diff}");
+    }
+
+    #[test]
+    fn an_untracked_file_is_shown_as_new_with_its_content_capped() {
+        let dir = repository("new-file");
+        let body = (1..=250)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        write(&dir, "notes.md", &body);
+
+        let diff = file_diff(&dir, "notes.md").unwrap();
+
+        assert!(diff.contains("new file"), "{diff}");
+        assert!(diff.contains("line 1"));
+        assert!(diff.contains("line 200"));
+        assert!(!diff.contains("line 201"), "capped, with the cap said");
+        assert!(diff.contains("200"), "the note says how much was shown");
+    }
+
+    #[test]
+    fn a_path_outside_the_folder_is_not_reviewed() {
+        let dir = repository("escape");
+        let outside = temp("outside");
+        write(&outside, "secret.md", "token");
+
+        let error = file_diff(&dir, "../wr-review-escape-does-not-matter").unwrap_err();
+        assert!(!error.is_empty());
+    }
+
+    #[test]
+    fn a_commit_lands_exactly_the_confirmed_paths_and_names_its_sha() {
+        let dir = repository("commit");
+        write(&dir, "one.md", "reviewed\n");
+        write(&dir, "two.md", "not reviewed yet\n");
+
+        let sha = commit(&dir, &["one.md".to_string()], "Manual edits by Alice").unwrap();
+
+        assert_eq!(sha.len(), 7, "a short sha, {sha}");
+        let status = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let status = String::from_utf8_lossy(&status.stdout);
+        assert!(
+            status.contains("two.md"),
+            "the unconfirmed file is still dirty: {status}"
+        );
+        assert!(
+            !status.contains("one.md"),
+            "the confirmed file is committed: {status}"
+        );
+        let log = std::process::Command::new("git")
+            .args(["log", "-1", "--format=%s"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            "Manual edits by Alice"
+        );
+    }
+
+    #[test]
+    fn a_commit_without_an_identity_reports_gits_own_words() {
+        // No config is ever written: whose name goes on the commit is the
+        // machine's git configuration, and its absence is git's sentence.
+        let dir = temp("no-identity");
+        run(&dir, &["init", "-q", "."]);
+        run(&dir, &["config", "user.name", ""]);
+        run(&dir, &["config", "user.email", ""]);
+        write(&dir, "one.md", "x");
+
+        let error = commit(&dir, &["one.md".to_string()], "x").unwrap_err();
+
+        assert!(!error.is_empty());
+        let log = std::process::Command::new("git")
+            .args(["log", "--format=%s"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(!log.status.success(), "no commit was made");
     }
 }

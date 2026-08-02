@@ -52,6 +52,15 @@
         <section id="messages"></section>
         <div id="activity" class="activity"></div>
         <div id="session-options"></div>
+        <!-- Work nobody reviewed pauses runs, never talk (#207): the banner
+             says it in one line, the feed row carries the ways out, and the
+             muted line under it is where a refused run's reason goes. -->
+        <div id="gate" hidden>
+          <span id="gate-summary"></span>
+          <button type="button" id="gate-review" class="ghost">Review</button>
+          <button type="button" id="gate-keep" class="ghost">Keep</button>
+        </div>
+        <div id="gate-refused" class="muted"></div>
         <form id="composer">
           <button type="button" id="summon" class="ghost" title="Address your agent">@agent</button>
           <input id="input" placeholder="Message the room…" autocomplete="off" />
@@ -187,6 +196,34 @@
           <button value="cancel" formnovalidate id="cs-cancel">Cancel</button>
           <button type="button" id="cs-save">Save</button>
           <button value="cancel" formnovalidate id="cs-done" hidden>Done</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- Reviewing work nobody ran (#207): what changed, what it means, and
+         the ways out. The Commit row hides until asked — a message is written
+         deliberately, not by accident of the dialog being open. -->
+    <dialog id="review-changes">
+      <form method="dialog">
+        <h3>Review changes</h3>
+        <p id="rc-context" class="muted"></p>
+        <div id="rc-summary" class="muted" hidden></div>
+        <div id="rc-files"></div>
+        <div id="rc-norepo" hidden>
+          <p class="muted">This folder has no history.</p>
+          <button type="button" id="rc-init" class="ghost">Make it a git repo</button>
+        </div>
+        <p id="rc-error" class="muted"></p>
+        <div id="rc-commit-row" hidden>
+          <label>Message <input id="rc-message" autocomplete="off" /></label>
+        </div>
+        <menu>
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button type="button" id="rc-summarize" class="ghost">Summarize</button>
+          <button type="button" id="rc-stash" class="ghost">Stash</button>
+          <button type="button" id="rc-keep" class="ghost">Keep</button>
+          <button type="button" id="rc-commit" class="ghost">Commit…</button>
+          <button type="button" id="rc-confirm" hidden>Confirm</button>
         </menu>
       </form>
     </dialog>
