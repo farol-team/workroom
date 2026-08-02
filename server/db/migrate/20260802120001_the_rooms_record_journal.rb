@@ -5,10 +5,11 @@ class TheRoomsRecordJournal < ActiveRecord::Migration[8.1]
   def change
     create_table :channel_records do |t|
       t.references :workspace, null: false, foreign_key: true
-      # The journal is a property of the room and goes when the room goes.
-      # ON DELETE CASCADE rather than the model's callback: a row nothing may
-      # update is a row nothing may destroy either.
-      t.references :channel, null: false, foreign_key: { on_delete: :cascade }
+      # Plain, like every sibling's: the journal goes when the room goes, and
+      # Channel#channel_records is what takes it — delete_all, because a row
+      # nothing may update is a row nothing may destroy either. The keys here
+      # guard integrity and refuse a room whose journal is still standing.
+      t.references :channel, null: false, foreign_key: true
       t.bigint :seq, null: false
       t.string :kind, null: false
       t.references :subject, polymorphic: true, null: true

@@ -9,9 +9,10 @@ class Channel < ApplicationRecord
   has_many :agent_sessions, dependent: :destroy
   has_many :artifacts, dependent: :destroy
   has_many :memory_entries, dependent: :destroy
-  # delete_all, not destroy: a journal entry refuses to be destroyed — it is
-  # append-only — so the cascade has to be the one the foreign key already
-  # performs rather than a callback that would raise halfway through.
+  # This is the cascade — the foreign keys are integrity guards and refuse the
+  # delete rather than following it. delete_all, not destroy: a journal entry
+  # is append-only and refuses to be destroyed, so a callback would raise
+  # halfway through what one statement does without asking any of them.
   has_many :channel_records, dependent: :delete_all
 
   validates :slug, :name, :memory_uri, presence: true

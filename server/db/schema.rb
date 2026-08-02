@@ -274,8 +274,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_120001) do
   add_foreign_key "artifacts", "channels"
   add_foreign_key "artifacts", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "artifacts", "workspaces"
+  add_foreign_key "channel_records", "channels"
   add_foreign_key "channel_records", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
-  add_foreign_key "channel_records", "channels", on_delete: :cascade
   add_foreign_key "channel_records", "workspaces"
   add_foreign_key "channels", "workspaces"
   add_foreign_key "invitations", "users", column: "accepted_by_id"
