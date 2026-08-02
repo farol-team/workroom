@@ -85,6 +85,21 @@ class Memory::OpenVikingTest < ActiveSupport::TestCase
     archived = entry.uri.sub("resources/channels/", "resources/superseded/")
     assert @store.send(:read, archived), "the record moved rather than vanished (Article P6)"
   end
+
+  # The sidecar is a dot-file because the store's own indexing skips dot-names;
+  # a visible meta.json would be summarized, embedded, and surfaced in search.
+  # That skip is a single `if` upstream, so a live store pins it (#213).
+  test "the lineage sidecar stays out of what the room lists and finds" do
+    skip "needs a live store" if ENV["OPENVIKING_URL"].blank?
+    entry = @store.write(@channel, title: "Reporting cadence", detail: "Monthly rollups.")
+    @store.annotate(entry.uri, seq: 1, entry_hash: "ab" * 32, action: "written")
+
+    refute @store.all(@channel).any? { |e| e.uri.split("/").last.start_with?(".") },
+           "the sidecar is bookkeeping, not something the room said"
+    found = eventually { @store.search(@channel, "reporting cadence") }
+    refute found.any? { |e| e.uri.split("/").last.start_with?(".") },
+           "a sidecar answering a search is the entry's provenance pretending to be the entry"
+  end
 end
 
 # Where an entry goes when it is superseded is a fact about the layout, and a
@@ -188,5 +203,134 @@ class Memory::OpenVikingAnsweringBadlyTest < ActiveSupport::TestCase
   ensure
     thread&.kill
     server&.close
+  end
+end
+
+# Lineage is a verb of the seam, not a feature of one store: every write the
+# server witnessed may be annotated with the journal record of it, and a store
+# with no lineage index answers by doing nothing. `Memory::Local` inherits
+# that answer unchanged (#213).
+class Memory::StoreAnnotateTest < ActiveSupport::TestCase
+  test "annotate is part of the seam, with a default of nothing done" do
+    store = Memory::Store.new
+
+    assert_nil store.annotate("viking://resources/channels/meetings/cadence.md",
+                              seq: 1, entry_hash: "ab" * 32, action: "remember")
+  end
+end
+
+# The sidecar protocol against a store that answers and remembers what it was
+# asked. No live instance: the subject here is what the adapter sends, so the
+# requests are kept and the answers are the minimum the adapter is built on —
+# a read finds only the uris the test said exist, which is what `write` relies
+# on to keep a key's first name.
+class Memory::OpenVikingSidecarTest < ActiveSupport::TestCase
+  setup { @channel = channel(name: "Meetings") }
+
+  test "annotate writes the journal lineage beside the entry, as a dot-file" do
+    uri = "viking://resources/channels/meetings/cadence.md"
+
+    requests = recording do |store|
+      store.annotate(uri, seq: 3, entry_hash: "ab" * 32, action: "remember",
+                     uri: uri, trust: "agent", author_id: 7, run_id: 11,
+                     recorded_at: Time.utc(2026, 8, 2, 12).iso8601)
+    end
+
+    writes = requests.select { |r| r[:path] == "/api/v1/content/write" }
+    assert_equal 1, writes.length, "annotate writes the sidecar and nothing else"
+    # A visible meta.json would be summarized, embedded and surfaced by search;
+    # a dot-name next to the entry is skipped at every stage of the store's own
+    # indexing — the premise of #213.
+    assert_equal "viking://resources/channels/meetings/.cadence.meta.json", writes.first[:body]["uri"]
+    assert_equal "create", writes.first[:body]["mode"]
+
+    meta = JSON.parse(writes.first[:body]["content"])
+    assert_equal 3, meta["seq"]
+    assert_equal "ab" * 32, meta["entry_hash"]
+    assert_equal "remember", meta["action"]
+    assert_equal uri, meta["uri"]
+    assert_equal "agent", meta["trust"]
+    assert_equal 7, meta["author_id"]
+    assert_equal 11, meta["run_id"]
+    assert meta["recorded_at"].present?, "the journal moment, not the store's"
+  end
+
+  test "superseding moves the sidecar into the archive with the entry" do
+    stale = "viking://resources/channels/meetings/cadence.md"
+
+    requests = recording(existing: [ stale ]) { |store| store.supersede(stale) }
+
+    moves = requests.select { |r| r[:path] == "/api/v1/fs/mv" }
+                    .map { |r| [ r[:body]["from_uri"], r[:body]["to_uri"] ] }
+    assert_equal 2, moves.length, "the entry and its lineage travel together (Article P6)"
+    assert_includes moves, [ stale, "viking://resources/superseded/channels/meetings/cadence.md" ]
+    assert_includes moves, [ "viking://resources/channels/meetings/.cadence.meta.json",
+                             "viking://resources/superseded/channels/meetings/.cadence.meta.json" ]
+  end
+
+  test "a missing sidecar does not stop a supersession" do
+    stale = "viking://resources/channels/meetings/cadence.md"
+    moved = nil
+
+    requests = recording(existing: [ stale ], fail_sidecar_mv: true) do |store|
+      moved = store.supersede(stale)
+    end
+
+    assert_equal stale, moved.uri, "the sidecar is an index, not the record"
+    attempted = requests.select { |r| r[:path] == "/api/v1/fs/mv" }.map { |r| r[:body]["from_uri"] }
+    assert_includes attempted, "viking://resources/channels/meetings/.cadence.meta.json",
+                    "the move was tried, and its failure tolerated like a tag that did not stick"
+  end
+
+  private
+
+  def recording(existing: [], fail_sidecar_mv: false)
+    requests = []
+    server = TCPServer.new("127.0.0.1", 0)
+    thread = Thread.new do
+      while (socket = server.accept)
+        begin
+          answer(socket, requests, existing, fail_sidecar_mv)
+        rescue IOError, SystemCallError
+          nil # the client hung up first; the test is not about this socket
+        ensure
+          socket.close
+        end
+      end
+    end
+
+    yield Memory::OpenViking.new(base_url: "http://127.0.0.1:#{server.addr[1]}", api_key: "unused")
+    requests
+  ensure
+    thread&.kill
+    server&.close
+  end
+
+  def answer(socket, requests, existing, fail_sidecar_mv)
+    request_line = socket.gets
+    return unless request_line
+
+    method, target = request_line.split(" ")
+    headers = {}
+    while (line = socket.gets) && line != "\r\n"
+      key, value = line.chomp.split(": ", 2)
+      headers[key.downcase] = value
+    end
+    body = socket.read(headers["content-length"].to_i) if headers["content-length"]
+
+    uri = URI.parse(target)
+    params = uri.query ? URI.decode_www_form(uri.query).to_h : {}
+    json = body.to_s.empty? ? {} : JSON.parse(body)
+    requests << { method:, path: uri.path, params:, body: json }
+
+    payload = "{}"
+    if uri.path == "/api/v1/content/read" && existing.include?(params["uri"])
+      payload = { result: "---\ntitle: Cadence\n---\n\n# Cadence\n\nWeekly.\n" }.to_json
+    elsif uri.path == "/api/v1/fs/mv" && fail_sidecar_mv && json["from_uri"].to_s.end_with?(".meta.json")
+      payload = { status: "error", error: { message: "no such file" } }.to_json
+    end
+
+    socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+                 "Content-Length: #{payload.bytesize}\r\nConnection: close\r\n\r\n#{payload}")
   end
 end
