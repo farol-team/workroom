@@ -113,6 +113,7 @@ module Rail
         entry = store.write(@channel, title: args[:title], detail: args[:detail],
                             trust: "agent", author: @user, source: run)
         run&.update(distilled_at: Time.current)
+        record("remember", uri: entry.uri, title: args[:title], run: run)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
@@ -122,8 +123,24 @@ module Rail
         return [ :error, "no capability at #{target}" ] unless target.start_with?(@channel.memory_uri)
 
         entry = store.supersede(target, reason: args[:reason])
-        entry ? [ :ok, "Superseded #{entry.uri}" ] : [ :error, "nothing current at #{target}" ]
+        return [ :error, "nothing current at #{target}" ] unless entry
+
+        record("supersede", uri: entry.uri, reason: args[:reason], run: working_run)
+        [ :ok, "Superseded #{entry.uri}" ]
       end
+    end
+
+    # A write to memory is a thing that happened in the room, so the room's
+    # journal says so — after the write succeeded, never before, and never for
+    # one that was refused. The entry names the uri rather than a row id: the
+    # rail writes to whichever store is configured, and only the uri means the
+    # same thing in both. Who and which turn ride along, because an entry
+    # nobody can trace back is a defect (Article P4).
+    def record(action, uri:, run:, **rest)
+      RecordStore::Append.call(
+        channel: @channel, kind: "memory", subject: nil,
+        payload: { action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id }.merge(rest)
+      )
     end
   end
 end
