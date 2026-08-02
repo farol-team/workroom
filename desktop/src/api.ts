@@ -275,9 +275,11 @@ export class Api {
   /// the connection out, a laptop closes — and the room it fed then looks exactly
   /// like a room nobody is writing in (#180). So a close is answered with another
   /// attempt, and `onResync` lets the caller ask for what arrived while nobody was
-  /// listening; only the caller knows what being caught up means. `Socket` is the
-  /// seam a test stands a fake in, and the only one.
-  live(slug: string, onEvent: (e: any) => void, onResync: () => void = () => {},
+  /// listening; only the caller knows what being caught up means, and a promise it
+  /// rejects is a room still behind, so it is asked again. `Socket` is the seam a
+  /// test stands a fake in, and the only one.
+  live(slug: string, onEvent: (e: any) => void,
+       onResync: () => void | Promise<void> = () => {},
        Socket: new (url: string) => CableSocket = WebSocket): Live {
     const url = this.base.replace(/^http/, "ws") + `/cable?token=${encodeURIComponent(this.token)}`;
     const subscriptions = [
@@ -289,13 +291,34 @@ export class Api {
     let deliberate = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
 
+    // Doubling from a second and capped at half a minute, so a server that
+    // stays down is not hammered; jittered down from there, so a server
+    // coming back does not take every client's attempt in the same tick.
+    // One thing waits at a time — the socket and the catch-up climb the same
+    // ladder, and a server that refuses both should be asked once, not twice.
+    const later = (again: () => void) => {
+      clearTimeout(retry);
+      const wait = Math.min(1000 * 2 ** attempt++, 30_000);
+      retry = setTimeout(again, wait * (0.5 + Math.random() / 2));
+    };
+
+    // The socket is answered before the rest of the server necessarily is: a
+    // machine that has only just come back can accept the connection and still
+    // refuse the request the catch-up makes. Dropping that refusal would leave
+    // the room as far behind as the outage left it, with nothing left to notice
+    // — so a refused catch-up waits and asks again, exactly as a dropped socket
+    // does. A caller that has since left the room is not owed an answer.
+    const catchUp = () => {
+      Promise.resolve(onResync()).catch(() => { if (!deliberate) later(catchUp); });
+    };
+
     const connect = (missed: boolean): CableSocket => {
       const ws = new Socket(url);
       ws.onopen = () => {
         attempt = 0;                      // a socket that lived earns a fresh first wait
         subscriptions.forEach((identifier) =>
           ws.send(JSON.stringify({ command: "subscribe", identifier })));
-        if (missed) onResync();
+        if (missed) catchUp();
       };
       ws.onmessage = (ev) => {
         const data = JSON.parse(ev.data);
@@ -304,11 +327,7 @@ export class Api {
       };
       ws.onclose = () => {
         if (deliberate) return;             // leaving a room is not an outage
-        // Doubling from a second and capped at half a minute, so a server that
-        // stays down is not hammered; jittered down from there, so a server
-        // coming back does not take every client's attempt in the same tick.
-        const wait = Math.min(1000 * 2 ** attempt++, 30_000);
-        retry = setTimeout(() => { socket = connect(true); }, wait * (0.5 + Math.random() / 2));
+        later(() => { socket = connect(true); });
       };
       return ws;
     };

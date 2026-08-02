@@ -464,6 +464,10 @@ async function open(slug: string) {
 /// this adds is that the answer is only for the room still on screen — the room
 /// can be left while the request is in flight, and pouring another channel's
 /// messages into this one is worse than staying behind.
+///
+/// The rejection is deliberately not swallowed here: a server that has only just
+/// come back can refuse this request, and `live()` reads the rejection as a room
+/// still behind and asks again. Returning the promise is what makes that work.
 async function catchUp(slug: string) {
   if (current?.slug !== slug) return;
   const missed = await api.caughtUp(slug, held);
