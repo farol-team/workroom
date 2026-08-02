@@ -1226,21 +1226,6 @@ describe("what the room says when something goes wrong", () => {
       said: "claude exited 1",
     },
     {
-      what: "an install npm refused",
-      edges: () => ({ bridge: aBridge({
-        definitions: () => [ { name: "codex", command: "codex-acp", args: [] } ],
-        isRunning: () => false,
-        stateOf: () => "missing",
-        install: vi.fn(async () => ({ ok: false, code: 1, stdoutTail: "", stderrTail: "npm: not found" })),
-      }) }),
-      drive: async () => {
-        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
-        await settle();
-      },
-      attempted: (edges) => edges.bridge.install,
-      said: "npm: not found",
-    },
-    {
       what: "a skill the room did not accept",
       edges: () => ({ server: aServer({
         writeSkill: vi.fn(async () => { throw new Error("422 the title is taken"); }),
@@ -1255,21 +1240,6 @@ describe("what the room says when something goes wrong", () => {
       },
       attempted: (edges) => edges.server.writeSkill,
       said: "the title is taken",
-    },
-    {
-      what: "a code that opens no room",
-      edges: () => ({ server: aServer({
-        acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
-      }) }),
-      drive: async () => {
-        el("workspace-join").click();
-        await settle();
-        el<HTMLInputElement>("join-code").value = "abc-123";
-        el<HTMLDialogElement>("join").close("go");
-        await settle();
-      },
-      attempted: (edges) => edges.server.acceptInvitation,
-      said: "that code is spent",
     },
     {
       what: "a workspace that was not made",
@@ -1386,23 +1356,70 @@ describe("what the room says when something goes wrong", () => {
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("nothing in the client reaches for a native dialog", async () => {
-    // A source-level sweep, and one on purpose: sixteen call sites is more
-    // windows than a suite should open to say one thing, and the thing being
-    // said is about all of them at once.
-    //
-    // Stricter than the PLAN, deliberately — it kept alerts for "boot-fatal
-    // cases where no room exists yet", and there is no such case: `#notices`
-    // is in the document index.html ships (index.html:51), so the strip is
-    // there before the first fetch is made. This spec is the contract; that
-    // line of the plan is amended by it.
-    //
-    // What it cannot see is a call site that answers by saying nothing at all.
-    // That is what the examples above are for, and why each of them names the
-    // words the person must end up reading.
-    const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
+  test("an agent nobody started is a notice, and the room already has the message", async () => {
+    // The one failure here that is not the server's or the machine's: the
+    // person addressed an agent that is not running. Their message went to the
+    // room before the agent was ever asked, so the notice is about the agent
+    // alone — it has to name which one and what to press, because "your agent"
+    // is three rows in a panel and pressing the wrong one changes nothing.
+    const { server, bridge } = await openTheClient({ bridge: aBridge({ isRunning: () => false }) });
+    el<HTMLInputElement>("input").value = "@claude what did we agree?";
 
-    expect(source.match(/\balert\(/g) ?? []).toEqual([]);
+    submit("composer");
+    await settle();
+
+    expect(server.post).toHaveBeenCalledWith("meetings", "what did we agree?");
+    expect(server.startRun).not.toHaveBeenCalled();
+    expect(bridge.sessionFor).not.toHaveBeenCalled();
+    expect(notices()).toMatch(/claude/i);
+    expect(notices()).toMatch(/start/i);
+    // Nothing to restore: this send is the one that worked.
+    expect(el<HTMLInputElement>("input").value).toBe("");
+    expect(blockingDialog).not.toHaveBeenCalled();
+  });
+
+  test("an install npm refused says what npm said, and the row still offers it", async () => {
+    // The answer to "what did that do to my machine" is npm's own, so it is
+    // carried rather than summarised. And the offer survives the refusal: a
+    // row that has gone quiet after a failed install is a row somebody has to
+    // restart the application to use.
+    const { bridge } = await openTheClient({ bridge: aBridge({
+      definitions: () => [ { name: "codex", command: "codex-acp", args: [] } ],
+      isRunning: () => false,
+      stateOf: () => "missing",
+      install: vi.fn(async () => ({ ok: false, code: 1, stdoutTail: "",
+                                    stderrTail: "npm ERR! 404 not found" })),
+    }) });
+    const offer = () => document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1];
+
+    offer().click();
+    await settle();
+
+    expect(bridge.install).toHaveBeenCalled();
+    expect(notices()).toContain("npm ERR! 404 not found");
+    expect(offer().textContent).toBe("Install");
+    expect(offer().disabled).toBe(false);
+    expect(blockingDialog).not.toHaveBeenCalled();
+  });
+
+  test("a code the server would not take is a notice, and the code survives it", async () => {
+    // A code arrives out of band — from a message, a call, a piece of paper —
+    // and is typed once. Losing it to a failed redemption costs the person the
+    // invitation, not the attempt.
+    const { server } = await openTheClient({ server: aServer({
+      acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
+    }) });
+    el("workspace-join").click();
+    await settle();
+    el<HTMLInputElement>("join-code").value = "abc-123";
+
+    el<HTMLDialogElement>("join").close("go");
+    await settle();
+
+    expect(server.acceptInvitation).toHaveBeenCalledWith("abc-123");
+    expect(notices()).toContain("that code is spent");
+    expect(el<HTMLInputElement>("join-code").value).toBe("abc-123");
+    expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
 
