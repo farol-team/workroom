@@ -24,9 +24,15 @@ module Api
         # However memory was written — by an agent through the rail or by a
         # person here — the room's journal is one entry longer. A record that
         # only knows about the agent's writes describes half a room.
+        # The detail travels with it. A journal saying only that the room learned
+        # something exports as a heading with nothing under it, and reading the
+        # text back from the store later is not open to the mirror: by then the
+        # entry may be superseded, and the store rightly answers with what the
+        # room knows now rather than what it was told then.
         RecordStore::Append.call(
           channel: channel!, kind: "memory", subject: nil,
-          payload: { action: "written", uri: entry.uri, title:, trust:, author_id: current_user.id }
+          payload: { action: "written", uri: entry.uri, title:, detail: entry.detail, trust:,
+                     author_id: current_user.id }
         )
         render json: serialize(entry), status: :created
       end
