@@ -1126,7 +1126,13 @@ async function openTheClient(
   return { server, bridge, shell };
 }
 
-const notices = () => document.getElementById("notices")!.textContent ?? "";
+/// What the room is saying, read as the notices `say()` puts up rather than as
+/// the strip's text. The difference is the whole point of the card: a failure
+/// has to arrive on the surface the room already uses for everything it tells
+/// somebody, and text written into that dock any other way is not that.
+const notices = () =>
+  [ ...document.querySelectorAll<HTMLElement>("#notices .notice") ]
+    .map((notice) => notice.textContent ?? "").join("\n");
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const submit = (id: string) =>
   el(id).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -1379,28 +1385,45 @@ describe("what the room says when something goes wrong", () => {
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("a browser sign-in that fails is said in the room", async () => {
+  test("a browser sign-in that fails is a notice, and the door is still open", async () => {
     // The one failure that happens with a modal already on screen — and the
-    // notice strip is behind it, in the room this person cannot see yet. It
-    // still goes there: the dialog closes when they are through, and a native
-    // dialog on top of a dialog is the worst of both.
-    const { shell } = await openTheClient(
+    // notice strip is behind it, in a room this person cannot see yet. It goes
+    // there anyway: a native dialog on top of a dialog is the worst of both,
+    // and the strip is what they read the moment the sign-in closes.
+    //
+    // Two things, and neither of them is a sentence: it arrives as a notice
+    // rather than as something that stops the window, and it carries what
+    // failed. The way back is the button they already pressed, so what makes
+    // the failure survivable is that pressing it again asks again.
+    const shell = aShell({ invoke: vi.fn(async () => { throw new Error("the browser said no"); }) });
+    await openTheClient(
       { server: aServer({ methods: vi.fn(async () => ({ development: true, provider: true, version: "0.1.0" })) }),
-        shell: aShell({ invoke: vi.fn(async () => { throw new Error("the browser said no"); }) }) },
-      async () => { el("signin-provider").click(); await settle(); },
-    );
+        shell },
+      async () => {
+        el("signin-provider").click();
+        await settle();
 
-    expect(shell.invoke).toHaveBeenCalled();
-    expect(notices()).toContain("the browser said no");
-    expect(blockingDialog).not.toHaveBeenCalled();
+        expect(shell.invoke).toHaveBeenCalledTimes(1);
+        expect(notices()).toContain("the browser said no");
+        expect(blockingDialog).not.toHaveBeenCalled();
+
+        expect(el<HTMLButtonElement>("signin-provider").disabled).toBe(false);
+        el("signin-provider").click();
+        await settle();
+
+        expect(shell.invoke).toHaveBeenCalledTimes(2);
+      },
+    );
   });
 
-  test("an agent nobody started is a notice, and the room already has the message", async () => {
-    // The one failure here that is not the server's or the machine's: the
+  test("an agent nobody started is a notice that starts it", async () => {
+    // The one failure here that is neither the server's nor the machine's: the
     // person addressed an agent that is not running. Their message went to the
     // room before the agent was ever asked, so the notice is about the agent
-    // alone — it has to name which one and what to press, because "your agent"
-    // is three rows in a panel and pressing the wrong one changes nothing.
+    // alone — it names which one, because "your agent" is three rows in a
+    // panel, and it carries the way out rather than describing it. What the
+    // remedy is worded as is the room's business; that pressing it starts the
+    // agent that was addressed is not.
     const { server, bridge } = await openTheClient({ bridge: aBridge({ isRunning: () => false }) });
     el<HTMLInputElement>("input").value = "@claude what did we agree?";
 
@@ -1411,17 +1434,21 @@ describe("what the room says when something goes wrong", () => {
     expect(server.startRun).not.toHaveBeenCalled();
     expect(bridge.sessionFor).not.toHaveBeenCalled();
     expect(notices()).toMatch(/claude/i);
-    expect(notices()).toMatch(/start/i);
     // Nothing to restore: this send is the one that worked.
     expect(el<HTMLInputElement>("input").value).toBe("");
     expect(blockingDialog).not.toHaveBeenCalled();
+
+    document.querySelector<HTMLButtonElement>("#notices .notice button")!.click();
+    await settle();
+
+    expect(bridge.start).toHaveBeenCalledWith("claude");
   });
 
-  test("an install npm refused says what npm said, and the row still offers it", async () => {
+  test("an install npm refused says what npm said, and can be pressed again", async () => {
     // The answer to "what did that do to my machine" is npm's own, so it is
-    // carried rather than summarised. And the offer survives the refusal: a
-    // row that has gone quiet after a failed install is a row somebody has to
-    // restart the application to use.
+    // carried rather than summarised. And the offer survives the refusal: a row
+    // that has gone quiet after a failed install is one somebody has to restart
+    // the application to use, so the way to know it survived is to use it.
     const { bridge } = await openTheClient({ bridge: aBridge({
       definitions: () => [ { name: "codex", command: "codex-acp", args: [] } ],
       isRunning: () => false,
@@ -1434,17 +1461,22 @@ describe("what the room says when something goes wrong", () => {
     offer().click();
     await settle();
 
-    expect(bridge.install).toHaveBeenCalled();
+    expect(bridge.install).toHaveBeenCalledTimes(1);
     expect(notices()).toContain("npm ERR! 404 not found");
-    expect(offer().textContent).toBe("Install");
-    expect(offer().disabled).toBe(false);
     expect(blockingDialog).not.toHaveBeenCalled();
+
+    expect(offer().disabled).toBe(false);
+    offer().click();
+    await settle();
+
+    expect(bridge.install).toHaveBeenCalledTimes(2);
   });
 
   test("a code the server would not take is a notice, and the code survives it", async () => {
     // A code arrives out of band — from a message, a call, a piece of paper —
     // and is typed once. Losing it to a failed redemption costs the person the
-    // invitation, not the attempt.
+    // invitation rather than the attempt, so what survives is the way back in:
+    // the code is still in the field, and sending it again is one press.
     const { server } = await openTheClient({ server: aServer({
       acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
     }) });
@@ -1564,7 +1596,8 @@ describe("a turn that fails at the end", () => {
     expect(saidByTheAgent(server)).toContain("here you go");
     expect(saidByTheAgent(server).some((body) => /agent error/i.test(body))).toBe(false);
     expect(server.finishRun).toHaveBeenCalledWith(7, "succeeded");
-    expect(notices()).toMatch(/reply/i);
+    // What the room says about it is the room's wording; that it says anything
+    // at all, and says what failed, is not.
     expect(notices()).toContain("500 not written");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
