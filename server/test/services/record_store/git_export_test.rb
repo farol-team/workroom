@@ -667,11 +667,16 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # A room in a workspace this connection has not entered. Without entering it
   # the slug resolves to nothing, and the run that mirrors nothing is the run
   # that reports success.
+  #
+  # The slug is minted, not "marketing": CI's db:prepare seeds the test
+  # database (the seeded room has a marketing channel), so a slug from the
+  # seeds would be ambiguous here for reasons this test is not about.
   test "the task enters a workspace to find its rooms" do
+    slug = "mkt-#{SecureRandom.hex(3)}"
     theirs = workspace(name: "Globex")
-    room_in(theirs, slug: "marketing")
+    room_in(theirs, slug:)
 
-    run = run_task("marketing", @path)
+    run = run_task(slug, @path)
 
     assert_not run.aborted, "#{run.out}#{run.err}"
     assert_equal 1, shas.length, "the room was found, entered, and mirrored"
