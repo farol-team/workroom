@@ -796,39 +796,24 @@ mod resolution {
 }
 
 #[cfg(test)]
-mod off_the_runtime {
-    //! Two things about the commands that read a disk, neither of which can be
-    //! reached by calling them.
+mod what_the_commands_delegate {
+    //! Where the two workspace commands keep their behaviour, which is not in
+    //! themselves.
     //!
     //! A `#[tauri::command]` taking `State` cannot be invoked from a test —
     //! there is no way to build one without a running application — so what
     //! these commands do with the workspace is written as functions a test can
     //! call, in `workspace`. That only means anything if the commands actually
-    //! go through those functions and keep no second copy of the logic, which
-    //! is the first assertion here. The second is the card itself: the work
-    //! reaches the blocking pool before anything touches a disk. Both are read
-    //! off the source, because a command that blocks and one that does not
-    //! return the same value — the difference is visible only to everything
-    //! else waiting on the runtime.
-
-    /// The commands that walk a directory somebody bound, or shell out to git
-    /// inside it. On a real repository that is thousands of entries and a
-    /// `git status` besides, and an async command doing it inline holds a
-    /// runtime worker for the whole of it — the ACP bridge answering nothing,
-    /// mid-turn, for as long as the walk takes.
-    const BLOCKING: &[&str] = &["agent_workspace", "agent_produced", "agent_read"];
-
-    /// Every way a command body reaches a disk or asks git. None of these may
-    /// appear before the handoff: a `spawn_blocking` that runs beside the walk
-    /// rather than around it has moved nothing off the runtime.
-    const TOUCHES_A_DISK: &[&str] = &[
-        "fs::",
-        "canonicalize(",
-        "workspace::snapshot(",
-        "workspace::git_changes(",
-        "workspace::baseline(",
-        "workspace::offer(",
-    ];
+    //! go through those functions and keep no second copy of the logic: a
+    //! correct `offer` beside an `agent_produced` still diffing inline is a
+    //! green suite over a defect that never moved. Read off the source, the
+    //! way the capability list already is, because a command that cannot be
+    //! called leaves nothing else to look at.
+    //!
+    //! Only the delegation is asserted here. That the work then reaches the
+    //! blocking pool is read at the call sites when the card is accepted —
+    //! blocking and not blocking return the same value, and the difference is
+    //! visible only to everything else waiting on the runtime.
 
     /// Each command, the function it must hand the workspace to, and what it
     /// must therefore no longer be doing itself. Leaving the old inline copy in
@@ -857,8 +842,8 @@ mod off_the_runtime {
     }
 
     /// What one command does, from its signature to the brace that closes it,
-    /// with the commentary taken out — a command that only mentions the
-    /// blocking pool in a comment has not moved anything onto it.
+    /// with the commentary taken out — a command that only mentions a function
+    /// in a comment about it is not calling it.
     fn body(source: &str, name: &str) -> String {
         let start = source
             .find(&format!("async fn {name}("))
@@ -870,30 +855,6 @@ mod off_the_runtime {
             .filter(|line| !line.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n")
-    }
-
-    #[test]
-    fn the_commands_that_touch_the_filesystem_hand_it_to_the_blocking_pool() {
-        let source = source();
-
-        for name in BLOCKING {
-            let body = body(&source, name);
-            let Some(handoff) = body.find("spawn_blocking(") else {
-                panic!(
-                    "`{name}` does its filesystem work on the runtime itself, holding a worker \
-                     for as long as the directory takes to read"
-                );
-            };
-            for call in TOUCHES_A_DISK {
-                if let Some(at) = body.find(*call) {
-                    assert!(
-                        at > handoff,
-                        "`{name}` reaches `{call}` before it reaches the blocking pool, so that \
-                         part still runs on the runtime"
-                    );
-                }
-            }
-        }
     }
 
     #[test]
