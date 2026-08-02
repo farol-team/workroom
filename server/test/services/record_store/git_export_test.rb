@@ -135,6 +135,13 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
       assert_equal entry.created_at.utc.iso8601, authored_at(sha).utc.iso8601
       assert_equal entry.created_at.utc.iso8601, committed_at(sha).utc.iso8601
     end
+
+    # The front matter's `recorded` is the same fact in the file itself. Outside
+    # a travel_to it would sit milliseconds from export time, and an export that
+    # stamped the file "now" would pass — here "now" and "recorded" are three
+    # months apart.
+    front = front_matter(read("memory/acme-wants-monthly-reporting.md"))
+    assert_in_delta entries.second.created_at, front["recorded"].to_time, 5
   end
 
   # The shape spike #45 printed: readable markdown, and every field a memory
@@ -262,7 +269,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     already = shas
 
     posted(body: "Tuesday works")
-    artifact(name: "agenda.md")
+    last = artifact(name: "agenda.md")
     second = RecordStore::GitExport.call(@channel, path: @path)
 
     assert_equal 2, first.entries_exported
@@ -270,6 +277,13 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal 4, shas.length
     assert_equal already, shas.first(2), "the mirror fast-forwards; it does not rewrite"
     assert_equal shas.last, second.head_sha
+
+    # The state file is what the next run resumes from, so it must have moved:
+    # left at the first export's seq, a third run would re-commit seq 3 and 4
+    # and duplicate the month's lines.
+    state = JSON.parse(read(STATE_FILE))
+    assert_equal last.seq, state["last_seq"]
+    assert_equal last.entry_hash, state["last_hash"]
   end
 
   test "an export with nothing new to say writes no commit" do
@@ -517,6 +531,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
     written = git("ls-files").split("\n").grep(%r{\Aartifacts/})
     assert_equal 1, written.length
+    assert_equal 1, written.first.count("/"),
+                 "one file directly under artifacts/ — not the server's own path rebuilt inside the repo"
+    assert_includes written.first, "absolute-escape"
     assert_equal content, read(written.first)
 
     assert_no_strays
