@@ -16,7 +16,11 @@ class Api::V1::ChannelsControllerLoadTest < ActionDispatch::IntegrationTest
   # grow with the room; these say it was not traded for a fixed cost nobody
   # notices — a fix that removes one query per message and adds ten per request
   # satisfies every equality in this file and none of these.
-  SIDEBAR_CEILING = 10
+  #
+  # Both sit under what the unfixed code pays for the same request (a sidebar of
+  # three rooms costs 10 today, an opened room of twelve messages 25), so a
+  # ceiling here forbids something rather than describing what is already there.
+  SIDEBAR_CEILING = 9
   ROOM_CEILING = 18
 
   setup { @alice = user(name: "Alice") }
@@ -37,12 +41,18 @@ class Api::V1::ChannelsControllerLoadTest < ActionDispatch::IntegrationTest
 
   test "the sidebar counts every room, including the one nobody has spoken in" do
     channel(slug: "silent", name: "A Silent")
-    3.times { |i| room_where_somebody_spoke("busy-#{i}") }
+    3.times { |i| room_where_somebody_spoke("busy-#{i}", said: i + 1) }
 
     get api_v1_channels_path, headers: auth(@alice)
 
     assert_response :success
-    assert_equal [ 0, 2, 2, 2 ], response.parsed_body.map { |c| c["message_count"] },
+    # A different number in every room, so a count handed to the wrong one is a
+    # different answer and not the same one. One query for the whole sidebar
+    # means the counts arrive keyed by channel and have to be matched back, and
+    # three rooms holding two apiece could not tell a mis-keyed hash from a
+    # correct one. The room nobody has spoken in is the other half: it has no
+    # key in that hash at all, and what it must still render is 0.
+    assert_equal [ 0, 1, 2, 3 ], response.parsed_body.map { |c| c["message_count"] },
                  "a room nobody has spoken in has said nothing, which is a number and not an absence"
   end
 
@@ -85,9 +95,9 @@ class Api::V1::ChannelsControllerLoadTest < ActionDispatch::IntegrationTest
 
   private
 
-  def room_where_somebody_spoke(slug)
+  def room_where_somebody_spoke(slug, said: 2)
     room = channel(slug: slug, name: slug.titleize)
-    2.times { |n| room.messages.create!(author: @alice, body: "said #{n}") }
+    said.times { |n| room.messages.create!(author: @alice, body: "said #{n}") }
     room
   end
 
