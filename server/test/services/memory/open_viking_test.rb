@@ -96,6 +96,9 @@ class Memory::OpenVikingTest < ActiveSupport::TestCase
 
     refute @store.all(@channel).any? { |e| e.uri.split("/").last.start_with?(".") },
            "the sidecar is bookkeeping, not something the room said"
+    # `count` is the listing's own number: one entry was written, and a store
+    # that counts the sidecar among what the room knows inflates it.
+    assert_equal 1, @store.count(@channel), "the sidecar is not part of the listing either"
     found = eventually { @store.search(@channel, "reporting cadence") }
     refute found.any? { |e| e.uri.split("/").last.start_with?(".") },
            "a sidecar answering a search is the entry's provenance pretending to be the entry"
@@ -282,15 +285,32 @@ class Memory::OpenVikingSidecarTest < ActiveSupport::TestCase
                     "the move was tried, and its failure tolerated like a tag that did not stick"
   end
 
+  # The journal is the source of truth and the sidecar only its index: a store
+  # that refuses the sidecar must not refuse the fact. Same rescue idiom as
+  # `tag` — an index that did not stick is not a failed write.
+  test "a sidecar the store refused to write is not an error" do
+    uri = "viking://resources/channels/meetings/cadence.md"
+
+    requests = recording(fail_sidecar_write: true) do |store|
+      assert_nothing_raised do
+        store.annotate(uri, seq: 3, entry_hash: "ab" * 32, action: "remember")
+      end
+    end
+
+    attempted = requests.select { |r| r[:path] == "/api/v1/content/write" }
+    assert_equal 1, attempted.length, "the write was tried, and its refusal swallowed"
+    assert_equal "viking://resources/channels/meetings/.cadence.meta.json", attempted.first[:body]["uri"]
+  end
+
   private
 
-  def recording(existing: [], fail_sidecar_mv: false)
+  def recording(existing: [], fail_sidecar_mv: false, fail_sidecar_write: false)
     requests = []
     server = TCPServer.new("127.0.0.1", 0)
     thread = Thread.new do
       while (socket = server.accept)
         begin
-          answer(socket, requests, existing, fail_sidecar_mv)
+          answer(socket, requests, existing, fail_sidecar_mv, fail_sidecar_write)
         rescue IOError, SystemCallError
           nil # the client hung up first; the test is not about this socket
         ensure
@@ -306,7 +326,7 @@ class Memory::OpenVikingSidecarTest < ActiveSupport::TestCase
     server&.close
   end
 
-  def answer(socket, requests, existing, fail_sidecar_mv)
+  def answer(socket, requests, existing, fail_sidecar_mv, fail_sidecar_write)
     request_line = socket.gets
     return unless request_line
 
@@ -328,6 +348,8 @@ class Memory::OpenVikingSidecarTest < ActiveSupport::TestCase
       payload = { result: "---\ntitle: Cadence\n---\n\n# Cadence\n\nWeekly.\n" }.to_json
     elsif uri.path == "/api/v1/fs/mv" && fail_sidecar_mv && json["from_uri"].to_s.end_with?(".meta.json")
       payload = { status: "error", error: { message: "no such file" } }.to_json
+    elsif uri.path == "/api/v1/content/write" && fail_sidecar_write && json["uri"].to_s.end_with?(".meta.json")
+      payload = { status: "error", error: { message: "read-only filesystem" } }.to_json
     end
 
     socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \

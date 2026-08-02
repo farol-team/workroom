@@ -139,14 +139,19 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
   # subject here; what the OpenViking adapter does with it is pinned in
   # open_viking_test.rb against the wire.
   test "what a person records is annotated with the journal lineage" do
-    store = Memory::Store.current
+    # The seam is swapped process-wide, like everywhere else in this file: a
+    # request runs in its own execution context, and a store pinned to this
+    # thread's `Current` never reaches the controller.
+    store = Memory::Local.new
     annotations = []
     store.define_singleton_method(:annotate) { |uri, **lineage| annotations << [ uri, lineage ] }
 
-    post api_v1_channel_memory_path(@channel.slug),
-         params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
-         headers: auth(@alice).merge(@json)
-    assert_response :created
+    with_store(store) do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+           headers: auth(@alice).merge(@json)
+      assert_response :created
+    end
 
     record = @channel.channel_records.order(:seq).last
     assert_equal 1, annotations.length, "a write the server witnessed is annotated"

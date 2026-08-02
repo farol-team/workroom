@@ -328,6 +328,26 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert_equal "supersede", meta["action"]
   end
 
+  # The journal is the source of truth and the sidecar only its index, so a
+  # store that refuses the sidecar must not refuse the remember: the entry was
+  # written, the record was appended, and the agent is told so.
+  test "a sidecar the store refused does not turn a remember into an error" do
+    requests = nil
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      requests = with_recording_store(fail_sidecar_write: true) do
+        rpc("tools/call", { name: "execute_capability", arguments: {
+          uri: "workroom://memory/remember",
+          args: { title: "Pricing objection", detail: "Setup cost, not price." } } })
+        assert_response :success
+      end
+    end
+
+    sidecar = requests.find { |r| r[:path] == "/api/v1/content/write" &&
+                                  r[:body]["uri"].to_s.end_with?(".meta.json") }
+    refute_nil sidecar, "the sidecar was tried, and its refusal swallowed"
+  end
+
   private
 
   # The OpenViking adapter pointed at a server that answers the minimum and
@@ -335,13 +355,13 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
   # anything else reads as not there, which is what `write` relies on to keep
   # a key's first name. The store seam is process-wide, so it is put back
   # rather than left pointing at a dead server.
-  def with_recording_store(existing: [])
+  def with_recording_store(existing: [], fail_sidecar_write: false)
     requests = []
     server = TCPServer.new("127.0.0.1", 0)
     thread = Thread.new do
       while (socket = server.accept)
         begin
-          answer_store(socket, requests, existing)
+          answer_store(socket, requests, existing, fail_sidecar_write)
         rescue IOError, SystemCallError
           nil # the client hung up first; the test is not about this socket
         ensure
@@ -360,7 +380,7 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     server&.close
   end
 
-  def answer_store(socket, requests, existing)
+  def answer_store(socket, requests, existing, fail_sidecar_write)
     request_line = socket.gets
     return unless request_line
 
@@ -380,6 +400,8 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     payload = "{}"
     if uri.path == "/api/v1/content/read" && existing.include?(params["uri"])
       payload = { result: "---\ntitle: Stale\n---\n\n# Stale\n\nOutdated.\n" }.to_json
+    elsif uri.path == "/api/v1/content/write" && fail_sidecar_write && json["uri"].to_s.end_with?(".meta.json")
+      payload = { status: "error", error: { message: "read-only filesystem" } }.to_json
     end
     socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
                  "Content-Length: #{payload.bytesize}\r\nConnection: close\r\n\r\n#{payload}")
