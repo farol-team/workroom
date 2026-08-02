@@ -119,6 +119,18 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
                  "a multi-line message is still one JSON line"
   end
 
+  # git folds a non-blank-separated newline into the subject, so truncating the
+  # body to 60 chars is not "the first line": with a short first line the two
+  # rules part ways, and `git log --oneline` reads as the run-on noise this
+  # suite's subjects exist to prevent.
+  test "a message's subject is its first line, not the first 60 characters" do
+    posted(body: "Tuesday works\nLet's do 3pm")
+
+    RecordStore::GitExport.call(@channel, path: @path)
+
+    assert_equal "Tuesday works", subject_of(shas.last)
+  end
+
   # The Behavior contract is that `git log` answers when the room learned
   # something. Left to git, every commit is dated when the export ran, and a
   # mirror of two years of work reads as a single afternoon — worse, the second
@@ -308,7 +320,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   end
 
   test "an export with nothing new to say writes no commit" do
-    posted(body: "shall we meet Tuesday")
+    said = posted(body: "shall we meet Tuesday")
     RecordStore::GitExport.call(@channel, path: @path)
     head = shas.last
 
@@ -317,6 +329,8 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal 0, again.entries_exported
     assert_equal [ head ], shas
     assert_equal head, again.head_sha
+    assert_equal 1, read("messages/#{month_of(said)}.jsonl").lines.length,
+                 "a no-op run touches nothing — the month's file is exactly as the first run left it"
   end
 
   # The one thing a mirror must never do quietly: fork from the journal it
@@ -615,6 +629,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_not run.aborted, "#{run.out}#{run.err}"
     assert_equal 1, shas.length
     assert_equal "shall we meet Tuesday", subject_of(shas.last)
+    assert_includes run.out, "meetings"
+    assert_includes run.out, "1 entries",
+                    "the run reports what it did — a cron's silence reads as nothing happened"
   end
 
   # A room in a workspace this connection has not entered. Without entering it
