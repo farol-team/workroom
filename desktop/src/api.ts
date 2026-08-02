@@ -13,13 +13,7 @@ export interface Channel {
   id: number; slug: string; name: string; purpose: string | null;
   visibility: string; memory_uri: string;
   message_count: number;
-  /// Only when a room is opened. The listing cannot carry it without asking the
-  /// context store once per channel, and nothing in the sidebar renders it.
-  memory_count?: number;
 }
-
-export { ADDRESS, parseAddress } from "./rules";
-export type { RoomTemplate } from "./rules";
 
 import type { RoomTemplate } from "./rules";
 
@@ -164,12 +158,6 @@ export class Api {
   memory(slug: string) {
     return this.call<Array<{ uri: string; title: string; overview: string; trust: string }>>(
       `/channels/${slug}/memory`);
-  }
-
-  remember(slug: string, title: string, detail: string) {
-    return this.call(`/channels/${slug}/memory`, {
-      method: "POST", body: JSON.stringify({ title, detail, trust: "human" }),
-    });
   }
 
   /// `parentId` makes it a reply: the room shows a summary, the conversation

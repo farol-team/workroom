@@ -214,8 +214,6 @@ export class Agents {
     return invoke<string | null>("agent_export_session", { sessionId, command });
   }
 
-  sessionIdFor(name: string, slug: string) { return this.sessions.get(sessionKey(name, slug)); }
-
   prompt(name: string, sessionId: string, text: string,
          context: string | null, history: string | null = null) {
     return invoke<{ stopReason?: string }>("agent_prompt",

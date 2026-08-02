@@ -109,10 +109,6 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 #composer #destination.to-agent { color: var(--agent); }
 #composer #summon { font-family: inherit; }
 
-.presence { font-size: 12px; color: var(--muted); font-style: italic; padding-left: 46px; }
-.vis select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
-
 .plan { margin-left: 46px; border-left: 2px solid var(--accent); padding: 6px 0 6px 10px;
   font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
 .plan-entry { color: var(--muted); }
@@ -140,8 +136,6 @@ aside#memory header.sub { border-top: 1px solid var(--line); margin-top: 8px; }
   position: relative; }
 .day::before { content: ""; position: absolute; left: 0; right: 0; top: 50%;
   border-top: 1px solid var(--line); z-index: 0; }
-.day { }
-.day::after { content: attr(data-day); display: none; }
 
 /* An empty room says what it is for. */
 .intro { color: var(--muted); padding: 24px 16px; white-space: pre-wrap; max-width: 56ch; }
@@ -232,7 +226,10 @@ button.template:disabled { cursor: default; opacity: .5; }
 #agents-dialog form { display: flex; flex-direction: column; gap: .6rem; min-width: 26rem; }
 #agents { display: flex; flex-direction: column; gap: 8px; }
 .agent-row { display: flex; align-items: center; gap: 10px; }
-.agent-row .agent-name { font-weight: 600; }
+.agent-row .agent-name { font-weight: 600; background: none; border: 0; padding: 0;
+  font-family: inherit; font-size: inherit; color: var(--text); cursor: pointer; }
+/* The one this person addresses, said in the sidebar's own colour. */
+.agent-row .agent-name.chosen { color: var(--accent); }
 .agent-row .muted { flex: 1; }
 #agents > code { display: block; font-size: 11px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
