@@ -19,7 +19,6 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 let channels: Channel[] = [];
 let current: Channel | null = null;
 let socket: Live | null = null;
-let me = "";   // who is signed in, so a workspace belongs to a person
 
 // ---------- rendering ----------
 
@@ -57,7 +56,7 @@ const panel = createAgentsPanel({
   openSession: async (name) => {
     if (!current) return;
     const dir = boundFolder(current.slug, bindings)
-      ?? await agents.workspace(me, name, current.slug);
+      ?? await agents.workspace(rooms.current!, current.slug);
     await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
   },
   onTrouble: (message) => alert(message),
@@ -251,7 +250,7 @@ async function send(text: string) {
   const { context, boundary, store } = await api.context(current.slug);
   const history = timeline.recentHistory();
   const workspace = boundFolder(current.slug, bindings)
-    ?? await agents.workspace(me, name, current.slug);
+    ?? await agents.workspace(rooms.current!, current.slug);
   const sessionId = await agents.sessionFor(name, current.slug, workspace,
                                             api.rail(current.slug), store);
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
@@ -721,7 +720,6 @@ async function boot() {
   const { user } = signedInThroughBrowser
     ? await api.whoAmI()
     : await api.signIn($<HTMLInputElement>("email").value.trim());
-  me = user.email;
   $("who").textContent = user.name;
 
   // Signing in is where a token for a room arrives. The other place is making

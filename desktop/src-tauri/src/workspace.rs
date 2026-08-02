@@ -1,8 +1,8 @@
 //! Where a session works, and what it produced there.
 //!
-//! The directory is derived from who is working, with which agent, in which
-//! channel — never chosen by the agent. An agent that could name its own
-//! working directory could name someone else's.
+//! The directory is derived from the workspace and the channel — never
+//! chosen by the agent. An agent that could name its own working directory
+//! could name someone else's.
 
 use std::collections::HashMap;
 use std::fs;
@@ -30,12 +30,11 @@ fn segment(raw: &str) -> String {
     }
 }
 
-/// A person, an agent, and a channel each get their own directory. Two channels
-/// never share one, and neither do two agents in the same channel.
-pub fn workspace_path(root: &Path, user: &str, agent: &str, channel: &str) -> PathBuf {
-    root.join(segment(user))
-        .join(segment(agent))
-        .join(segment(channel))
+/// A workspace and a channel each get their own directory. Two channels never
+/// share one; two agents in the same channel share it, because they are
+/// working on the same thing (#201).
+pub fn workspace_path(root: &Path, workspace: &str, channel: &str) -> PathBuf {
+    root.join(segment(workspace)).join(segment(channel))
 }
 
 /// What a directory held at a moment: each file, its size and its modified time.
@@ -353,34 +352,36 @@ mod tests {
     }
 
     #[test]
-    fn each_person_agent_and_channel_gets_its_own_directory() {
+    fn each_workspace_and_channel_gets_its_own_directory() {
+        // ~/WorkRoom/<workspace>/<channel> — home is already per-person,
+        // and two agents in one channel work on one thing, so neither gets
+        // a path level of its own (#201).
         let root = Path::new("/data");
         assert_eq!(
-            workspace_path(root, "alice", "opencode", "meetings"),
-            PathBuf::from("/data/alice/opencode/meetings")
+            workspace_path(root, "farol", "meetings"),
+            PathBuf::from("/data/farol/meetings")
         );
         assert_ne!(
-            workspace_path(root, "alice", "opencode", "meetings"),
-            workspace_path(root, "alice", "claude", "meetings"),
+            workspace_path(root, "farol", "meetings"),
+            workspace_path(root, "farol", "marketing"),
         );
         assert_ne!(
-            workspace_path(root, "alice", "opencode", "meetings"),
-            workspace_path(root, "bob", "opencode", "meetings"),
+            workspace_path(root, "farol", "meetings"),
+            workspace_path(root, "acme", "meetings"),
         );
     }
 
     #[test]
     fn a_name_cannot_climb_out_of_its_directory() {
-        // The channel slug arrives from the server, and the agent name from a
-        // file the person edits. Neither may become a path.
+        // Both slugs arrive from the server. Neither may become a path.
         let root = Path::new("/data");
-        let escaped = workspace_path(root, "alice", "opencode", "../../.ssh");
+        let escaped = workspace_path(root, "farol", "../../.ssh");
 
-        assert!(escaped.starts_with("/data/alice/opencode"), "{escaped:?}");
-        assert_eq!(escaped.components().count(), 5);
+        assert!(escaped.starts_with("/data/farol"), "{escaped:?}");
+        assert_eq!(escaped.components().count(), 4);
         assert_eq!(
-            workspace_path(root, "..", "..", ".."),
-            PathBuf::from("/data/unnamed/unnamed/unnamed"),
+            workspace_path(root, "..", ".."),
+            PathBuf::from("/data/unnamed/unnamed"),
             "a name that is nothing but dots is not a directory name"
         );
     }

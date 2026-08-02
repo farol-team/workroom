@@ -205,8 +205,11 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
 }
 
 /// Open the working directory for this session and remember what was in it.
-/// The path is derived from who is working, with which agent, in which channel —
-/// the agent never names its own directory.
+/// The path is derived from the workspace and the channel — the agent never
+/// names its own directory. The root is `~/WorkRoom`: where an agent spends
+/// its days is work, and work should be visible in Finder, not hidden in
+/// app-data like a cache — and it stays out of iCloud's Documents domain,
+/// whose file eviction would corrupt an agent's working tree (#201).
 ///
 /// Everything here reads a disk, so it happens on the blocking pool. An async
 /// command that walks a directory inline holds a runtime worker for as long as
@@ -215,18 +218,17 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
 #[tauri::command]
 async fn agent_workspace(
     app: AppHandle,
-    user: String,
-    name: String,
+    workspace: String,
     channel: String,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let root = app
             .path()
-            .app_data_dir()
-            .map_err(|e| format!("no app data directory: {e}"))?
-            .join("workspaces");
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
 
-        let dir = workspace::workspace_path(&root, &user, &name, &channel);
+        let dir = workspace::workspace_path(&root, &workspace, &channel);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 

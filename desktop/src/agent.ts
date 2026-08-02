@@ -69,10 +69,10 @@ export class Agents {
     return profile ? stateOfProfile(profile, where) : where ? "ready" : "missing";
   }
 
-  /// Where this session works. Derived from who is working, with which agent,
-  /// in which channel — the agent never names its own directory.
-  workspace(user: string, name: string, channel: string) {
-    return invoke<string>("agent_workspace", { user, name, channel });
+  /// Where this session works: `~/WorkRoom/<workspace>/<channel>`, derived
+  /// from the room — the agent never names its own directory.
+  workspace(room: string, channel: string) {
+    return invoke<string>("agent_workspace", { workspace: room, channel });
   }
 
   /// Mark where a turn begins, so the offer can tell the run's work from

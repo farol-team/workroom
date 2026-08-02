@@ -255,9 +255,12 @@ An agent writes files to its working directory by default. Left alone, results s
 laptop and a colleague sees the conversation without its output.
 
 The rule is that work product goes to the channel. Each session has a working directory
-scoped to its (user, agent, channel) triple, **derived rather than chosen** — an agent that
-could name its own working directory could name someone else's. A channel slug that looks
-like a path does not become one.
+scoped to its channel, rooted at `~/WorkRoom/<workspace>/<channel>/` — **derived rather
+than chosen**: an agent that could name its own working directory could name someone
+else's, and a channel slug that looks like a path does not become one. The root is a
+visible place on purpose — where an agent spends its days is work, not cache — and it
+stays out of iCloud's Documents domain, whose file eviction and partial `.git` sync
+would corrupt an agent's working tree.
 
 A channel may instead be **bound** to a folder somebody already has. `cwd` in ACP is the
 project root — an agent reads its conventions from there, and the code being asked about lives
