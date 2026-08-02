@@ -16,9 +16,10 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const bin = (name) => resolve(here, "../node_modules/.bin", name);
 
-/// Only agents this repository pins. An agent fetched at run time is #120's
-/// subject, and a matrix built from one is a matrix about whatever was
-/// published this morning.
+/// Only agents this repository pins, at the version it pins them to — which is
+/// why the adapter is a devDependency here and nowhere near the application
+/// (#120). What people install is fetched on a press and moves; a matrix built
+/// from whatever was published this morning is a matrix about this morning.
 const AGENTS = [
   { name: "claude", command: bin("claude-agent-acp"), args: [] },
 ];

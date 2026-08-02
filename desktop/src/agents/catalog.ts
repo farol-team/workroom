@@ -10,12 +10,10 @@ export interface AgentProfile {
   label: string;
   command: string;
   args: string[];
-  /// Whether it comes in the bundle. The one that does is there before anything
-  /// is looked for, and is never offered an install (#120).
-  shipped: boolean;
-  /// What to fetch, for the ones that are not carried. Named here rather than
-  /// in the panel, so the state and the offer cannot disagree.
-  package?: string;
+  /// What to fetch. Nothing rides along in the application, so every agent has
+  /// one — named here rather than in the panel, so the state and the offer
+  /// cannot disagree.
+  package: string;
   docsUrl: string;
 }
 
@@ -23,8 +21,10 @@ export interface AgentProfile {
 /// guess: either the command is on this machine or it is not.
 export type AgentState = "ready" | "missing";
 
-/// The three, in the order they are shown. The shipped one leads because it is
-/// the one that is certainly there.
+/// The three, in the order they are shown. Claude leads because it is the one
+/// `@agent` addresses when nobody has said otherwise — not because it is more
+/// present than the others. None of them is: this application carries no agent,
+/// and each arrives the same way, on a press.
 ///
 /// Commands and packages verified against the registry on 2026-08-01 — the
 /// command is the one `npm view <package> bin` reports, which is what ends up
@@ -33,16 +33,17 @@ export type AgentState = "ready" | "missing";
 export const BASELINE: AgentProfile[] = [
   {
     name: "claude", label: "Claude", command: "claude-agent-acp", args: [],
-    shipped: true, docsUrl: "https://docs.claude.com/en/docs/claude-code/overview",
+    package: "@agentclientprotocol/claude-agent-acp",
+    docsUrl: "https://docs.claude.com/en/docs/claude-code/overview",
   },
   {
     name: "codex", label: "Codex", command: "codex-acp", args: [],
-    shipped: false, package: "@agentclientprotocol/codex-acp",
+    package: "@agentclientprotocol/codex-acp",
     docsUrl: "https://developers.openai.com/codex/cli/",
   },
   {
     name: "opencode", label: "OpenCode", command: "opencode", args: [ "acp" ],
-    shipped: false, package: "opencode-ai", docsUrl: "https://opencode.ai/docs/",
+    package: "opencode-ai", docsUrl: "https://opencode.ai/docs/",
   },
 ];
 
@@ -54,19 +55,21 @@ export function profileFor(name: string): AgentProfile | undefined {
 
 /// Whether an agent can be addressed right now. `resolved` is where the machine
 /// says its command is, as the bridge looks for it, or null for nowhere.
-export function stateOf(profile: AgentProfile, resolved: string | null): AgentState {
-  return profile.shipped || resolved ? "ready" : "missing";
+///
+/// One question, asked of the machine, and the profile is not consulted: an
+/// agent this project pinned is in exactly the state an agent it never heard of
+/// would be, and there is nothing the panel can report as ready without having
+/// found it (#120).
+export function stateOf(resolved: string | null): AgentState {
+  return resolved ? "ready" : "missing";
 }
 
-/// The one command installing this agent would run, or null for the one that
-/// ships — there is nothing to fetch, and offering to fetch it would install a
-/// second copy of what the bundle already carries.
+/// The one command installing this agent would run.
 ///
 /// Into a prefix this application owns, never the person's own node
 /// installation: what WorkRoom fetches, WorkRoom keeps to itself. The prefix is
 /// quoted because the app data directory on macOS has a space in it, and an
 /// unquoted one reads as another package to install.
-export function installCommand(profile: AgentProfile, prefix: string): string | null {
-  if (profile.shipped || !profile.package) return null;
+export function installCommand(profile: AgentProfile, prefix: string): string {
   return `npm install -g --prefix "${prefix}" ${profile.package}`;
 }

@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@agentclientprotocol/claude-agent-acp':
-        specifier: 0.64.0
-        version: 0.64.0(@anthropic-ai/sdk@0.115.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -27,6 +24,9 @@ importers:
         specifier: ^2
         version: 2.10.1
     devDependencies:
+      '@agentclientprotocol/claude-agent-acp':
+        specifier: 0.64.0
+        version: 0.64.0(@anthropic-ai/sdk@0.115.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))
       '@tauri-apps/cli':
         specifier: ^2
         version: 2.11.4

@@ -370,10 +370,10 @@ describe("agent definitions", () => {
     expect(none[0].default).toBe(true);
   });
 
-  test("nothing configured is the agent that ships, and the two it can offer", () => {
-    // The shipped one is default and certainly there (#120). The other two are
-    // named so somebody can see they exist and what state they are in — naming
-    // one installs nothing.
+  test("nothing configured is the three this project supports, claude first", () => {
+    // Claude answers `@agent` because something must, not because it is present
+    // (#120) — all three are installed the same way. They are named so somebody
+    // can see they exist and what state they are in; naming one installs nothing.
     expect(normalizeAgents([])).toEqual([
       { name: "claude", command: "claude-agent-acp", args: [], default: true },
       { name: "codex", command: "codex-acp", args: [] },

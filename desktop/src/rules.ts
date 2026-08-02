@@ -59,9 +59,8 @@ export function activeAgent(agents: AgentDef[], chosen?: string): string | undef
 ///
 /// Whatever survives, the agents this project supports are named beside it.
 /// An agent you did not guess the name of is one you do not have: without this
-/// the two that are not bundled exist only for somebody who already knew to
-/// write them down. Naming one installs nothing — it is listed, with the state
-/// it is really in.
+/// the three exist only for somebody who already knew to write them down.
+/// Naming one installs nothing — it is listed, with the state it is really in.
 export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   const seen = new Set<string>();
   const clean: AgentDef[] = [];
