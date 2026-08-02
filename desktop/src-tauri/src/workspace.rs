@@ -317,6 +317,170 @@ mod tests {
 }
 
 #[cfg(test)]
+mod the_offer_a_turn_leaves {
+    //! What a turn is offered, when another turn is finishing at the same
+    //! moment and when the person re-opens the channel while it still runs.
+    //!
+    //! The two commands own one line — what was already there — and both read
+    //! it and move it. Everything below is about that line being read and moved
+    //! once per turn, by the turn that did the work.
+
+    use super::*;
+    use std::io::Write as _;
+    use std::time::Duration;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-offer-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::File::create(path)
+            .unwrap()
+            .write_all(body.as_bytes())
+            .unwrap();
+    }
+
+    fn paths(files: &[Produced]) -> Vec<String> {
+        let mut out: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        out.sort();
+        out
+    }
+
+    /// Two turns, held at the door until the work is on disk, then let go at
+    /// once. Racing them on wall-clock alone proves nothing — the loser is
+    /// usually finished before the winner starts — and the map is the only
+    /// door both of them have to come through.
+    fn both_turns_at_once(dir: &Path, shots: &Workspaces, work: &str) -> Vec<String> {
+        let held = shots.0.lock().unwrap();
+        let (first, second) = std::thread::scope(|s| {
+            let one = s.spawn(|| offer(shots, dir).unwrap());
+            let two = s.spawn(|| offer(shots, dir).unwrap());
+            std::thread::sleep(Duration::from_millis(150));
+            write(dir, work, "findings");
+            drop(held);
+            (one.join().unwrap(), two.join().unwrap())
+        });
+
+        let mut both = paths(&first);
+        both.extend(paths(&second));
+        both
+    }
+
+    #[test]
+    fn two_turns_finishing_at_once_offer_the_work_once() {
+        // Two channels can be bound to one folder, and their turns can land in
+        // the same millisecond. A file offered twice is a room told twice that
+        // it was written, and a person asked twice to publish it.
+        let dir = temp("race");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+
+        assert_eq!(
+            both_turns_at_once(&dir, &shots, "report.md"),
+            vec!["report.md"],
+            "one turn's work, offered by one turn"
+        );
+    }
+
+    #[test]
+    fn work_written_while_the_line_is_held_is_not_lost() {
+        // The other way the race hurts. A turn that snapshots before it takes
+        // the map has already missed everything written since — and nobody
+        // else offers it either, because the line is then moved past it.
+        let dir = temp("under-lock");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+
+        let held = shots.0.lock().unwrap();
+        let files = std::thread::scope(|s| {
+            let turn = s.spawn(|| offer(&shots, &dir).unwrap());
+            std::thread::sleep(Duration::from_millis(150));
+            write(&dir, "late.md", "written while the map was held");
+            drop(held);
+            turn.join().unwrap()
+        });
+
+        assert_eq!(paths(&files), vec!["late.md"]);
+    }
+
+    #[test]
+    fn opening_the_workspace_again_does_not_move_the_line() {
+        // Clicking back into a channel whose agent is mid-turn is not the start
+        // of a turn. Re-snapshotting there silently swallows everything the
+        // turn has written so far.
+        let dir = temp("re-entry");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "written while the turn still runs");
+
+        baseline(&shots, &dir).unwrap();
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+    }
+
+    #[test]
+    fn a_workspace_opened_for_the_first_time_starts_from_what_was_there() {
+        // The other half: a first entry must take the line, or a folder with a
+        // year of work in it is offered whole on the first turn.
+        let dir = temp("first-entry");
+        write(&dir, "old.md", "from an earlier day");
+        let shots = Workspaces::default();
+
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "new.md", "this turn");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["new.md"]);
+    }
+
+    #[test]
+    fn what_was_offered_once_is_not_offered_again() {
+        let dir = temp("twice");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "findings");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        assert!(
+            offer(&shots, &dir).unwrap().is_empty(),
+            "the next turn is measured from where the last one ended"
+        );
+    }
+
+    #[test]
+    fn a_bound_repository_is_still_answered_by_git() {
+        // The line does not apply to somebody's real repository: git already
+        // knows what changed there, by their ignore rules rather than ours.
+        let dir = temp("bound");
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "a@b"]);
+        run(&["config", "user.name", "a"]);
+        write(&dir, ".gitignore", "node_modules/\n");
+        write(&dir, "src/main.rs", "fn main() {}");
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "findings");
+        write(&dir, "node_modules/left-pad/index.js", "junk");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+    }
+}
+
+#[cfg(test)]
 mod bound_folder_tests {
     use super::*;
     use std::io::Write;

@@ -796,6 +796,46 @@ mod resolution {
 }
 
 #[cfg(test)]
+mod off_the_runtime {
+    /// The commands that walk a directory somebody bound, or shell out to git
+    /// inside it. On a real repository that is thousands of entries and a
+    /// `git status` besides, and an async command doing it inline holds a
+    /// runtime worker for the whole of it — which is the ACP bridge answering
+    /// nothing, mid-turn, for as long as the walk takes.
+    ///
+    /// Asserted against the source because there is nothing else to look at: a
+    /// command that blocks and one that does not return the same value, and the
+    /// difference is only visible to everything else waiting on the runtime.
+    const BLOCKING: &[&str] = &["agent_workspace", "agent_produced", "agent_read"];
+
+    /// What one command does, from its signature to the brace that closes it.
+    fn body(source: &str, name: &str) -> String {
+        let start = source
+            .find(&format!("async fn {name}("))
+            .unwrap_or_else(|| panic!("`{name}` is not a command in this file"));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").expect("a command that ends");
+        rest[..end].to_string()
+    }
+
+    #[test]
+    fn the_commands_that_touch_the_filesystem_hand_it_to_the_blocking_pool() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .unwrap();
+
+        for name in BLOCKING {
+            assert!(
+                body(&source, name).contains("spawn_blocking"),
+                "`{name}` does its filesystem work on the runtime itself, holding a worker \
+                 for as long as the directory takes to read"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod capabilities {
     /// What this application is allowed to do, and why each one is here.
     ///
