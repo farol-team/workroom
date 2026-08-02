@@ -19,5 +19,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  // The specs are typechecked too (#222). A gate that only sees `src` lets a
+  // spec drift out of shape with the code it claims to exercise — it still
+  // runs green under vitest, which never checks types, so the drift is
+  // invisible until someone reads the file.
+  "include": ["src", "test"]
 }
