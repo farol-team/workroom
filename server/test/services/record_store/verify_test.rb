@@ -1,4 +1,7 @@
 require "test_helper"
+require "rake"
+
+Rails.application.load_tasks unless Rake::Task.task_defined?("record:verify")
 
 # What turns the journal from a claim into evidence. Append writes the chain;
 # this reads it back and recomputes it from the rows and the stored bytes, so
@@ -26,6 +29,39 @@ class RecordStore::VerifyTest < ActiveSupport::TestCase
     assert_not result.ok?, "the journal verified clean while it was tampered with"
     assert result.failures.any? { |failure| failure.include?("seq #{seq}") },
            "no failure named seq #{seq}: #{result.failures.inspect}"
+  end
+
+  # A room of its own, in a workspace that is not necessarily this test's. The
+  # entered block is how anything reaches another workspace at all — the
+  # boundary is the database's, so a channel created outside it would be
+  # refused rather than misfiled.
+  def room_in(workspace, slug:, entries: 1)
+    workspace.entered do
+      room = Channel.create!(slug:, name: slug.capitalize)
+      entries.times do |i|
+        RecordStore::Append.call(channel: room, kind: "message.created", subject: nil,
+                                 payload: { "body" => "#{slug} #{i}" })
+      end
+      room
+    end
+  end
+
+  TaskRun = Struct.new(:out, :err, :aborted)
+
+  # The task in process, which also means under the app role the suite confines
+  # to — the role a deployment uses, and the one that has row-level security
+  # applied to it. Run any other way it would be checked by a connection that
+  # bypasses the boundary, and the only thing worth proving about the task is
+  # which rooms it reaches.
+  def run_task(*args)
+    Rake::Task["record:verify"].reenable
+    aborted = false
+    out, err = capture_io do
+      Rake::Task["record:verify"].invoke(*args)
+    rescue SystemExit
+      aborted = true
+    end
+    TaskRun.new(out, err, aborted)
   end
 
   test "a journal written through Append verifies clean" do
@@ -142,5 +178,75 @@ class RecordStore::VerifyTest < ActiveSupport::TestCase
 
     assert verify.ok?, verify.failures.join("; ")
     assert_not RecordStore::Verify.call(neighbour).ok?
+  end
+
+  # The digest check earns its keep only if bytes can change under a stable
+  # address, and they can: the Disk service writes what it is handed to the
+  # path a key names, and an S3 bucket somebody has write access to is the same
+  # story. Nothing is missing here and nothing was re-pointed — the row is
+  # filed under an address the bytes no longer hash to.
+  test "an envelope rewritten in place under its own address is caught" do
+    entries = journal(2)
+    key = "record/sha256/#{entries.second.entry_hash}"
+
+    ActiveStorage::Blob.service.upload(key, StringIO.new("not the envelope #{SecureRandom.hex(8)}".b))
+
+    result = verify
+
+    assert_names_seq 2, result
+    assert result.failures.any? { |failure| failure.include?("hashes to") },
+           "the failure blames something other than the digest: #{result.failures.inspect}"
+  end
+
+  # --- the rake task ---------------------------------------------------------
+  #
+  # The task holds no verification logic, so what is worth proving about it is
+  # what the service cannot: which rooms it reaches, whose they are, and what
+  # it exits with. Reaching them is not a detail — the boundary is the
+  # database's, and a checker that enters no workspace sees no rooms and calls
+  # that a clean record.
+
+  test "every workspace's rooms are checked, and each line names whose room it is" do
+    mine = Current.workspace
+    theirs = workspace(name: "Globex")
+    room_in(mine, slug: "meetings")
+    room_in(theirs, slug: "meetings")
+
+    run = run_task
+
+    assert_not run.aborted, "#{run.out}#{run.err}"
+    assert_includes run.out, "#{mine.slug}/meetings: OK (1 entries)"
+    assert_includes run.out, "#{theirs.slug}/meetings: OK (1 entries)"
+  end
+
+  # Two rooms of the same name in different workspaces is the ordinary case —
+  # slugs are unique per workspace, not globally. Each workspace answers for
+  # its own, and a broken one anywhere is the verdict for the run.
+  test "the slug form checks each workspace's own room of that name" do
+    mine = Current.workspace
+    theirs = workspace(name: "Globex")
+    room_in(mine, slug: "meetings")
+    broken = room_in(theirs, slug: "meetings")
+    theirs.entered do
+      tamper("UPDATE channel_records SET entry_hash = " \
+             "'#{Digest::SHA256.hexdigest("forged #{SecureRandom.hex(8)}")}' " \
+             "WHERE channel_id = #{broken.id}")
+    end
+
+    run = run_task("meetings")
+
+    assert run.aborted, "a journal that does not verify must leave a nonzero exit: #{run.out}"
+    assert_includes run.out, "#{mine.slug}/meetings: OK (1 entries)"
+    assert_includes run.out, "#{theirs.slug}/meetings: seq 1:"
+    assert_not_includes run.out, "#{mine.slug}/meetings: seq"
+  end
+
+  # Silence would read as a room that verified, which is the one answer a
+  # checker must never give by accident.
+  test "a slug no room anywhere answers to is refused, not passed over" do
+    run = run_task("no-such-room")
+
+    assert run.aborted, "an unknown slug left a zero exit: #{run.out}"
+    assert_includes run.err, "no-such-room"
   end
 end
