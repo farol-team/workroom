@@ -88,11 +88,11 @@ module Rail
       end
     end
 
+    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
+
     # The turn this call belongs to. The rail is reached by an agent holding its
     # owner's token, not by the client, so the run is inferred from what that
     # person currently has open in this channel — which is exactly one thing.
-    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
-
     def working_run
       AgentRun.joins(:agent_session)
               .where(agent_sessions: { user_id: @user.id, channel_id: @channel.id })
@@ -113,6 +113,11 @@ module Rail
         entry = store.write(@channel, title: args[:title], detail: args[:detail],
                             trust: "agent", author: @user, source: run)
         run&.update(distilled_at: Time.current)
+        # What was recorded, not only that something was: the entry's text is in
+        # the journal because the git mirror replays envelopes and the store has
+        # moved on by the time it does. A correction carries a reason instead —
+        # it is the one thing a supersession knows.
+        record("remember", uri: entry.uri, title: args[:title], detail: entry.detail, run: run)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
@@ -122,8 +127,24 @@ module Rail
         return [ :error, "no capability at #{target}" ] unless target.start_with?(@channel.memory_uri)
 
         entry = store.supersede(target, reason: args[:reason])
-        entry ? [ :ok, "Superseded #{entry.uri}" ] : [ :error, "nothing current at #{target}" ]
+        return [ :error, "nothing current at #{target}" ] unless entry
+
+        record("supersede", uri: entry.uri, reason: args[:reason], run: working_run)
+        [ :ok, "Superseded #{entry.uri}" ]
       end
+    end
+
+    # A write to memory is a thing that happened in the room, so the room's
+    # journal says so — after the write succeeded, never before, and never for
+    # one that was refused. The entry names the uri rather than a row id: the
+    # rail writes to whichever store is configured, and only the uri means the
+    # same thing in both. Who and which turn ride along, because an entry
+    # nobody can trace back is a defect (Article P4).
+    def record(action, uri:, run:, **rest)
+      RecordStore::Append.call(
+        channel: @channel, kind: "memory", subject: nil,
+        payload: { action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id }.merge(rest)
+      )
     end
   end
 end

@@ -6,7 +6,12 @@
 module Broadcast
   module_function
 
-  def stream_for(channel)  = "room:#{channel.slug}"
+  # A slug is unique inside a workspace and nowhere else, so a name built from
+  # it alone put two customers' `general` on one stream (#186). The workspace
+  # goes in the name because the name is the whole gate: a subscription is
+  # granted once, and nothing about a stream is refused afterwards. Nothing is
+  # stored to stay compatible with — the name is computed per broadcast.
+  def stream_for(channel)  = "room:#{channel.workspace_id}:#{channel.slug}"
   def user_stream_for(user) = "user:#{user.id}"
 
   def message(m)

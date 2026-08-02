@@ -19,6 +19,10 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     response.parsed_body
   end
 
+  def journal = @channel.channel_records.order(:seq)
+
+  def payload_of(entry) = JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"]
+
   test "the handshake reports the protocol and the server" do
     body = rpc("initialize", { protocolVersion: "2025-06-18" })
 
@@ -200,6 +204,69 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_equal(-32_601, body.dig("error", "code"))
+  end
+
+  # A write to memory is a thing that happened in the room, so the room's
+  # journal says it happened — with the uri rather than a row id, because the
+  # rail writes to whichever store is configured and only the uri means the same
+  # thing in both.
+  test "what an agent remembers lengthens the room's journal" do
+    run = agent_run(user: @alice, channel: @channel)
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/remember",
+        args: { title: "Pricing objection", detail: "Setup cost, not price." } } })
+    end
+
+    written = MemoryEntry.current.find_by(title: "Pricing objection")
+    entry = journal.last
+    assert_nil entry.subject_id, "the uri is the reference, not a row this store happens to have"
+
+    payload = payload_of(entry)
+    assert_equal "remember", payload["action"]
+    assert_equal written.uri, payload["uri"]
+    assert_equal "Pricing objection", payload["title"]
+    assert_equal "Setup cost, not price.", payload["detail"],
+                 "the journal holds what the agent recorded, not only that it recorded"
+    assert_equal "agent", payload["trust"]
+    assert_equal @alice.id, payload["author_id"], "whose agent wrote it (Article P4)"
+    assert_equal run.id, payload["run_id"], "the turn it came from (Article P4)"
+  end
+
+  test "a remember the rail refused is in no journal" do
+    assert_no_difference -> { @channel.channel_records.count } do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/remember", args: { title: "No detail with it" } } })
+    end
+  end
+
+  # Superseding is the correction mechanism (Article P3), so the record has to
+  # be able to tell a correction from a new claim.
+  test "a supersession is recorded, and says which way it went" do
+    stale = MemoryEntry.last
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/supersede",
+        args: { uri: stale.uri, reason: "contradicted by a later call" } } })
+    end
+
+    payload = payload_of(journal.last)
+    assert_equal "supersede", payload["action"]
+    assert_equal stale.uri, payload["uri"]
+    assert_equal "contradicted by a later call", payload["reason"]
+  end
+
+  test "a supersession that was refused is in no journal" do
+    other = channel(name: "Marketing")
+    theirs = @store.write(other, title: "Campaign brief", detail: "Elsewhere.")
+
+    assert_no_difference -> { ChannelRecord.count } do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/supersede",
+        args: { uri: theirs.uri, reason: "not mine to correct" } } })
+    end
   end
 
   test "an unknown capability answers with an error" do

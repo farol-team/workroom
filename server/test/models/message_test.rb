@@ -13,7 +13,7 @@ class MessageTest < ActiveSupport::TestCase
     nested = @channel.messages.new(author: @user, body: "nested", parent: reply)
 
     refute nested.valid?
-    assert_includes nested.errors[:parent].join, "вложенность"
+    assert_includes nested.errors[:parent].join, "nesting deeper than one level"
   end
 
   test "a reply to a root message is accepted" do

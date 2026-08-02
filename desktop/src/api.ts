@@ -17,6 +17,22 @@ export interface Channel {
 
 import type { RoomTemplate } from "./rules";
 
+/// The whole of what this client uses a WebSocket for. Naming it is what lets a
+/// test hand `live()` a socket of its own without impersonating a browser.
+export interface CableSocket {
+  send(data: string): void;
+  close(): void;
+  onopen: ((ev: any) => void) | null;
+  onmessage: ((ev: any) => void) | null;
+  onclose: ((ev: any) => void) | null;
+}
+
+/// A subscription, which outlives any one socket under it. Closing it is the
+/// caller saying it is done — not the network saying so.
+export interface Live {
+  close(): void;
+}
+
 export class Api {
   constructor(public base = "http://127.0.0.1:3000", public token = "") {}
 
@@ -125,6 +141,22 @@ export class Api {
     return this.call<Channel & { messages: Message[] }>(`/channels/${slug}`);
   }
 
+  /// What a room said while nobody was listening (#180). The cable replays
+  /// nothing, so the only way back is to ask the channel again and keep what is
+  /// past the newest message already on hand.
+  ///
+  /// The mark is read here, before the request, and that ordering is the whole
+  /// point of the method existing. Read after, a message arriving on the live
+  /// socket during the round trip becomes the mark, everything the outage ate is
+  /// filtered out as already seen, and the room stays short with nothing to say
+  /// it did. Passing `held` in rather than a number is what makes the ordering
+  /// impossible to get wrong from the outside.
+  async caughtUp(slug: string, held: { id: number }[]): Promise<Message[]> {
+    const newest = held.reduce((max, m) => Math.max(max, m.id), 0);
+    const { messages } = await this.channel(slug);
+    return messages.filter((m) => m.id > newest);
+  }
+
   /// What the room knows, ready to prepend to an agent turn.
   context(slug: string) {
     return this.call<{
@@ -226,22 +258,93 @@ export class Api {
 
   /// Two streams. The room carries what the room shares; the user stream
   /// carries what only its owner needs — their own steps, whatever level they chose.
-  live(slug: string, onEvent: (e: any) => void) {
+  ///
+  /// A socket dies for reasons nobody chose — the server restarts, a proxy times
+  /// the connection out, a laptop closes — and the room it fed then looks exactly
+  /// like a room nobody is writing in (#180). So a close is answered with another
+  /// attempt, and `onResync` lets the caller ask for what arrived while nobody was
+  /// listening; only the caller knows what being caught up means, and a promise it
+  /// rejects is a room still behind, so it is asked again. `Socket` is the seam a
+  /// test stands a fake in, and the only one.
+  live(slug: string, onEvent: (e: any) => void,
+       onResync: () => void | Promise<void> = () => {},
+       Socket: new (url: string) => CableSocket = WebSocket): Live {
     const url = this.base.replace(/^http/, "ws") + `/cable?token=${encodeURIComponent(this.token)}`;
-    const ws = new WebSocket(url);
     const subscriptions = [
       JSON.stringify({ channel: "RoomChannel", slug }),
       JSON.stringify({ channel: "UserChannel" }),
     ];
 
-    ws.onopen = () =>
-      subscriptions.forEach((identifier) =>
-        ws.send(JSON.stringify({ command: "subscribe", identifier })));
-    ws.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.type) return;              // welcome / ping / confirm_subscription
-      if (data.message) onEvent(data.message);
+    let deliberate = false;
+
+    // Doubling from a second and capped at half a minute, so a server that
+    // stays down is not hammered; jittered down from there, so a server
+    // coming back does not take every client's attempt in the same tick.
+    //
+    // Two things wait here, and they wait apart. On a real outage both are
+    // waiting at once — the machine that refuses the catch-up is the machine
+    // whose socket just dropped — so one shared handle makes them one wait,
+    // and whichever is scheduled second cancels the first. When that is the
+    // catch-up, the room is left with no socket and nobody waiting to open
+    // one: the outage again, with nothing left to notice it (#180).
+    const ladder = () => {
+      let attempt = 0;
+      let retry: ReturnType<typeof setTimeout> | undefined;
+      return {
+        later(again: () => void) {
+          clearTimeout(retry);
+          const wait = Math.min(1000 * 2 ** attempt++, 30_000);
+          retry = setTimeout(again, wait * (0.5 + Math.random() / 2));
+        },
+        arrived() { attempt = 0; },   // what got through earns a fresh first wait
+        stop() { clearTimeout(retry); },
+      };
     };
-    return ws;
+
+    const reconnecting = ladder();
+    const catchingUp = ladder();
+
+    // The socket is answered before the rest of the server necessarily is: a
+    // machine that has only just come back can accept the connection and still
+    // refuse the request the catch-up makes. Dropping that refusal would leave
+    // the room as far behind as the outage left it, with nothing left to notice
+    // — so a refused catch-up waits and asks again, exactly as a dropped socket
+    // does. A caller that has since left the room is not owed an answer.
+    const catchUp = () => {
+      Promise.resolve(onResync()).then(
+        () => catchingUp.arrived(),
+        () => { if (!deliberate) catchingUp.later(catchUp); },
+      );
+    };
+
+    const connect = (missed: boolean): CableSocket => {
+      const ws = new Socket(url);
+      ws.onopen = () => {
+        reconnecting.arrived();
+        subscriptions.forEach((identifier) =>
+          ws.send(JSON.stringify({ command: "subscribe", identifier })));
+        if (missed) catchUp();
+      };
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.type) return;              // welcome / ping / confirm_subscription
+        if (data.message) onEvent(data.message);
+      };
+      ws.onclose = () => {
+        if (deliberate) return;             // leaving a room is not an outage
+        reconnecting.later(() => { socket = connect(true); });
+      };
+      return ws;
+    };
+
+    let socket = connect(false);
+    return {
+      close() {
+        deliberate = true;
+        reconnecting.stop();
+        catchingUp.stop();
+        socket.close();
+      },
+    };
   }
 }

@@ -99,6 +99,40 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
                  "they were not a turn")
   end
 
+  # However memory was written — by an agent through the rail or by a person
+  # here — the room's journal is one entry longer. A record that only knows
+  # about the agent's writes describes half a room.
+  test "what a person records lengthens the room's journal" do
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+           headers: auth(@alice).merge(@json)
+    end
+
+    assert_equal 1, @channel.channel_records.count, "one write, one entry"
+
+    entry = @channel.channel_records.order(:seq).last
+    payload = JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"]
+
+    assert_equal "written", payload["action"]
+    assert_equal response.parsed_body["uri"], payload["uri"]
+    assert_equal "Monthly rollups", payload["title"]
+    assert_equal "First Tuesday.", payload["detail"],
+                 "the journal holds what the room learned, not only that it learned something"
+    assert_equal "human", payload["trust"]
+    assert_equal @alice.id, payload["author_id"], "an entry nobody can trace back is a defect (Article P4)"
+  end
+
+  test "a write the room refused is in no journal" do
+    assert_no_difference -> { @channel.channel_records.count } do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Missing its detail" }.to_json,
+           headers: auth(@alice).merge(@json)
+    end
+
+    assert_response :unprocessable_content
+  end
+
   private
 
   def with_store(store)

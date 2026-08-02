@@ -283,6 +283,17 @@ and says how many files it left out.
 Offered, not uploaded. Work product belongs to the channel, but what leaves the machine is
 still the person's decision — the same shape as the transcript offer, for the same reason.
 
+An uploaded file is stored by **what it is**, not by where it was put: its SHA-256 is its
+address, so the same file arriving from two rooms is one object, and the room's journal
+records the upload with that address. It comes back at
+`GET /api/v1/channels/:slug/record/:sha256` — inside the room that holds it, because a hash
+means the same thing everywhere and holding one is not permission to read it.
+
+`bin/rails record:export[slug,path]` writes the same artifacts out as ordinary files:
+`artifacts/<name>` in a git repository, one commit per journal entry, alongside the room's
+memory as markdown and its messages as monthly JSONL. Work product that can only be read
+back through this server is work product a team cannot leave with.
+
 This is what makes a channel a complete record rather than a discussion of work that
 happened elsewhere.
 
