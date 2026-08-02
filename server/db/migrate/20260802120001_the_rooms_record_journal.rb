@@ -24,5 +24,12 @@ class TheRoomsRecordJournal < ActiveRecord::Migration[8.1]
     # a fork, and a fork that reaches the table is one no reader can resolve.
     add_index :channel_records, %i[channel_id seq], unique: true
     add_index :channel_records, %i[channel_id entry_hash], unique: true
+
+    # A child of one workspace cannot reference a parent of another — the same
+    # composite key 20260801130001 gave every other table with a channel
+    # parent. The boundary policy reads workspace_id without a join, so a row
+    # where the two disagree would be readable from the wrong room.
+    add_foreign_key :channel_records, :channels,
+                    column: %i[channel_id workspace_id], primary_key: %i[id workspace_id]
   end
 end
