@@ -590,12 +590,42 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
     RecordStore::GitExport.call(@channel, path: @path)
 
+    # The path is pinned, not only its innocence: named from the title this
+    # would be memory/escaped.md, and nothing here would have been sanitized.
     written = git("ls-files").split("\n").grep(%r{\Amemory/})
-    assert_equal 1, written.length
-    assert_not_includes written.first, "..", "the uri tail is sanitised, not joined"
+    assert_equal [ "memory/escape.md" ], written
     assert_includes read(written.first), "Escaped"
 
     assert_no_strays
+  end
+
+  # The file is named from the uri, not the title: the stores mint tails a
+  # title cannot reproduce (a repeat title gets `<key>-<hex>`; OpenViking adds
+  # `.md` itself), and the supersede envelope carries no title at all — only
+  # the uri. A write and its correction must land on the same file whatever
+  # the tail looks like, or `git log` on the file is not the entry's history
+  # (Article P3).
+  test "a write and its supersession meet at the file their uri names" do
+    uri = "#{@channel.memory_uri}acme-wants-monthly-reporting-a1b2c3.md"
+
+    RecordStore::Append.call(
+      channel: @channel, kind: "memory", subject: nil,
+      payload: { action: "written", uri:, title: "Acme wants monthly reporting",
+                 detail: "First Tuesday of the month.", trust: "human", author_id: @alice.id }
+    )
+    RecordStore::Append.call(
+      channel: @channel, kind: "memory", subject: nil,
+      payload: { action: "supersede", uri:, trust: "agent", author_id: @alice.id,
+                 run_id: nil, reason: "contradicted by a later call" }
+    )
+
+    RecordStore::GitExport.call(@channel, path: @path)
+
+    written = git("ls-files").split("\n").grep(%r{\Amemory/})
+    assert_equal 1, written.length,
+                 "one uri, one file — the correction is a version of the file it corrects"
+    refute_match(/\.md\.md\z/, written.first)
+    assert_equal 2, git("log", "--format=%H", "--", written.first).split("\n").length
   end
 
   # Article P5. The export is one room's record; another room's entries are not
@@ -629,7 +659,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_not run.aborted, "#{run.out}#{run.err}"
     assert_equal 1, shas.length
     assert_equal "shall we meet Tuesday", subject_of(shas.last)
-    assert_includes run.out, "meetings"
+    assert_includes run.out, @channel.slug
     assert_includes run.out, "1 entries",
                     "the run reports what it did — a cron's silence reads as nothing happened"
   end
