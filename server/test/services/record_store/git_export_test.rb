@@ -34,6 +34,10 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
   teardown do
     FileUtils.remove_entry(@root) if @root && File.exist?(@root)
+    # `Memory::Store.current=` pins a process-wide store that `current`
+    # never un-resolves on its own; leaving one behind makes the suite
+    # order-dependent (channel_context_test.rb does the same).
+    Memory::Store.current = nil
   end
 
   # Three kinds, one of each, in the order a room produces them.
@@ -57,6 +61,30 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
                  "each commit is the entry it replays, oldest first"
 
     assert_equal [ remembered.seq, delivered.seq ], [ 2, 3 ], "the premise: the journal was in this order"
+  end
+
+  # A room nobody has written in yet is not an error and not a wedge:
+  # the mirror is a valid repository with nothing in it, its state file
+  # says "nothing exported yet", and the day the first entry lands the
+  # export continues from there — the chain check has no seq 0 to
+  # verify, so it must not raise on a mirror that never forked.
+  test "an empty journal mirrors as an empty repository the next export continues from" do
+    first = RecordStore::GitExport.call(@channel, path: @path)
+
+    assert_equal 0, first.entries_exported
+    assert_nil first.head_sha
+    assert_path_exists File.join(@path, ".git")
+
+    state = JSON.parse(read(STATE_FILE))
+    assert_equal @channel.slug, state["channel"]
+    assert_equal 0, state["last_seq"]
+    assert_nil state["last_hash"]
+
+    posted(body: "shall we meet Tuesday")
+    second = RecordStore::GitExport.call(@channel, path: @path)
+
+    assert_equal 1, second.entries_exported
+    assert_equal [ "shall we meet Tuesday" ], shas.map { |sha| subject_of(sha) }
   end
 
   # `git log --oneline` is the artifact this card exists to produce. Every
@@ -129,6 +157,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal memory_uri("Acme wants monthly reporting"), front["uri"]
     assert_equal "human", front["trust"]
     assert_equal "Alice", front["author"]
+    assert_nil front["run"], "a person's own record was nobody's turn"
     assert_match(/^recorded: ["']?\d{4}-\d\d-\d\dT[\d:.]+Z/, body,
                  "in UTC, because when must not depend on who asks")
     assert_in_delta entry.created_at, front["recorded"].to_time, 5
@@ -365,6 +394,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     front = front_matter(body)
     assert_equal "agent", front["trust"]
     assert_equal memory_uri("Pricing objection"), front["uri"]
+    assert_equal "Alice's agent", front["author"],
+                 "an agent's inference is not the person's own assertion (Article P4)"
+    assert_equal run.id, front["run"], "the turn it came from, readable offline (Article P4)"
     assert_includes body, "Setup cost, not price.", "what the agent recorded, not only that it did"
   end
 
@@ -469,6 +501,23 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal 1, written.length
     assert_equal content, read(written.first)
     assert_not_includes written.first, "..", "the name is sanitised, not joined"
+
+    assert_no_strays
+  end
+
+  # An absolute name is the same hazard with the climb already done:
+  # `File.join(repo, "artifacts", name)` does not absolutize, so only
+  # sanitizing the name keeps the file inside. Placed under @root so the
+  # strays check catches it if it escapes.
+  test "an artifact name that is absolute does not leave the repository either" do
+    content = "escaped #{SecureRandom.hex(8)}"
+
+    artifact(name: File.join(@root, "absolute-escape.txt"), content:)
+    RecordStore::GitExport.call(@channel, path: @path)
+
+    written = git("ls-files").split("\n").grep(%r{\Aartifacts/})
+    assert_equal 1, written.length
+    assert_equal content, read(written.first)
 
     assert_no_strays
   end
