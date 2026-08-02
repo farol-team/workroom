@@ -65,6 +65,14 @@ class Api::V1::ChannelsControllerLoadTest < ActionDispatch::IntegrationTest
     get api_v1_channel_path(room.slug), headers: auth(@alice)
 
     assert_response :success
+    # An opened room carries the same count the sidebar does, off the same
+    # serializer — which is the one the counts hash is about to be threaded
+    # through. A count that reaches the listing and not the room it opens is a
+    # number that went missing where nobody was looking (#177).
+    assert_equal 4, response.parsed_body["message_count"],
+                 "what a room says it holds does not depend on which endpoint was asked"
+    assert_equal room.slug, response.parsed_body["slug"]
+
     authors = response.parsed_body["messages"].map { |m| m["author"] }
     assert_equal %w[user agent user agent], authors.map { |a| a["kind"] },
                  "a message written by an agent is attributed to the run, one written by a person to them"

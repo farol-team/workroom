@@ -33,20 +33,16 @@ class Api::V1::MemoryControllerLoadTest < ActionDispatch::IntegrationTest
     get api_v1_channel_memory_path(room.slug), headers: auth(@alice)
 
     assert_response :success
-    authors = response.parsed_body.map { |e| e["author"] }
-    # Sorted: a listing answers most trusted and most recent first, which is the
-    # store's business and not this file's — what is asserted here is that every
-    # line says who, and that neither kind of entry lost anything to the other.
-    assert_equal %w[agent agent human human], authors.map { |a| a["kind"] }.sort
-    assert_equal [ "Colleague 0", "Colleague 0", "Colleague 1", "Colleague 1" ],
-                 authors.map { |a| a["name"] }.sort
-
-    agents = authors.select { |a| a["kind"] == "agent" }
-    assert_equal %w[opencode opencode], agents.map { |a| a["agent_kind"] }
-    assert agents.all? { |a| a["run_id"].present? },
-           "an entry a colleague cannot follow back is a defect (Article P4)"
-    assert authors.select { |a| a["kind"] == "human" }.none? { |a| a.key?("run_id") },
-           "a person was not a turn, and having no run is not a missing record"
+    # Entry by entry, against what was written — not two lists checked for
+    # holding the same names between them. A chain fetched in one go and keyed
+    # back to the wrong entry is precisely what this file's other half invites,
+    # and a listing where every agent belongs to somebody else reads as correct
+    # to any assertion that sorts before it compares.
+    #
+    # The whole author is compared, so a person who was not a turn keeps no run
+    # and an entry that was one keeps the run it came from (Article P4).
+    assert_equal @recorded, response.parsed_body.to_h { |e| [ e["title"], e["author"] ] },
+                 "an entry that leads back to the wrong person leads nowhere"
   end
 
   private
@@ -55,15 +51,22 @@ class Api::V1::MemoryControllerLoadTest < ActionDispatch::IntegrationTest
   # each round by a different person — provenance resolves differently for the
   # two, and no two entries share the row at the end of the chain, so a listing
   # that walks it cannot be rescued by the request's query cache.
+  #
+  # `@recorded` is what was written, by title: the listing is compared against
+  # it rather than against itself.
   def room_that_learned(rounds)
     room = channel(slug: "room-#{SecureRandom.hex(3)}")
+    @recorded = {}
     rounds.times do |i|
       speaker = user(name: "Colleague #{i}")
+      run = agent_run(user: speaker, channel: room)
       Memory::Store.current.write(room, title: "Inferred #{i}", detail: "What the agent concluded, #{i}.",
-                                  trust: "agent", author: speaker,
-                                  source: agent_run(user: speaker, channel: room))
+                                  trust: "agent", author: speaker, source: run)
       Memory::Store.current.write(room, title: "Stated #{i}", detail: "What the person said, #{i}.",
                                   trust: "human", author: speaker)
+      @recorded["Inferred #{i}"] = { "kind" => "agent", "name" => speaker.name,
+                                     "agent_kind" => "opencode", "run_id" => run.id }
+      @recorded["Stated #{i}"] = { "kind" => "human", "name" => speaker.name }
     end
     room
   end

@@ -162,6 +162,32 @@ module Memory
       assert_equal "?!", first.abstract, "and the discovery tier to the title"
     end
 
+    # An overview nobody wrote is the detail cut short, and the cut is the point
+    # of it. `Store#context_for` renders overviews and nothing else, so this is
+    # the length of what every session opens with — a fallback that keeps the
+    # whole detail turns the orientation tier into the detail tier and pushes
+    # kilobytes into an agent's opening context, one entry at a time, which no
+    # assertion about the tier being *present* would ever notice.
+    OVERVIEW_LIMIT = 400
+
+    def test_an_overview_nobody_wrote_is_the_detail_cut_to_a_length
+      detail = ("Everything the room worked out about the reporting cadence. " * 40).strip
+      entry = @store.write(@channel, title: "The long story", detail: detail)
+      skill = @store.write_skill(@channel, title: "The long procedure", body: detail)
+
+      [ [ "an entry", entry ], [ "a skill", skill ] ].each do |what, written|
+        assert_operator written.overview.length, :<=, OVERVIEW_LIMIT,
+                        "#{what}: the tier a session opens with is bounded"
+        refute_equal detail, written.overview,
+                     "#{what}: an overview the size of the detail is not an overview"
+        assert written.overview.start_with?("Everything the room worked out"),
+               "#{what}: cut from the front of the detail, not composed from somewhere else"
+      end
+
+      assert_equal detail, @store.fetch(entry.uri).detail,
+                   "and nothing was cut from the tier that is fetched on purpose"
+    end
+
     # And the second answer: a blank title is refused. Not a key that could not
     # be derived — nothing to derive one from, and an entry the room could never
     # name afterwards.
