@@ -227,6 +227,8 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert_equal "remember", payload["action"]
     assert_equal written.uri, payload["uri"]
     assert_equal "Pricing objection", payload["title"]
+    assert_equal "Setup cost, not price.", payload["detail"],
+                 "the journal holds what the agent recorded, not only that it recorded"
     assert_equal "agent", payload["trust"]
     assert_equal @alice.id, payload["author_id"], "whose agent wrote it (Article P4)"
     assert_equal run.id, payload["run_id"], "the turn it came from (Article P4)"

@@ -86,9 +86,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     RecordStore::GitExport.call(@channel, path: @path)
 
     subject = subject_of(shas.last)
-    assert_operator subject.length, :<=, 60
-    assert said.start_with?(subject[0, 40]), "the subject is the start of what was said: #{subject}"
-    assert_not_includes subject, "second paragraph", "only the first line"
+    assert_equal said[0, 60], subject, "the subject is the start of what was said, kept to a line"
   end
 
   # The Behavior contract is that `git log` answers when the room learned
@@ -96,12 +94,19 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # mirror of two years of work reads as a single afternoon — worse, the second
   # export dates the first entries months after the events they describe.
   test "a commit is dated when the room learned it, not when the mirror was made" do
-    entry = travel_to(3.months.ago) { posted(body: "shall we meet Tuesday") }
+    entries = travel_to(3.months.ago) do
+      [ posted(body: "shall we meet Tuesday"),
+        memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month."),
+        artifact(name: "notes.txt") ]
+    end
 
     RecordStore::GitExport.call(@channel, path: @path)
 
-    assert_equal entry.created_at.utc.iso8601, authored_at(shas.last).utc.iso8601
-    assert_equal entry.created_at.utc.iso8601, committed_at(shas.last).utc.iso8601
+    assert_equal entries.length, shas.length, "one commit per entry, whatever the kind"
+    entries.zip(shas).each do |entry, sha|
+      assert_equal entry.created_at.utc.iso8601, authored_at(sha).utc.iso8601
+      assert_equal entry.created_at.utc.iso8601, committed_at(sha).utc.iso8601
+    end
   end
 
   # The shape spike #45 printed: readable markdown, and every field a memory
@@ -320,6 +325,19 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # what. A person's own name and address, because that is what the record says.
   test "what a person recorded is committed under their name" do
     posted(body: "shall we meet Tuesday")
+
+    RecordStore::GitExport.call(@channel, path: @path)
+
+    assert_equal "Alice <#{@alice.email}>", author_of(shas.last)
+  end
+
+  # The memory envelope is the one entry that names its author by id alone: a
+  # message carries its author whole, an artifact names a run, but a person's
+  # memory write carries `author_id` and nothing else. An export that resolves
+  # identity only from `payload["author"]` commits every memory entry as the
+  # exporter itself and still passes everything above.
+  test "what a person remembered is committed under their name, resolved from the id the envelope carries" do
+    memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
 
     RecordStore::GitExport.call(@channel, path: @path)
 

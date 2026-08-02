@@ -117,6 +117,8 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     assert_equal "written", payload["action"]
     assert_equal response.parsed_body["uri"], payload["uri"]
     assert_equal "Monthly rollups", payload["title"]
+    assert_equal "First Tuesday.", payload["detail"],
+                 "the journal holds what the room learned, not only that it learned something"
     assert_equal "human", payload["trust"]
     assert_equal @alice.id, payload["author_id"], "an entry nobody can trace back is a defect (Article P4)"
   end
