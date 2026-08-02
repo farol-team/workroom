@@ -19,8 +19,10 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     @alice = user(name: "Alice")
     @root = Dir.mktmpdir("wr-export")
     # A directory the operator has not created: `bin/rails record:export[meetings,
-    # /tmp/wr-export]` is run against a path that does not exist yet.
-    @path = File.join(@root, "meetings")
+    # /tmp/wr-export]` is run against a path that does not exist yet. Two levels
+    # below @root, so that a name climbing out of the repository still lands
+    # somewhere this test owns and can assert about.
+    @path = File.join(@root, "mirrors", "meetings")
   end
 
   teardown do
@@ -171,8 +173,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
   # The one thing a mirror must never do quietly: fork from the journal it
   # claims to mirror. A state file that disagrees about where the chain was is
-  # either tampering or a repository built from some other room's record, and
-  # either way the export stops rather than appending onto it.
+  # tampering, and the export stops rather than appending onto it.
   test "a state file that disagrees with the journal stops the export" do
     message(body: "shall we meet Tuesday")
     RecordStore::GitExport.call(@channel, path: @path)
@@ -186,6 +187,30 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     end
 
     assert_equal [ head ], shas, "an export that refuses writes nothing"
+  end
+
+  # The other way a mirror forks: the right repository for the wrong room.
+  # The state file names the channel it was built from, and that name is there
+  # to be read — an export that only checks how far it got would find nothing
+  # at last_seq + 1 in the second room's shorter journal, report nothing to do,
+  # and leave the operator believing Marketing had been mirrored into a folder
+  # that holds Meetings (Article P5).
+  test "a mirror built from one room refuses to become another room's" do
+    message(body: "shall we meet Tuesday")
+    memory(title: "Acme wants monthly reporting")
+    RecordStore::GitExport.call(@channel, path: @path)
+    ours = shas
+
+    other = channel(name: "Marketing")
+    RecordStore::Append.call(channel: other, kind: "message.created", subject: nil,
+                             payload: { "body" => "theirs" })
+
+    assert_raises RecordStore::GitExport::ChainMismatch do
+      RecordStore::GitExport.call(other, path: @path)
+    end
+
+    assert_equal ours, shas, "the refusal leaves the first room's mirror as it was"
+    assert_equal @channel.slug, JSON.parse(read(STATE_FILE))["channel"]
   end
 
   # Commit identity comes out of the entry, so `git log` answers who as well as
@@ -217,6 +242,26 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     front = front_matter(read("memory/pricing-objection.md"))
     assert_equal "agent", front["trust"]
     assert_equal "#{@channel.memory_uri}pricing-objection", front["uri"]
+  end
+
+  # An artifact is raw bytes on disk: nothing inside the file says where it came
+  # from, so the commit is the only provenance the mirror carries for it. The
+  # entry names a run and no author, which makes run -> session -> person the
+  # step an export is likeliest to skip — and skipping it turns work somebody's
+  # agent produced into work the exporter appears to have written itself.
+  #
+  # Bob's run rather than Alice's, so resolving it is the only way to get the
+  # name right.
+  test "an artifact is committed under the run that produced it" do
+    bob = user(name: "Bob")
+    run = agent_run(user: bob, channel: @channel)
+
+    artifact(name: "notes.txt", run:)
+    RecordStore::GitExport.call(@channel, path: @path)
+
+    assert_equal 1, shas.length
+    assert_equal "Bob's agent <agent+#{run.id}@workroom.local>", author_of(shas.last)
+    assert_equal "WorkRoom <record@workroom.local>", committer_of(shas.last)
   end
 
   # Author is whoever the entry came from; committer is the export itself, for
@@ -283,8 +328,11 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal content, read(written.first)
     assert_not_includes written.first, "..", "the name is sanitised, not joined"
 
-    refute_path_exists File.expand_path("../escape.txt", @path)
-    refute_path_exists File.expand_path("../../escape.txt", @path)
+    # Both rungs the name tried to climb, asserted as emptiness rather than as
+    # the absence of one filename: whatever the export wrote, it wrote inside
+    # the directory it was given.
+    assert_equal [ "meetings" ], Dir.children(File.dirname(@path))
+    assert_equal [ "mirrors" ], Dir.children(@root)
   end
 
   # Article P5. The export is one room's record; another room's entries are not
