@@ -15,12 +15,13 @@ class UserChannelTest < ActionCable::Channel::TestCase
   end
 
   # The private stream carries steps and everything an agent produced regardless
-  # of what its owner showed the room, so whose it is may never come from the
-  # subscriber.
-  test "nobody else's stream comes with it" do
+  # of what its owner showed the room, so whose it is comes from the identified
+  # connection and never from what the subscriber asked for.
+  test "a user named by the subscriber is not whose stream this is" do
     stub_connection current_user: @alice, current_workspace: Current.workspace
-    subscribe
+    subscribe user_id: @bob.id
 
+    assert_has_stream Broadcast.user_stream_for(@alice)
     assert_has_no_stream Broadcast.user_stream_for(@bob)
   end
 end
