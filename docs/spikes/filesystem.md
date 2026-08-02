@@ -151,10 +151,57 @@ The honest summary: the filesystem is an excellent way to *read* WorkRoom and a
 bad way to *write* it. The mirror should be exactly as good as `git log` is —
 complete, trustworthy, and read-only.
 
+## The mirror as built
+
+`RecordStore::GitExport`, run as `bin/rails record:export[slug,path]`. It is
+one-way and on demand, as recommended — with one thing this spike did not
+anticipate.
+
+**It is exported from the journal, not from the store.** The throwaway exporter
+above read `GET /api/v1/channels/:slug/memory`, which is what a room *currently*
+knows. The record store (#181) gave the room something better: an append-only
+journal, one entry per thing that happened, each entry's bytes addressed by
+their own digest. Replaying that gives the mirror three properties the listing
+could not:
+
+- **One commit per entry, dated when it happened.** `git log` answers *when the
+  room learned this*, not when somebody last ran the export.
+- **Superseding survives.** A correction is a new commit on the same file, and
+  `git show` of the commit before it still says what the room used to think.
+  Exported from a listing, a superseded entry is simply absent — Article P3's
+  history, gone in the copy people actually read.
+- **Nothing has to be live.** The export asks the context store nothing. Its
+  input is bytes that were written once and never change, so a mirror made two
+  years later says exactly what a mirror made that afternoon would have said.
+
+That last one has a cost worth naming: a memory entry's **detail travels in the
+journal entry**. The alternative — resolve the uri through `Memory::Store` at
+export time — cannot work, because by then the entry may be superseded and the
+seam correctly answers with what the room knows *now*.
+
+What the mirror refuses:
+
+- a state file (`.workroom-export.json`) that disagrees with the journal about
+  where the last run stopped;
+- a repository holding commits and no state file — it is somebody else's
+  history, and committing a room's journal on top of it is the fork this whole
+  design exists to prevent;
+- a slug naming a room in more than one workspace, since one folder holds one
+  room's record and slugs are unique per workspace only.
+
+Names never come from content. An artifact called `../../escape.txt` and a uri
+whose tail climbs out of the repository both land inside it, sanitized.
+
 ## Follow-up cards
 
-- Fix `MemoryController#index` to go through `Memory::Store` — small, and a
-  correctness fix on its own terms
-- Add `Memory::Store#all(channel, since:)` to the seam, with the contract test
-  that every backend must pass
-- The mirror itself, once both are in place
+- ~~Fix `MemoryController#index` to go through `Memory::Store`~~ — done
+- ~~Add `Memory::Store#all(channel, since:)` to the seam~~ — done
+- ~~The mirror itself~~ — done: `record:export`
+- **Journal the detail on write.** The two call sites that append a `memory`
+  entry — `Api::V1::MemoryController#create` and `Rail::Registry#record` — send
+  `title` and not `detail`. The export reads both and the specs cover both, so
+  a mirror of a room written before that field lands has front matter and a
+  heading where the entry's text should be. Additive, one field per call site;
+  those files were outside this card's scope.
+- Desktop integration: the mirror inside a bound folder (#43), and a client that
+  says plainly what it is about to write and where.
