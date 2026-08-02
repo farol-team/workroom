@@ -66,19 +66,15 @@ module Memory
     end
 
     def write_skill(channel, title:, body:, key: nil, author: nil)
-      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{channel.skills_uri}#{key}.md"
-      uri = "#{channel.skills_uri}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
-
       entry = Entry.new(
-        uri: uri, title: title, detail: body, trust: "human",
-        overview: body.to_s.truncate(400), abstract: title,
+        **write_policy(channel.skills_uri, title: title, detail: body, key: key, extension: ".md"),
+        trust: "human",
         author_name: author.respond_to?(:name) ? author.name : author,
         created_at: Time.current
       )
 
       mkdir(channel.skills_uri)
-      post("/api/v1/content/write", uri: uri, content: serialize(entry), mode: "create", wait: false)
+      post("/api/v1/content/write", uri: entry.uri, content: serialize(entry), mode: "create", wait: false)
       entry
     end
 
@@ -107,21 +103,19 @@ module Memory
 
     def write(channel, title:, detail:, overview: nil, abstract: nil,
               trust: "agent", author: nil, source: nil, key: nil)
-      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{root_of(channel)}#{key}.md"
-
       # A second entry under a taken name supersedes the first rather than
-      # replacing it — the store has no overwrite, which suits Article P6.
-      uri = "#{root_of(channel)}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
+      # replacing it — the store has no overwrite, which suits Article P6. Where
+      # the name comes from is Store#write_policy's business, here and in every
+      # other store.
+      attrs = write_policy(root_of(channel), title: title, detail: detail, key: key,
+                           overview: overview, abstract: abstract, extension: ".md")
 
       # Provenance is resolved at write time, in the keys the document will
       # carry: the run can be asked now and never again from a record that
       # points at nothing (Article P4).
       front = Provenance.front_matter(author: author, source: source, trust: trust)
       entry = Entry.new(
-        uri: uri, title: title, detail: detail, trust: trust,
-        overview: overview.presence || detail.to_s.truncate(400),
-        abstract: abstract.presence || title,
+        **attrs, trust: trust,
         author_name: front["author"], agent_kind: front["agent"],
         model: front["model"], run_id: front["run"],
         created_at: Time.current
@@ -132,8 +126,8 @@ module Memory
       # write, which takes seconds; an agent recording a conclusion mid-turn
       # must not sit through it. The entry is readable at once and retrievable
       # by meaning shortly after.
-      post("/api/v1/content/write", uri: uri, content: serialize(entry), mode: "create", wait: false)
-      tag(uri, entry, channel, source)
+      post("/api/v1/content/write", uri: entry.uri, content: serialize(entry), mode: "create", wait: false)
+      tag(entry.uri, entry, channel, source)
       entry
     end
 
@@ -147,6 +141,18 @@ module Memory
       mkdir(archive.rpartition("/").first + "/")
       post("/api/v1/fs/mv", from_uri: uri, to_uri: archive)
       entry
+    end
+
+    # What is filed under a key, out of the way. `ls` is how this store knows
+    # what it holds, and the name a correction left behind is the key plus the
+    # tilde form Store#write_policy gives it — a directory listing is the only
+    # way to ask for both at once.
+    def displace(root, key, extension)
+      filed = list(root).select do |uri|
+        uri == "#{root}#{key}#{extension}" || uri.start_with?("#{root}#{key}~")
+      end
+
+      filed.filter_map { |uri| supersede(uri) }.first
     end
 
     private

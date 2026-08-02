@@ -54,6 +54,48 @@ module Memory
       TEXT
     end
 
+    # --- the write policy ----------------------------------------------------
+    #
+    # Everything a write decides before anything is stored: what the entry is
+    # filed under, what fills the tiers the caller left out, and what happens to
+    # whatever the room already knew under that name. Both stores had written
+    # these rules out for themselves, in their own words, and the copies had
+    # already drifted — one raised a NoMethodError where the other wrote an
+    # entry nothing could ever find (#177). Persistence stays with each store;
+    # the rules are one thing here.
+
+    # What every session opens with is a list of overviews (`context_for`), so
+    # the tier is bounded by the size of an opening context and not by the size
+    # of what somebody wrote.
+    OVERVIEW_LIMIT = 400
+
+    def write_policy(root, title:, detail:, key: nil, overview: nil, abstract: nil, extension: "")
+      raise ArgumentError, "a memory entry needs a title" if title.to_s.strip.empty?
+
+      key ||= title.parameterize.presence || SecureRandom.hex(4)
+      uri = "#{root}#{key}#{extension}"
+      # A correction takes a name of its own: the store that keeps the record it
+      # displaced still has the old name under it, and an entry is identified by
+      # its uri (Article P6). The tilde is what makes the new name findable as a
+      # correction of the same key — `parameterize` never produces one, so
+      # `cadence~a1b2c3` can only ever be a later version of `cadence`, and
+      # never the entry a title like "Cadence weekly" would have derived.
+      uri = "#{root}#{key}~#{SecureRandom.hex(3)}#{extension}" if displace(root, key, extension)
+
+      { uri: uri, title: title, detail: detail,
+        overview: overview.presence || detail.to_s.truncate(OVERVIEW_LIMIT),
+        abstract: abstract.presence || title }
+    end
+
+    # What the room currently knows under this key, moved out of the way of what
+    # it is about to know instead. Asked by key rather than by uri because by
+    # the second correction there is nothing at the plain one: a store answers
+    # for whichever name the last write left it under.
+    #
+    # Not `supersede`, which logs the correction as an act of its own — a write
+    # has never done that, and this move does not start.
+    def displace(_root, _key, _extension) = raise NotImplementedError
+
     def search(_channel, _query, limit: 10) = raise NotImplementedError
 
     # Everything the room currently knows, most trusted first. Not search with

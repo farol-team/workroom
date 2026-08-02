@@ -4,7 +4,14 @@ module Api
       before_action :require_channel_access!, only: %i[show context]
 
       def index
-        render json: Channel.order(:name).map { |c| serialize(c) }
+        rooms = Channel.order(:name).to_a
+        # One grouped count for the whole sidebar. A count per room is a fan-out
+        # across every room in the workspace, paid on every refresh by every
+        # client — and it grew with the workspace, which is the half nobody
+        # notices until a workspace is large (#177). A room nobody has spoken in
+        # has no key here and is still a room that has said nothing.
+        counts = Message.group(:channel_id).count
+        render json: rooms.map { |c| serialize(c, counts.fetch(c.id, 0)) }
       end
 
       # The shape a room can be added with. Offered, never created: a team with no
@@ -27,7 +34,7 @@ module Api
 
           channel = template.create!(owner: current_user)
           Activity.log(actor: current_user, action: "channel.created", subject: channel)
-          return render json: serialize(channel), status: :created
+          return render json: serialize(channel, channel.messages.count), status: :created
         end
 
         channel = Channel.create!(
@@ -36,7 +43,7 @@ module Api
         )
         channel.memberships.create!(user: current_user, role: "owner")
         Activity.log(actor: current_user, action: "channel.created", subject: channel)
-        render json: serialize(channel), status: :created
+        render json: serialize(channel, channel.messages.count), status: :created
       end
 
       def show
@@ -53,9 +60,26 @@ module Api
         # said instead (#146).
         away = !store.available?
 
-        body = serialize(channel!).merge(
+        # The serializer names whoever's agent wrote an answer, which is the run's
+        # session's person — three steps from the message. Walked per row that is
+        # a query per agent message in the room; loaded for the whole page it is
+        # one statement per table the chain crosses, whatever the room has said
+        # (#177). The nesting travels through the polymorphic author and reaches
+        # only the side that has it.
+        #
+        # Loaded after the page is in hand rather than through `includes`: `last`
+        # reads the newest rows and hands them back oldest first, so preloading
+        # from the array asks for the people in the order the room saw them —
+        # which is the order the run chain arrives in too, and the same person
+        # asking and answering is then one query rather than two.
+        messages = channel!.messages.order(:created_at).last(200)
+        ActiveRecord::Associations::Preloader.new(
+          records: messages, associations: { author: { agent_session: :user } }
+        ).call
+
+        body = serialize(channel!, channel!.messages.count).merge(
           memory: away ? "unavailable" : "ok",
-          messages: channel!.messages.includes(:author).order(:created_at).last(200).map { |m| MessageSerializer.call(m) }
+          messages: messages.map { |m| MessageSerializer.call(m) }
         )
         body[:memory_count] = count unless away
         render json: body
@@ -103,9 +127,13 @@ module Api
       # number was not stale, it was structurally zero and would have stayed zero
       # (#99). The store can answer it, but only one room at a time, so the answer
       # belongs to `show`.
-      def serialize(c)
+      #
+      # The message count is handed in rather than asked for: the listing has one
+      # for every room at once and a room being opened has its own, and a
+      # serializer that fetched it would put the listing's fan-out back (#177).
+      def serialize(c, message_count)
         c.slice(:id, :slug, :name, :purpose, :visibility, :memory_uri)
-         .merge(message_count: c.messages.count)
+         .merge(message_count: message_count)
       end
     end
   end

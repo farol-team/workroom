@@ -6,7 +6,10 @@ module Api
       def index
         store = Memory::Store.current
         entries = params[:q].present? ? store.search(channel!, params[:q]) : store.all(channel!, limit: 50)
-        render json: entries.map { |e| serialize(e) }
+        # Whose agent recorded each entry is the expensive half of this payload,
+        # and it is the same chain for every line — so the listing is asked for
+        # once rather than followed per entry (#177).
+        render json: Memory::Provenance.preload(entries.to_a).map { |e| serialize(e) }
       end
 
       # Direct write. Distillation proposes a Promotion instead; this path is
