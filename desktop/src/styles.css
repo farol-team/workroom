@@ -226,8 +226,11 @@ button.template:disabled { cursor: default; opacity: .5; }
 #agents-dialog form { display: flex; flex-direction: column; gap: .6rem; min-width: 26rem; }
 #agents { display: flex; flex-direction: column; gap: 8px; }
 .agent-row { display: flex; align-items: center; gap: 10px; }
-.agent-row .agent-name { font-weight: 600; background: none; border: 0; padding: 0;
-  font-family: inherit; font-size: inherit; color: var(--text); cursor: pointer; }
+/* `font: inherit`, not the longhands: the shorthand also resets the weight the
+   button's own stylesheet would otherwise keep, so the name reads at the
+   window's weight rather than a semibold of its own. */
+.agent-row .agent-name { background: none; border: 0; padding: 0;
+  font: inherit; color: var(--text); cursor: pointer; }
 /* The one this person addresses, said in the sidebar's own colour. */
 .agent-row .agent-name.chosen { color: var(--accent); }
 .agent-row .muted { flex: 1; }
