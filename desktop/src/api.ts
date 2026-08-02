@@ -287,20 +287,34 @@ export class Api {
       JSON.stringify({ channel: "UserChannel" }),
     ];
 
-    let attempt = 0;
     let deliberate = false;
-    let retry: ReturnType<typeof setTimeout> | undefined;
 
     // Doubling from a second and capped at half a minute, so a server that
     // stays down is not hammered; jittered down from there, so a server
     // coming back does not take every client's attempt in the same tick.
-    // One thing waits at a time — the socket and the catch-up climb the same
-    // ladder, and a server that refuses both should be asked once, not twice.
-    const later = (again: () => void) => {
-      clearTimeout(retry);
-      const wait = Math.min(1000 * 2 ** attempt++, 30_000);
-      retry = setTimeout(again, wait * (0.5 + Math.random() / 2));
+    //
+    // Two things wait here, and they wait apart. On a real outage both are
+    // waiting at once — the machine that refuses the catch-up is the machine
+    // whose socket just dropped — so one shared handle makes them one wait,
+    // and whichever is scheduled second cancels the first. When that is the
+    // catch-up, the room is left with no socket and nobody waiting to open
+    // one: the outage again, with nothing left to notice it (#180).
+    const ladder = () => {
+      let attempt = 0;
+      let retry: ReturnType<typeof setTimeout> | undefined;
+      return {
+        later(again: () => void) {
+          clearTimeout(retry);
+          const wait = Math.min(1000 * 2 ** attempt++, 30_000);
+          retry = setTimeout(again, wait * (0.5 + Math.random() / 2));
+        },
+        arrived() { attempt = 0; },   // what got through earns a fresh first wait
+        stop() { clearTimeout(retry); },
+      };
     };
+
+    const reconnecting = ladder();
+    const catchingUp = ladder();
 
     // The socket is answered before the rest of the server necessarily is: a
     // machine that has only just come back can accept the connection and still
@@ -309,13 +323,16 @@ export class Api {
     // — so a refused catch-up waits and asks again, exactly as a dropped socket
     // does. A caller that has since left the room is not owed an answer.
     const catchUp = () => {
-      Promise.resolve(onResync()).catch(() => { if (!deliberate) later(catchUp); });
+      Promise.resolve(onResync()).then(
+        () => catchingUp.arrived(),
+        () => { if (!deliberate) catchingUp.later(catchUp); },
+      );
     };
 
     const connect = (missed: boolean): CableSocket => {
       const ws = new Socket(url);
       ws.onopen = () => {
-        attempt = 0;                      // a socket that lived earns a fresh first wait
+        reconnecting.arrived();
         subscriptions.forEach((identifier) =>
           ws.send(JSON.stringify({ command: "subscribe", identifier })));
         if (missed) catchUp();
@@ -327,7 +344,7 @@ export class Api {
       };
       ws.onclose = () => {
         if (deliberate) return;             // leaving a room is not an outage
-        later(() => { socket = connect(true); });
+        reconnecting.later(() => { socket = connect(true); });
       };
       return ws;
     };
@@ -336,7 +353,8 @@ export class Api {
     return {
       close() {
         deliberate = true;
-        clearTimeout(retry);
+        reconnecting.stop();
+        catchingUp.stop();
         socket.close();
       },
     };
