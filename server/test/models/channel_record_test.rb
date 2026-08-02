@@ -72,4 +72,25 @@ class ChannelRecordTest < ActiveSupport::TestCase
     enter(mine)
     assert_equal 1, ChannelRecord.count
   end
+
+  # And the reason the denormalised column can be trusted. The boundary policy
+  # reads workspace_id without a join, so a row carrying one workspace while
+  # pointing at another's channel would be readable from the wrong room. The
+  # model derives the value and cannot produce that — which is the same
+  # argument the unique index on (channel_id, seq) is kept in spite of.
+  test "the database refuses an entry that claims another workspace's channel" do
+    theirs = workspace(name: "Globex")
+
+    # As the owner, so row-level security is out of the way and the composite
+    # key is what refuses. Under the app role the policy would refuse first,
+    # and this would pass while proving something else.
+    assert_raises ActiveRecord::InvalidForeignKey do
+      as_the_owner do
+        ChannelRecord.insert!({ channel_id: @channel.id, workspace_id: theirs.id, seq: 1,
+                                kind: "message.created", prev_hash: "0" * 64,
+                                entry_hash: Digest::SHA256.hexdigest("planted #{SecureRandom.hex(8)}"),
+                                created_at: Time.current })
+      end
+    end
+  end
 end
