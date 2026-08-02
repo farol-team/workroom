@@ -207,94 +207,72 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
 /// Open the working directory for this session and remember what was in it.
 /// The path is derived from who is working, with which agent, in which channel —
 /// the agent never names its own directory.
+///
+/// Everything here reads a disk, so it happens on the blocking pool. An async
+/// command that walks a directory inline holds a runtime worker for as long as
+/// the walk takes, and on somebody's real repository that is the whole bridge
+/// answering nothing, mid-turn, for a directory listing (#179).
 #[tauri::command]
 async fn agent_workspace(
     app: AppHandle,
-    shots: State<'_, Workspaces>,
     user: String,
     name: String,
     channel: String,
 ) -> Result<String, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("no app data directory: {e}"))?
-        .join("workspaces");
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no app data directory: {e}"))?
+            .join("workspaces");
 
-    let dir = workspace::workspace_path(&root, &user, &name, &channel);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let dir = workspace::workspace_path(&root, &user, &name, &channel);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
-    shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?
-        .insert(dir.clone(), workspace::snapshot(&dir));
-
-    Ok(dir.to_string_lossy().into_owned())
+        workspace::baseline(&app.state::<Workspaces>(), &dir)?;
+        Ok(dir.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("opening the workspace did not finish: {e}"))?
 }
 
 /// What this run wrote or changed, offered rather than uploaded — what leaves
 /// the machine stays the person's decision (Article D3 does not override P2).
+///
+/// The walk and the `git status` are the slow part and belong off the runtime;
+/// which files those are, and where the line between turns now sits, is
+/// `workspace::offer`'s to decide.
 #[tauri::command]
-async fn agent_produced(
-    shots: State<'_, Workspaces>,
-    workspace: String,
-) -> Result<Vec<Produced>, String> {
-    let dir = std::path::PathBuf::from(&workspace);
-
-    // A folder somebody bound is their real work, and git already knows what
-    // changed in it — by their ignore rules, not ours.
-    if let Some(changed) = workspace::git_changes(&dir) {
-        return Ok(changed
-            .into_iter()
-            .filter_map(|path| {
-                let bytes = std::fs::metadata(dir.join(&path)).ok()?.len();
-                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
-            })
-            .collect());
-    }
-
-    let after = workspace::snapshot(&dir);
-
-    let mut state = shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?;
-    let before = state.get(&dir).cloned().unwrap_or_default();
-
-    let files = workspace::produced(&before, &after)
-        .into_iter()
-        .filter_map(|rel| {
-            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
-            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
-                path: rel.to_string_lossy().into_owned(),
-                bytes,
-            })
-        })
-        .collect();
-
-    // The next turn is measured from here, so one file is not offered twice.
-    state.insert(dir, after);
-    Ok(files)
+async fn agent_produced(app: AppHandle, workspace: String) -> Result<Vec<Produced>, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::offer(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("looking at the workspace did not finish: {e}"))?
 }
 
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
-    let dir = std::path::PathBuf::from(&workspace)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
-    // A path that resolves outside its own workspace is not this session's to read.
-    if !file.starts_with(&dir) {
-        return Err(format!("{path} is outside the workspace"));
-    }
+    tokio::task::spawn_blocking(move || {
+        let dir = std::path::PathBuf::from(&workspace)
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
+        // A path that resolves outside its own workspace is not this session's to read.
+        if !file.starts_with(&dir) {
+            return Err(format!("{path} is outside the workspace"));
+        }
 
-    let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
-    if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
-        return Err(format!("{path} is too large to attach"));
-    }
-    Ok(BASE64.encode(bytes))
+        let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+        if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+            return Err(format!("{path} is too large to attach"));
+        }
+        Ok(BASE64.encode(bytes))
+    })
+    .await
+    .map_err(|e| format!("reading the file did not finish: {e}"))?
 }
 
 /// Sign in through the person's own browser.
@@ -865,8 +843,8 @@ mod what_the_commands_delegate {
             let body = body(&source, name);
             assert!(
                 body.contains(*delegate),
-                "`{name}` never calls `{delegate}`, so what the tests for it prove is not on the \
-                 path this command takes"
+                "`{name}` does not name `{delegate}` at all. What it passes is read at the call \
+                 site; that it calls it is read here"
             );
             for inline in kept_inline.iter() {
                 assert!(
@@ -924,6 +902,23 @@ mod reading_a_produced_file {
         .unwrap_err();
 
         assert!(error.contains("outside the workspace"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_file_too_large_to_attach_is_refused_rather_than_sent() {
+        // The other guard in this body, and the other one a move could drop.
+        let dir = temp("too-large");
+        std::fs::write(
+            dir.join("dump.bin"),
+            vec![0u8; MAX_ARTIFACT_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let error = agent_read(dir.to_string_lossy().into_owned(), "dump.bin".into())
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("too large to attach"), "{error}");
     }
 }
 

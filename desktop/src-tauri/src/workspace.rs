@@ -151,6 +151,71 @@ pub struct Produced {
 /// prompt suggesting the channel wants it.
 pub const MAX_ARTIFACT_BYTES: u64 = 25 * 1024 * 1024;
 
+/// Take the line this workspace's turns are measured from, if it has none yet.
+///
+/// Opening a workspace is not the same act as starting a turn: a person clicks
+/// back into a channel whose agent is still working, and a fresh snapshot there
+/// would quietly move the line past everything the turn has written so far —
+/// which then belongs to nobody, because the next turn measures from after it.
+/// The first entry has to take a line, or a folder with a year of work in it is
+/// offered whole; every entry after that already has one (#179).
+pub fn baseline(shots: &Workspaces, dir: &Path) -> Result<(), String> {
+    let mut state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    state
+        .entry(dir.to_path_buf())
+        .or_insert_with(|| snapshot(dir));
+    Ok(())
+}
+
+/// What this turn wrote or changed, and the line moved to where it ends.
+///
+/// Reading the line and moving it is one act, so it is done holding the map:
+/// two channels can be bound to one folder and their turns can finish in the
+/// same moment, and a "before" both of them read is a file the room is offered
+/// twice — or, when the write lands between one turn's snapshot and its turn to
+/// hold the map, a file offered by neither and then left behind the line. Under
+/// the lock the second turn diffs against what the first one left, which is
+/// nothing (#179).
+pub fn offer(shots: &Workspaces, dir: &Path) -> Result<Vec<Produced>, String> {
+    // A folder somebody bound is their real work, and git already knows what
+    // changed in it — by their ignore rules, not ours. There is no line to hold
+    // here: git answers from the repository every turn.
+    if let Some(changed) = git_changes(dir) {
+        return Ok(changed
+            .into_iter()
+            .filter_map(|path| {
+                let bytes = fs::metadata(dir.join(&path)).ok()?.len();
+                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
+            })
+            .collect());
+    }
+
+    let mut state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    let after = snapshot(dir);
+    let before = state.get(dir).cloned().unwrap_or_default();
+
+    let files = produced(&before, &after)
+        .into_iter()
+        .filter_map(|rel| {
+            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
+            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
+                path: rel.to_string_lossy().into_owned(),
+                bytes,
+            })
+        })
+        .collect();
+
+    // The next turn is measured from here, so one file is not offered twice.
+    state.insert(dir.to_path_buf(), after);
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
