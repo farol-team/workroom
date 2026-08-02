@@ -94,8 +94,9 @@ Knowledge and actions are both capabilities, discovered and invoked the same way
 | `viking://resources/channels/<slug>/…` | what the room knows — returns the detail tier |
 | `workroom://memory/remember` | record a conclusion so later work starts from it |
 | `workroom://memory/supersede` | replace an entry this work contradicts |
+| `workroom://channel/publish` | how to promote a conclusion into the team's repository — an instruction, present only when the channel names one (#208) |
 
-The last one is the obligation that replaced the human gate: an agent meeting a
+Supersede is the obligation that replaced the human gate: an agent meeting a
 contradiction resolves it rather than adding a second conflicting entry. It is a
 capability rather than a convention because an obligation nobody can perform in
 one call does not get performed.

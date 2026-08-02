@@ -104,11 +104,40 @@ memory rots silently.
 **Trust is asymmetric.** A person's assertion and an agent's inference are not equivalent,
 even inside the same channel. Mark them differently and let retrieval weigh them.
 
-**Promotion is a step, not an effect.** See above.
+**Promotion is a step, not an effect.** The next section is that step.
 
 **Forgetting is designed alongside remembering.** Stale knowledge is more dangerous than
 absent knowledge, because it is indistinguishable from current knowledge at retrieval time.
 Entries need a way to expire, be superseded, or be marked as historical.
+
+## Publishing: the third layer
+
+The model has three layers, not two:
+
+```
+journal → memory → repository
+what happened → what the room concluded → what the team keeps
+```
+
+A conclusion in memory is a draft: cheap to write, cheap to supersede, and read by whoever's
+agent asks next week. Most conclusions should stay exactly there. But some are documents —
+a decision record, a runbook, the post-mortem — and a document the team keeps belongs where
+the team keeps documents: the channel's repository (#203).
+
+Promotion is the step between, and it stays a step, not an effect. Nothing graduates from
+memory by being old or being read a lot. The agent writes the markdown into the channel's
+clone, commits it on its `agent/<topic>` branch (#205's standing rules), pushes as the
+person whose machine it runs on, and opens a pull request. **A human reviews and merges —
+never the agent, asked or not.** The rail offers the how as an instruction capability
+(`workroom://channel/publish`), present only in channels that name a repository — which is
+the whole of the server's involvement: it holds the url and never holds the clone (#208).
+
+The two-layer honesty holds underneath. There is no sync: the repository is not a mirror
+of memory and memory is not an index of the repository — spike #45's argument against
+two-way sync stands untouched, and a document published is a copy that has left, not a
+view that updates. And because the server never sees the repository's contents, nothing
+server-side retrieves them either: semantic search over what was published happens on the
+person's machine, or not at all.
 
 ## Multiple writers
 

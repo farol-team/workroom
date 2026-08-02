@@ -24,6 +24,24 @@ module Rail
       @user = user
     end
 
+    # The actions this channel offers: the fixed two, plus `publish` when the
+    # room names a repository (#203). The url is the condition because the
+    # instruction is to commit into the channel's clone — a room without one
+    # has nothing to publish into, and offering the steps there would be a
+    # capability that cannot be performed (#208).
+    def actions
+      ACTIONS.merge(
+        if @channel.repository_url.present?
+          { "workroom://channel/publish" => {
+              title: "Publish a conclusion to the team's repository",
+              summary: "Turn a conclusion in this channel's memory into a document the team keeps, reviewed like any other change.",
+              args: [] } }
+        else
+          {}
+        end
+      )
+    end
+
     # Discovery reads abstracts. The whole entry is loaded only for what was
     # chosen — the rail compresses the tool surface, tiers compress the content.
     def search(query, limit: 10)
@@ -37,7 +55,7 @@ module Rail
     end
 
     def execute(uri, args = {})
-      return run_action(uri, args) if ACTIONS.key?(uri)
+      return run_action(uri, args) if actions.key?(uri)
 
       # Through the store, not the table: search returns uris from whichever
       # store is configured, and the rail must be able to read what it found.
@@ -77,11 +95,38 @@ module Rail
 
     def store = Memory::Store.current
 
+    # Instruction, not bound (#208). A commit happens in the clone on the
+    # person's laptop, under their own git identity and their own credentials
+    # — the server holds the url and never holds the repository, so there is
+    # nothing here to execute. What the rail can honestly do is say exactly
+    # how, which is what RAIL.md calls an instruction capability: text the
+    # agent follows locally, a change to which takes effect on the next call.
+    def publish_text
+      <<~TEXT
+        A conclusion in this channel's memory is a draft: cheap to write, cheap
+        to supersede, read by whoever's agent asks next week. A document the
+        team keeps is different — it is published deliberately, and reviewed.
+
+        To publish, in the channel's working folder (the clone of
+        #{@channel.repository_url}):
+
+        1. Write the conclusion as a markdown file, in your own words.
+        2. Commit it on your agent/<topic> branch — never on the repository's
+           default branch (the session's standing rules).
+        3. Push the branch with the person's own credentials, as them.
+        4. Open a pull request. A human reviews and merges — you never merge
+           yourself, asked or not.
+
+        If any step needs a permission you do not have, stop and say what you
+        would have done. The call is the person's, not yours.
+      TEXT
+    end
+
     # Read the same way knowledge is read: by terms, so an agent describing what
     # it wants to do finds the action that does it.
     def matching_actions(query)
       terms = Memory::Store.terms_in(query)
-      ACTIONS.filter_map do |uri, a|
+      actions.filter_map do |uri, a|
         text = "#{uri} #{a[:title]} #{a[:summary]}".downcase
         next if terms.any? && terms.none? { |t| text.include?(t) }
         { uri: uri, title: a[:title], summary: a[:summary], kind: "action", args: a[:args] }
@@ -103,6 +148,8 @@ module Rail
     def run_action(uri, args)
       args = (args || {}).with_indifferent_access
       case uri
+      when "workroom://channel/publish"
+        [ :ok, publish_text ]
       when "workroom://memory/remember"
         return [ :error, "title and detail are required" ] if args[:title].blank? || args[:detail].blank?
 
