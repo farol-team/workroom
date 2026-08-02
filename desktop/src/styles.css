@@ -93,6 +93,17 @@ button.ghost { background: none; color: var(--muted); border: 1px solid var(--li
 .entry .o { color: var(--muted); line-height: 1.45; }
 .entry .mark { color: var(--accent); margin-right: 6px; }
 .entry.agent .mark { color: var(--agent); }
+/* A rule nobody learned, sitting among what the room learned: the AUTO mark
+   is what keeps the client's own prompt from reading as the room's memory
+   (#205). Muted where the learned entries are marked, because it is standing
+   rather than earned. */
+.entry.auto { color: var(--muted); }
+.auto-badge { font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted); border: 1px solid var(--muted);
+  border-radius: 4px; padding: 0 4px; margin-right: 6px; }
+/* What a permission ask means, said quietly under the question itself — the
+   question and the buttons stay the agent's (#205). */
+.ask-note { margin: 4px 0 6px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 12px; padding: 24px; min-width: 22rem; }
 dialog::backdrop { background: #000a; }

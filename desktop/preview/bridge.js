@@ -50,6 +50,15 @@ window.__TAURI_INTERNALS__ = {
     if (stagingProvision && command === "agent_clone") {
       return Promise.reject("fatal: repository 'https://example.test/acme/widgets' not found");
     }
+    // The memory panel's AUTO entry (#205) is drawn from the bridge's answers,
+    // so staging the panel means staging them: a repository with a mainline.
+    if (wanted === "memory" && command === "agent_derived_path") {
+      return Promise.resolve("~/WorkRoom/workroom/marketing");
+    }
+    if (wanted === "memory" && command === "agent_repo_info") {
+      return Promise.resolve({ remote: "https://github.com/acme/widgets",
+                               default_branch: "main", deploys_on_push: false });
+    }
     return new Promise(() => {});
   },
   transformCallback: (callback) => callback,
