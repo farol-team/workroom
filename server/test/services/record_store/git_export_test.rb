@@ -10,10 +10,12 @@ Rails.application.load_tasks unless Rake::Task.task_defined?("record:verify")
 # entry, so that `git log` over a folder answers "what does this room know, and
 # when did it learn it" with no server, no database and no account in the way.
 #
-# The export invents nothing. Every file it writes, every name and every date on
-# every commit comes out of an envelope that was already in the object store —
-# except a memory entry's detail, which the journal deliberately does not carry
-# and the export resolves through the seam.
+# The export invents nothing and asks nothing. Every file it writes, every name
+# and every date on every commit comes out of an envelope that was already in
+# the object store — including a memory entry's detail, because a journal that
+# needs a live store to be replayed is not a record of anything. The store holds
+# what a room currently knows; the journal holds what it learned and when, and
+# only one of those can be exported years later or superseded and still read.
 class RecordStore::GitExportTest < ActiveSupport::TestCase
   STATE_FILE = ".workroom-export.json".freeze
 
@@ -36,7 +38,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
   # Three kinds, one of each, in the order a room produces them.
   test "a room's journal becomes one commit per entry, in the order the room recorded them" do
-    said = message(body: "shall we meet Tuesday")
+    said = posted(body: "shall we meet Tuesday")
     remembered = memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
     delivered = artifact(name: "notes.txt")
 
@@ -62,7 +64,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # be worthless to read, so each kind says what it was in the words the room
   # used: what was said, what was remembered, what arrived.
   test "a commit says which thing happened, in the room's own words" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
     artifact(name: "notes.txt")
 
@@ -80,7 +82,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     said = "Tuesday is fine for me, though we should also cover the reporting cadence " \
            "and whatever Acme asked for last week"
 
-    message(body: "#{said}\n\nand a second paragraph nobody needs in a subject")
+    posted(body: "#{said}\n\nand a second paragraph nobody needs in a subject")
     RecordStore::GitExport.call(@channel, path: @path)
 
     subject = subject_of(shas.last)
@@ -94,7 +96,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # mirror of two years of work reads as a single afternoon — worse, the second
   # export dates the first entries months after the events they describe.
   test "a commit is dated when the room learned it, not when the mirror was made" do
-    entry = travel_to(3.months.ago) { message(body: "shall we meet Tuesday") }
+    entry = travel_to(3.months.ago) { posted(body: "shall we meet Tuesday") }
 
     RecordStore::GitExport.call(@channel, path: @path)
 
@@ -106,10 +108,10 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # entry carries surviving the trip. A mirror whose provenance is missing is a
   # folder of claims nobody can audit (Article P4).
   #
-  # The detail is the point of the file and the journal does not carry it — the
-  # entry names a uri, because the rail writes to whichever store is configured
-  # and only the uri means the same thing in both. So the export asks the seam,
-  # and a mirror of titles alone is not the readable markdown this card promises.
+  # The detail is the point of the file, so it travels in the envelope with
+  # everything else. A mirror of titles alone is not the readable markdown this
+  # card promises, and a mirror that fetched the detail from the store would be
+  # readable only for as long as the store still agreed.
   test "a memory write is markdown carrying what was recorded, by whom, and how far it is trusted" do
     detail = "Acme's ops lead asked for monthly rollups. Weekly created noise for their team."
     entry = memory(title: "Acme wants monthly reporting", detail:)
@@ -130,22 +132,26 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_includes body, detail, "the file says what the room knows, not only that it knows something"
   end
 
-  # The seam is not the journal, and the two can disagree: an external context
-  # store holds its own copy, entries get superseded, and a room mirrored a year
-  # later may ask about a uri nothing answers to. What the envelope kept is then
-  # all there is, and it is better than a file that never gets written.
-  test "memory the store cannot resolve still exports what the journal kept" do
-    RecordStore::Append.call(
-      channel: @channel, kind: "memory", subject: nil,
-      payload: { action: "written", uri: "#{@channel.memory_uri}renewal-is-in-march",
-                 title: "Renewal is in March", trust: "human", author_id: @alice.id }
-    )
+  # The seam is not the journal, and the two disagree constantly: entries get
+  # superseded, an external context store holds its own copy and can be away
+  # (#146), and a room mirrored a year later asks about uris nothing answers to
+  # any more. So the export does not ask.
+  #
+  # Memory::Store's own base class is the store that answers nothing — every
+  # read on it raises — which makes this the whole claim in one line: with the
+  # room's knowledge unreachable, the mirror still comes out complete.
+  test "the export replays the journal and asks the memory store nothing" do
+    detail = "Acme's ops lead asked for monthly rollups."
+    memory(title: "Acme wants monthly reporting", detail:)
+    posted(body: "shall we meet Tuesday")
+    artifact(name: "notes.txt")
 
-    RecordStore::GitExport.call(@channel, path: @path)
+    with_store(Memory::Store.new) do
+      RecordStore::GitExport.call(@channel, path: @path)
+    end
 
-    body = read("memory/renewal-is-in-march.md")
-    assert_includes body, "Renewal is in March"
-    assert_equal "human", front_matter(body)["trust"]
+    assert_equal 3, shas.length
+    assert_includes read("memory/acme-wants-monthly-reporting.md"), detail
   end
 
   test "an artifact is the file itself, under the name it was given" do
@@ -170,7 +176,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   end
 
   test "messages are one json line each, in the file for the month they happened" do
-    said = message(body: "shall we meet Tuesday")
+    said = posted(body: "shall we meet Tuesday")
 
     RecordStore::GitExport.call(@channel, path: @path)
 
@@ -185,10 +191,10 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # A month's file is appended to, not rewritten: the second export must not
   # lose the line the first one wrote.
   test "a later message joins the month's file rather than replacing it" do
-    said = message(body: "shall we meet Tuesday")
+    said = posted(body: "shall we meet Tuesday")
     RecordStore::GitExport.call(@channel, path: @path)
 
-    message(body: "Tuesday works")
+    posted(body: "Tuesday works")
     RecordStore::GitExport.call(@channel, path: @path)
 
     lines = read("messages/#{month_of(said)}.jsonl").lines
@@ -200,7 +206,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # The state file is what makes the second run a fast-forward rather than a
   # second history of the same events.
   test "the repository records how far the journal has been exported" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     last = memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
 
     RecordStore::GitExport.call(@channel, path: @path)
@@ -216,12 +222,12 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # mirror is a different repository every time and nothing downstream of it
   # survives a refresh.
   test "a second export adds the new entries and leaves the earlier commits alone" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
     first = RecordStore::GitExport.call(@channel, path: @path)
     already = shas
 
-    message(body: "Tuesday works")
+    posted(body: "Tuesday works")
     artifact(name: "agenda.md")
     second = RecordStore::GitExport.call(@channel, path: @path)
 
@@ -233,7 +239,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   end
 
   test "an export with nothing new to say writes no commit" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     RecordStore::GitExport.call(@channel, path: @path)
     head = shas.last
 
@@ -250,13 +256,13 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # again next time, because an abort that repairs the state file it distrusts
   # is a fork that heals itself into place.
   test "a state file that disagrees with the journal stops the export" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     RecordStore::GitExport.call(@channel, path: @path)
     head = shas.last
 
     tamper(last_hash: "0" * 64)
     tampered = read(STATE_FILE)
-    message(body: "after the tampering")
+    posted(body: "after the tampering")
 
     assert_raises RecordStore::GitExport::ChainMismatch do
       RecordStore::GitExport.call(@channel, path: @path)
@@ -273,7 +279,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # and leave the operator believing Marketing had been mirrored into a folder
   # that holds Meetings (Article P5).
   test "a mirror built from one room refuses to become another room's" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
     RecordStore::GitExport.call(@channel, path: @path)
     ours = shas
@@ -290,10 +296,30 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal @channel.slug, JSON.parse(read(STATE_FILE))["channel"]
   end
 
+  # The same refusal where the name cannot tell the two rooms apart. Slugs are
+  # unique per workspace, not globally, so "meetings" in Globex and "meetings"
+  # here are two different rooms with one name — and a mirror that recognises
+  # its own by name alone would fast-forward one workspace's folder with
+  # another workspace's record, which is the failure Article P5 is about.
+  test "a mirror refuses another workspace's room of the same name" do
+    globex = workspace(name: "Globex")
+    theirs = room_in(globex, slug: "meetings")
+    mine = room_in(Current.workspace, slug: "meetings")
+
+    RecordStore::GitExport.call(mine, path: @path)
+    ours = shas
+
+    assert_raises RecordStore::GitExport::ChainMismatch do
+      globex.entered { RecordStore::GitExport.call(theirs, path: @path) }
+    end
+
+    assert_equal ours, shas, "one folder, one room's record"
+  end
+
   # Commit identity comes out of the entry, so `git log` answers who as well as
   # what. A person's own name and address, because that is what the record says.
   test "what a person recorded is committed under their name" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
 
     RecordStore::GitExport.call(@channel, path: @path)
 
@@ -317,9 +343,11 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal "Alice's agent <agent+#{run.id}@workroom.local>", author_of(shas.last)
     assert_equal "remember: Pricing objection", subject_of(shas.last)
 
-    front = front_matter(read("memory/pricing-objection.md"))
+    body = read("memory/pricing-objection.md")
+    front = front_matter(body)
     assert_equal "agent", front["trust"]
     assert_equal memory_uri("Pricing objection"), front["uri"]
+    assert_includes body, "Setup cost, not price.", "what the agent recorded, not only that it did"
   end
 
   # An artifact is raw bytes on disk: nothing inside the file says where it came
@@ -346,7 +374,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # every commit alike. The two questions are different, and flattening them
   # loses the one the mirror can actually vouch for.
   test "every commit is committed by the export, whoever authored it" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
     remembered(title: "Pricing objection", detail: "Setup cost, not price.",
                run: agent_run(user: @alice, channel: @channel))
 
@@ -358,9 +386,17 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # Article P3: a correction is a new entry that supersedes the old one, and the
   # old one stays readable. Exported as a deletion — or as an edit with no trace
   # — the mirror would be the memory model turned off.
+  #
+  # By the time the export runs, the store has already dropped the entry from
+  # what the room currently knows: both commits are replayed from envelopes, and
+  # the first one still has to produce the detail as it stood. That is the whole
+  # reason the envelope carries it.
   test "a supersession is a new version of the file, and the old one is still in the history" do
     entry = memory(title: "Acme wants monthly reporting", detail: "First Tuesday of the month.")
     superseded(title: "Acme wants monthly reporting", reason: "contradicted by a later call")
+
+    assert_nil Memory::Store.current.fetch(memory_uri("Acme wants monthly reporting")),
+               "the premise: what the room currently knows no longer includes it"
 
     RecordStore::GitExport.call(@channel, path: @path)
 
@@ -370,16 +406,19 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     history = git("log", "--format=%H", "--", file).split("\n")
     assert_equal 2, history.length, "the correction is a commit, not a rewrite"
 
+    # The supersede envelope carries why and not what — it is a correction, and
+    # the entry it corrects is named by uri. So the new version says which entry
+    # this is and why it no longer stands; the version it replaced says what it
+    # said, one commit back.
     current = read(file)
     assert_includes current, "contradicted by a later call", "the mirror says why it was corrected"
-    assert_includes current, "Acme wants monthly reporting",
-                    "a correction that erased what was corrected would be a deletion in disguise"
+    assert_equal memory_uri("Acme wants monthly reporting"), front_matter(current)["uri"]
     assert_match(/\Asupersede: /, subject_of(shas.last))
 
     original = git("show", "#{history.last}:#{file}")
-    assert_includes original, "First Tuesday of the month."
-    assert_not_includes original, "contradicted by a later call",
-                        "the version before the correction is still readable"
+    assert_includes original, "First Tuesday of the month.",
+                    "the version before the correction still says what the room was told"
+    assert_not_includes original, "contradicted by a later call"
 
     assert_equal entry.seq + 1, @channel.channel_records.order(:seq).last.seq
   end
@@ -439,7 +478,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # Article P5. The export is one room's record; another room's entries are not
   # this mirror's to hold, whatever else is in the same database.
   test "the mirror holds one room's journal and no other's" do
-    said = message(body: "ours")
+    said = posted(body: "ours")
     other = channel(name: "Marketing")
     RecordStore::Append.call(channel: other, kind: "message.created", subject: nil,
                              payload: { "body" => "theirs" })
@@ -460,7 +499,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   # done.
 
   test "the task mirrors the room it was given" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
 
     run = run_task(@channel.slug, @path)
 
@@ -497,6 +536,22 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     refute_path_exists @path, "nothing is written to a path the run could not resolve"
   end
 
+  # The refusal the service raises has to reach the shell as an exit, or the
+  # operator's cron reports a mirror that forked as a mirror that refreshed.
+  test "a mirror that disagrees with the journal fails the run, not only the call" do
+    posted(body: "shall we meet Tuesday")
+    run_task(@channel.slug, @path)
+    head = shas.last
+
+    tamper(last_hash: "0" * 64)
+    posted(body: "after the tampering")
+
+    run = run_task(@channel.slug, @path)
+
+    assert run.aborted, "a forked mirror left a zero exit: #{run.out}"
+    assert_equal [ head ], shas
+  end
+
   # Silence would read as a room that was mirrored, which is the one answer this
   # must never give by accident.
   test "a slug no room anywhere answers to is refused, not passed over" do
@@ -508,7 +563,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   end
 
   test "the task refuses to run without both a room and a path" do
-    message(body: "shall we meet Tuesday")
+    posted(body: "shall we meet Tuesday")
 
     assert run_task.aborted, "no arguments at all left a zero exit"
     assert run_task(@channel.slug).aborted, "a room with nowhere to write it left a zero exit"
@@ -525,7 +580,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     # shape this file made up.
 
     # app/controllers/api/v1/messages_controller.rb
-    def message(body:, author: @alice)
+    def posted(body:, author: @alice)
       written = @channel.messages.create!(author:, body:)
       RecordStore::Append.call(channel: @channel, kind: "message.created", subject: written,
                                payload: MessageSerializer.call(written).as_json)
@@ -549,11 +604,16 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
     # app/controllers/api/v1/memory_controller.rb — a person recording something
     # the room should know. No run: nobody's turn produced it.
+    #
+    # The detail travels in the envelope. That field is the one thing here the
+    # call site does not send yet, and this card adds it: without it the journal
+    # records that the room learned something and not what, and the mirror can
+    # only be rebuilt from a store that has since moved on.
     def memory(title:, detail:, author: @alice)
       Memory::Store.current.write(@channel, title:, detail:, trust: "human", author:)
       RecordStore::Append.call(
         channel: @channel, kind: "memory", subject: nil,
-        payload: { action: "written", uri: memory_uri(title), title:, trust: "human",
+        payload: { action: "written", uri: memory_uri(title), title:, detail:, trust: "human",
                    author_id: author.id }
       )
     end
@@ -565,7 +625,7 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
       RecordStore::Append.call(
         channel: @channel, kind: "memory", subject: nil,
         payload: { action: "remember", uri: memory_uri(title), trust: "agent",
-                   author_id: author.id, run_id: run&.id, title: }
+                   author_id: author.id, run_id: run&.id, title:, detail: }
       )
     end
 
@@ -583,6 +643,14 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     # What Memory::Local#write builds a uri from, which is what the tail of the
     # exported filename has to come from.
     def memory_uri(title) = "#{@channel.memory_uri}#{title.parameterize}"
+
+    def with_store(store)
+      previous = Memory::Store.current
+      Memory::Store.current = store
+      yield
+    ensure
+      Memory::Store.current = previous
+    end
 
     # A room of somebody else's, with something in it. Everything inside the
     # block, because the boundary is the database's: a row for another workspace
