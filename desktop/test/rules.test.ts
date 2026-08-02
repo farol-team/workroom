@@ -1,7 +1,10 @@
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+/// <reference types="vite/client" />
 import { describe, expect, test } from "vitest";
+// One test below reads main.ts as text rather than importing it, and asks vite
+// for it (`?raw`) rather than node's fs: the specs are typechecked now (#222),
+// and node's globals have no types here — nothing else in this window-shaped
+// suite reaches the filesystem.
+import mainSource from "../src/main.ts?raw";
 import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
@@ -472,16 +475,12 @@ describe("distillation", () => {
   });
 });
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 describe("the turn carries the question", () => {
-  test("send() wraps the body before prompting", async () => {
+  test("send() wraps the body before prompting", () => {
     // A source-level guard, and it is one on purpose: `send()` needs a window,
     // so nothing else here can catch the question being quietly dropped. Losing
     // it would be invisible — turns keep working, and the room stops learning.
-    const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
-
-    expect(source).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
+    expect(mainSource).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
   });
 });
 
@@ -510,8 +509,8 @@ describe("what is happening in the room", () => {
     w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
     w.observed({ runId: 2, channel: "meetings", who: "Bob", at: 2000 });
 
-    expect(w.inChannel("meetings")).toEqual([{ who: "Bob", since: 1000 }],
-      "since the earliest, so the elapsed time does not reset mid-work");
+    expect(w.inChannel("meetings"), "since the earliest, so the elapsed time does not reset mid-work")
+      .toEqual([{ who: "Bob", since: 1000 }]);
   });
 
   test("one ending run does not silence the other", () => {
@@ -574,9 +573,9 @@ describe("unread", () => {
   test("what arrived since you last looked", () => {
     expect(unreadCount(7, 5)).toBe(2);
     expect(unreadCount(6, 6)).toBe(0);
-    expect(unreadCount(5, undefined)).toBe(0,
-      "a channel you have never opened is not a channel full of unread");
-    expect(unreadCount(3, 5)).toBe(0, "a room cannot owe you a negative number of messages");
+    expect(unreadCount(5, undefined), "a channel you have never opened is not a channel full of unread")
+      .toBe(0);
+    expect(unreadCount(3, 5), "a room cannot owe you a negative number of messages").toBe(0);
   });
 });
 
@@ -602,7 +601,7 @@ describe("threads", () => {
     const all = [ room, asked, answered, replied, alsoReplied ];
 
     expect(threadOf(all, 2).map((m) => m.id)).toEqual([ 2, 3, 4, 5 ]);
-    expect(threadOf(all, 1).map((m) => m.id)).toEqual([ 1 ], "a message nobody answered is a thread of one");
+    expect(threadOf(all, 1).map((m) => m.id), "a message nobody answered is a thread of one").toEqual([ 1 ]);
   });
 
   test("the summary says how many replied, and who", () => {
@@ -630,8 +629,8 @@ describe("who said it", () => {
     const alice = identity({ kind: "user", name: "Alice Ruiz" });
 
     expect(alice.initials).toBe("AR");
-    expect(alice.hue).toBe(identity({ kind: "user", name: "Alice Ruiz" }).hue,
-      "the same person is the same colour every time");
+    expect(alice.hue, "the same person is the same colour every time")
+      .toBe(identity({ kind: "user", name: "Alice Ruiz" }).hue);
     expect(alice.isAgent).toBe(false);
   });
 
@@ -662,7 +661,7 @@ describe("a long history", () => {
 
     const shown = onScreen(messages, 200);
     expect(shown.messages).toHaveLength(200);
-    expect(shown.messages[0].id).toBe(301, "the recent end, not the start");
+    expect(shown.messages[0].id, "the recent end, not the start").toBe(301);
     expect(shown.hidden).toBe(300);
   });
 
