@@ -198,8 +198,12 @@ whose tail climbs out of the repository both land inside it, sanitized.
 - ~~Fix `MemoryController#index` to go through `Memory::Store`~~ — done
 - ~~Add `Memory::Store#all(channel, since:)` to the seam~~ — done
 - ~~The mirror itself~~ — done: `record:export`
-- Desktop integration: the mirror inside a bound folder (#43), and a client that
-  says plainly what it is about to write and where.
+- ~~Desktop integration: the mirror inside a bound folder (#43)~~ — re-evaluated
+  after #204. With a clone per channel, the channel's clone is the mirror's
+  natural home; binding a folder by hand is no longer where it would live.
+  What remains of the card is a desktop-integrated `.workroom/` mirror inside
+  that clone, as its own follow-up: it needs an export API — today
+  `record:export` is a rake task, and no journal-listing endpoint exists.
 - Refresh on change rather than on demand, if anyone asks for it. Nothing runs
   the export today except a person or a cron; that is deliberate while the
   mirror is opt-in and one room at a time.

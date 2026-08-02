@@ -58,6 +58,35 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert_includes found.map { |c| c["uri"] }, "workroom://memory/remember"
   end
 
+  test "a channel with a repository is told how to publish into it" do
+    # Promotion is a step, not an effect (#208): the rail says how, and the
+    # how names where. The url is the room's own setting (#203).
+    @channel.update!(repository_url: "https://github.com/acme/widgets")
+
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "publish the decision to the repository" } })
+      .dig("result", "content", 0, "text"))
+    assert_includes found.map { |c| c["uri"] }, "workroom://channel/publish"
+
+    text = rpc("tools/call", { name: "execute_capability",
+      arguments: { uri: "workroom://channel/publish" } })
+      .dig("result", "content", 0, "text")
+    assert_includes text, "https://github.com/acme/widgets"
+    assert_includes text, "agent/", "the branch discipline is #205's, and the text carries it"
+    assert_includes text, "human", "a human merges, never the agent unasked"
+  end
+
+  test "a channel without a repository has nothing to publish into" do
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "publish the decision to the repository" } })
+      .dig("result", "content", 0, "text"))
+    refute_includes found.map { |c| c["uri"] }, "workroom://channel/publish"
+
+    out = rpc("tools/call", { name: "execute_capability",
+      arguments: { uri: "workroom://channel/publish" } })
+    assert out.dig("result", "isError"), "an instruction for a room without a clone is a capability it does not have"
+  end
+
   test "what an agent chose to keep is attributed to the run that kept it" do
     # A run that kept nothing and a run whose memory nobody can trace back look
     # the same from the outside, and only one of them is fine.
