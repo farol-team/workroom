@@ -185,8 +185,10 @@ async function open(slug: string) {
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
   renderBinding();
-  timeline.open(full);
+  // Before the timeline draws, not after: what it draws counts itself as seen
+  // through `onShown`, and setting the count afterwards would throw that away.
   seenCount.set(slug, full.messages.length);
+  timeline.open(full);
 
   renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
