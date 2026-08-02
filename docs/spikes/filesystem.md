@@ -175,9 +175,10 @@ could not:
   years later says exactly what a mirror made that afternoon would have said.
 
 That last one has a cost worth naming: a memory entry's **detail travels in the
-journal entry**. The alternative — resolve the uri through `Memory::Store` at
-export time — cannot work, because by then the entry may be superseded and the
-seam correctly answers with what the room knows *now*.
+journal entry**, which is a field both append call sites now send. The
+alternative — resolve the uri through `Memory::Store` at export time — cannot
+work, because by then the entry may be superseded and the seam correctly answers
+with what the room knows *now*.
 
 What the mirror refuses:
 
@@ -197,11 +198,12 @@ whose tail climbs out of the repository both land inside it, sanitized.
 - ~~Fix `MemoryController#index` to go through `Memory::Store`~~ — done
 - ~~Add `Memory::Store#all(channel, since:)` to the seam~~ — done
 - ~~The mirror itself~~ — done: `record:export`
-- **Journal the detail on write.** The two call sites that append a `memory`
-  entry — `Api::V1::MemoryController#create` and `Rail::Registry#record` — send
-  `title` and not `detail`. The export reads both and the specs cover both, so
-  a mirror of a room written before that field lands has front matter and a
-  heading where the entry's text should be. Additive, one field per call site;
-  those files were outside this card's scope.
 - Desktop integration: the mirror inside a bound folder (#43), and a client that
   says plainly what it is about to write and where.
+- Refresh on change rather than on demand, if anyone asks for it. Nothing runs
+  the export today except a person or a cron; that is deliberate while the
+  mirror is opt-in and one room at a time.
+- Entries journaled before this card carry no `detail`, so a mirror of a room
+  older than it has a heading with nothing under it for those. Nothing is lost
+  — the store still holds the text — but the mirror cannot show what the
+  envelope never said.

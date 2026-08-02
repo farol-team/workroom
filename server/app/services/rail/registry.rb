@@ -113,7 +113,11 @@ module Rail
         entry = store.write(@channel, title: args[:title], detail: args[:detail],
                             trust: "agent", author: @user, source: run)
         run&.update(distilled_at: Time.current)
-        record("remember", uri: entry.uri, title: args[:title], run: run)
+        # What was recorded, not only that something was: the entry's text is in
+        # the journal because the git mirror replays envelopes and the store has
+        # moved on by the time it does. A correction carries a reason instead —
+        # it is the one thing a supersession knows.
+        record("remember", uri: entry.uri, title: args[:title], detail: entry.detail, run: run)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
