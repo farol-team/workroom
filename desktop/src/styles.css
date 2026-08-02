@@ -105,6 +105,33 @@ dialog input, dialog select { display: block; width: 100%; margin: 0;
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
 h2 { margin: 0 0 4px; font-size: 16px; }
 
+/* The room's name doubles as the way into its settings (#203), drawn as the
+   name rather than as a button — a gear would say machinery where there is a
+   room. */
+.header-name { background: none; border: none; color: var(--text); font: inherit;
+  font-weight: 700; padding: 0; cursor: pointer; }
+.header-name:hover { color: var(--accent); }
+
+/* A choice row is not a text field: the dialog shape above stretches fields
+   to fill their row, and a radio stretched that way reads as broken. */
+dialog .choice { display: flex; align-items: baseline; gap: 8px; margin: 8px 0;
+  font-size: 14px; cursor: pointer; }
+dialog .choice input[type="radio"] { display: inline-block; width: auto; margin: 0;
+  padding: 0; background: none; border: none; accent-color: var(--accent); }
+/* A class rule beats the UA's `[hidden]` on specificity, so without this the
+   clone row shows through its own `hidden` — a choice that must disappear
+   while the room names no repository. */
+dialog .choice[hidden] { display: none; }
+dialog .section-head { padding: 12px 0 4px; border-top: 1px solid var(--line);
+  margin-top: 14px; text-transform: uppercase; letter-spacing: .05em; }
+dialog input[readonly] { color: var(--muted); }
+
+/* Calm, on purpose: a repository that ships on merge is ordinary, and the
+   person needs the checklist, not an alarm (#203). */
+#cs-warning { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  margin: 10px 0; font-size: 13px; }
+#cs-warning p { margin: 0 0 8px; }
+
 #composer #destination { align-self: center; white-space: nowrap; font-size: 12px; }
 #composer #destination.to-agent { color: var(--agent); }
 #composer #summon { font-family: inherit; }

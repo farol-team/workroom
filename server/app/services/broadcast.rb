@@ -60,6 +60,12 @@ module Broadcast
     to_owner(s.agent_run.agent_session.user, payload)
   end
 
+  # The room itself changed, not something in it. The serialized body is handed
+  # over rather than rebuilt here because it is the API's shape for a channel
+  # (#203) — building a second one in this file would fork that shape, and the
+  # room would hear a different description than the caller just read back.
+  def channel(c, serialized) = to_room(c, { type: "channel", channel: serialized })
+
   # Work product. The room came for this.
   def artifact(a)
     to_room(a.channel, { type: "artifact",

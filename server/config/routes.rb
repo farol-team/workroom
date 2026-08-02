@@ -35,6 +35,7 @@ Rails.application.routes.draw do
     get "channel-templates", to: "channels#templates", as: :channel_templates
     resources :channels, only: %i[index create], param: :slug
     get "channels/:slug",         to: "channels#show",    as: :channel
+    patch "channels/:slug",       to: "channels#update"
     get "channels/:slug/context", to: "channels#context",  as: :channel_context
 
     post "channels/:channel_slug/messages", to: "messages#create", as: :channel_messages

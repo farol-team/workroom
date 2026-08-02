@@ -266,6 +266,29 @@ async fn agent_turn_start(app: AppHandle, workspace: String) -> Result<(), Strin
     .map_err(|e| format!("marking the turn's start did not finish: {e}"))?
 }
 
+/// What a folder's repository would mean for an agent about to work in it —
+/// read when the person picks the folder, so the warning that a merge ships
+/// something arrives before the agent does (#203). The reading is `git` and a
+/// directory listing, and belongs off the runtime like every other walk.
+#[tauri::command]
+async fn agent_repo_info(path: String) -> Result<workspace::RepoInfo, String> {
+    tokio::task::spawn_blocking(move || workspace::repo_info(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("looking at the repository did not finish: {e}"))
+}
+
+/// Clone the room's repository into the folder the room works in. The url is
+/// the room's own setting and the directory is derived — like every session
+/// working directory, it is never the agent's to name (#201).
+#[tauri::command]
+async fn agent_clone(url: String, dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::clone_repository(&url, std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("cloning did not finish: {e}"))?
+}
+
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
@@ -600,6 +623,8 @@ pub fn run() {
             agent_workspace,
             agent_produced,
             agent_turn_start,
+            agent_repo_info,
+            agent_clone,
             agent_read,
             agent_new_session,
             agent_load_session,

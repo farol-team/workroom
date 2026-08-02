@@ -39,6 +39,38 @@ module Api
         render json: serialize(channel), status: :created
       end
 
+      # The one setting a room has so far: which repository its work lives in
+      # (#203). A setting is not a read, so this checks membership where `show`
+      # settles for an open door — a stranger may look at an open room, and may
+      # not say what it is about.
+      #
+      # Blank means none: the value is stripped and an empty answer writes NULL
+      # back, so clearing the setting and never having set it stay the same
+      # fact. No format validation — the address is for the agent that clones
+      # it, and a typo there is a checkout error, not a 422 here.
+      def update
+        @channel = Channel.find_by!(slug: params[:slug])
+        return render_error("not a member of this channel", :forbidden) unless current_user.member_of?(@channel)
+
+        url = params[:repository_url].to_s.strip.presence
+        # A patch that changes nothing is still answered, but the journal is
+        # append-only and a "changed nothing" entry in it is noise the chain
+        # then carries forever — so only a real change is recorded, logged and
+        # told to the room.
+        if url != @channel.repository_url
+          from = @channel.repository_url
+          @channel.update!(repository_url: url)
+          RecordStore::Append.call(
+            channel: @channel, kind: "channel.updated", subject: @channel,
+            payload: { field: "repository_url", from:, to: url, author_id: current_user.id }
+          )
+          Activity.log(actor: current_user, action: "channel.updated", subject: @channel)
+          Broadcast.channel(@channel, serialize(@channel))
+        end
+
+        render json: serialize(@channel)
+      end
+
       def show
         channel!.memberships.find_or_create_by!(user: current_user)
         store = Memory::Store.current
@@ -104,7 +136,7 @@ module Api
       # (#99). The store can answer it, but only one room at a time, so the answer
       # belongs to `show`.
       def serialize(c)
-        c.slice(:id, :slug, :name, :purpose, :visibility, :memory_uri)
+        c.slice(:id, :slug, :name, :purpose, :visibility, :memory_uri, :repository_url)
          .merge(message_count: c.messages.count)
       end
     end
