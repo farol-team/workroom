@@ -151,6 +151,71 @@ pub struct Produced {
 /// prompt suggesting the channel wants it.
 pub const MAX_ARTIFACT_BYTES: u64 = 25 * 1024 * 1024;
 
+/// Take the line this workspace's turns are measured from, if it has none yet.
+///
+/// Opening a workspace is not the same act as starting a turn: a person clicks
+/// back into a channel whose agent is still working, and a fresh snapshot there
+/// would quietly move the line past everything the turn has written so far —
+/// which then belongs to nobody, because the next turn measures from after it.
+/// The first entry has to take a line, or a folder with a year of work in it is
+/// offered whole; every entry after that already has one (#179).
+pub fn baseline(shots: &Workspaces, dir: &Path) -> Result<(), String> {
+    let mut state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    state
+        .entry(dir.to_path_buf())
+        .or_insert_with(|| snapshot(dir));
+    Ok(())
+}
+
+/// What this turn wrote or changed, and the line moved to where it ends.
+///
+/// Reading the line and moving it is one act, so it is done holding the map:
+/// two channels can be bound to one folder and their turns can finish in the
+/// same moment, and a "before" both of them read is a file the room is offered
+/// twice — or, when the write lands between one turn's snapshot and its turn to
+/// hold the map, a file offered by neither and then left behind the line. Under
+/// the lock the second turn diffs against what the first one left, which is
+/// nothing (#179).
+pub fn offer(shots: &Workspaces, dir: &Path) -> Result<Vec<Produced>, String> {
+    // A folder somebody bound is their real work, and git already knows what
+    // changed in it — by their ignore rules, not ours. There is no line to hold
+    // here: git answers from the repository every turn.
+    if let Some(changed) = git_changes(dir) {
+        return Ok(changed
+            .into_iter()
+            .filter_map(|path| {
+                let bytes = fs::metadata(dir.join(&path)).ok()?.len();
+                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
+            })
+            .collect());
+    }
+
+    let mut state = shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?;
+    let after = snapshot(dir);
+    let before = state.get(dir).cloned().unwrap_or_default();
+
+    let files = produced(&before, &after)
+        .into_iter()
+        .filter_map(|rel| {
+            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
+            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
+                path: rel.to_string_lossy().into_owned(),
+                bytes,
+            })
+        })
+        .collect();
+
+    // The next turn is measured from here, so one file is not offered twice.
+    state.insert(dir.to_path_buf(), after);
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +377,182 @@ mod tests {
         assert_eq!(
             produced(&before, &snapshot(&dir)),
             vec![PathBuf::from("out/charts/q3.svg")]
+        );
+    }
+}
+
+#[cfg(test)]
+mod the_offer_a_turn_leaves {
+    //! What a turn is offered, when another turn is finishing at the same
+    //! moment and when the person re-opens the channel while it still runs.
+    //!
+    //! The two commands own one line — what was already there — and both read
+    //! it and move it. Everything below is about that line being read and moved
+    //! once per turn, by the turn that did the work.
+
+    use super::*;
+    use std::io::Write as _;
+    use std::time::Duration;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-offer-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::File::create(path)
+            .unwrap()
+            .write_all(body.as_bytes())
+            .unwrap();
+    }
+
+    fn paths(files: &[Produced]) -> Vec<String> {
+        let mut out: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        out.sort();
+        out
+    }
+
+    /// Two turns, held at the door until the work is on disk, then let go at
+    /// once. Racing them on wall-clock alone proves nothing — the loser is
+    /// usually finished before the winner starts — and the map is the only
+    /// door both of them have to come through.
+    fn both_turns_at_once(dir: &Path, shots: &Workspaces, work: &str) -> Vec<String> {
+        let held = shots.0.lock().unwrap();
+        let (first, second) = std::thread::scope(|s| {
+            let one = s.spawn(|| offer(shots, dir).unwrap());
+            let two = s.spawn(|| offer(shots, dir).unwrap());
+            std::thread::sleep(Duration::from_millis(150));
+            write(dir, work, "findings");
+            drop(held);
+            (one.join().unwrap(), two.join().unwrap())
+        });
+
+        let mut both = paths(&first);
+        both.extend(paths(&second));
+        both
+    }
+
+    #[test]
+    fn two_turns_finishing_at_once_offer_the_work_once() {
+        // Two channels can be bound to one folder, and their turns can land in
+        // the same millisecond. A file offered twice is a room told twice that
+        // it was written, and a person asked twice to publish it.
+        let dir = temp("race");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+
+        assert_eq!(
+            both_turns_at_once(&dir, &shots, "report.md"),
+            vec!["report.md"],
+            "one turn's work, offered by one turn"
+        );
+    }
+
+    #[test]
+    fn work_written_while_the_line_is_held_is_not_lost() {
+        // The other way the race hurts. A turn that snapshots before it takes
+        // the map has already missed everything written since — and nobody
+        // else offers it either, because the line is then moved past it.
+        let dir = temp("under-lock");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+
+        let held = shots.0.lock().unwrap();
+        let files = std::thread::scope(|s| {
+            let turn = s.spawn(|| offer(&shots, &dir).unwrap());
+            std::thread::sleep(Duration::from_millis(150));
+            write(&dir, "late.md", "written while the map was held");
+            drop(held);
+            turn.join().unwrap()
+        });
+
+        assert_eq!(paths(&files), vec!["late.md"]);
+    }
+
+    #[test]
+    fn opening_the_workspace_again_does_not_move_the_line() {
+        // Clicking back into a channel whose agent is mid-turn is not the start
+        // of a turn. Re-snapshotting there silently swallows everything the
+        // turn has written so far.
+        let dir = temp("re-entry");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "written while the turn still runs");
+
+        baseline(&shots, &dir).unwrap();
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+    }
+
+    #[test]
+    fn a_workspace_opened_for_the_first_time_starts_from_what_was_there() {
+        // The other half: a first entry must take the line, or a folder with a
+        // year of work in it is offered whole on the first turn.
+        let dir = temp("first-entry");
+        write(&dir, "old.md", "from an earlier day");
+        let shots = Workspaces::default();
+
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "new.md", "this turn");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["new.md"]);
+    }
+
+    #[test]
+    fn what_was_offered_once_is_not_offered_again() {
+        let dir = temp("twice");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "findings");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        assert!(
+            offer(&shots, &dir).unwrap().is_empty(),
+            "the next turn is measured from where the last one ended"
+        );
+    }
+
+    #[test]
+    fn a_bound_repository_is_still_answered_by_git() {
+        // The line does not apply to somebody's real repository: git already
+        // knows what changed there, by their ignore rules rather than ours.
+        let dir = temp("bound");
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "a@b"]);
+        run(&["config", "user.name", "a"]);
+        write(&dir, ".gitignore", "node_modules/\n");
+        write(&dir, "src/main.rs", "fn main() {}");
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+        write(&dir, "report.md", "findings");
+        write(&dir, "node_modules/left-pad/index.js", "junk");
+
+        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        // And again, because a bound repository holds no line between turns and
+        // this is the one place "offered once" deliberately does not hold: the
+        // file is still uncommitted, so git still calls it changed, and the
+        // room is offered it again next turn. Two turns racing here are told
+        // the same true thing rather than one of them being told a stale one.
+        // Written down because the difference is invisible otherwise, and the
+        // next person to read the race specs will wonder why it stops here.
+        assert_eq!(
+            paths(&offer(&shots, &dir).unwrap()),
+            vec!["report.md"],
+            "git answers every turn, and answers the same until the work is committed"
         );
     }
 }
