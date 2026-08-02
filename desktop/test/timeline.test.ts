@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest";
-import { createTimeline, type TimelineDeps } from "../src/timeline";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { ON_SCREEN, createTimeline, type TimelineDeps } from "../src/timeline";
 import type { Author, Channel, Message } from "../src/api";
+import type { Asked } from "../src/rules";
 
 // The room's half of index.html — the ids the timeline draws into. Kept in step
 // with the real markup by hand, the way the onboarding spec keeps its own.
@@ -11,10 +12,6 @@ const MARKUP = `
   </aside>`;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-
-/// The on-screen cap, mirrored from the timeline: a room with ten thousand
-/// messages is not ten thousand elements.
-const ON_SCREEN = 200;
 
 const person = (name: string): Author => ({ kind: "user", id: 1, name, email: `${name}@farol.run` });
 const theirAgent = (name: string): Author =>
@@ -40,10 +37,17 @@ function room(messages: Message[], over: Partial<Channel> = {}): Channel & { mes
   };
 }
 
-/// What the timeline cannot own. `showSteps` is a view preference of the room,
-/// not a property of the run.
+/// What the timeline cannot own: the room's unread bookkeeping, the agent that
+/// answers a permission, and the machine the work product is read from.
 function deps(over: Partial<TimelineDeps> = {}): TimelineDeps {
-  return { showSteps: () => true, ...over };
+  return {
+    onShown: vi.fn(),
+    permit: vi.fn(async () => {}),
+    produced: vi.fn(async () => []),
+    readFile: vi.fn(async () => ""),
+    attach: vi.fn(async () => {}),
+    ...over,
+  };
 }
 
 beforeEach(() => { document.body.innerHTML = MARKUP; nextId = 0; });
@@ -51,16 +55,16 @@ beforeEach(() => { document.body.innerHTML = MARKUP; nextId = 0; });
 describe("the room's timeline", () => {
   test("a message that arrives twice is drawn once and held once", () => {
     const timeline = createTimeline(deps());
-    const hello = said("morning");
-    timeline.open(room([ hello ]));
+    timeline.open(room([]));
 
     // The same message reaches the room stream and the owner's, and posting it
     // hands it back to the sender as well.
+    const hello = said("morning");
     timeline.add(hello);
     timeline.add({ ...hello });
 
     expect(document.querySelectorAll("#messages .msg")).toHaveLength(1);
-    expect(timeline.held().filter((m) => m.id === hello.id)).toHaveLength(1);
+    expect(timeline.held()).toHaveLength(1);
   });
 
   test("an empty room says what it is for, and stops once something is said", () => {
@@ -83,25 +87,50 @@ describe("the room's timeline", () => {
     expect(timeline.held()).toEqual([]);
     expect(timeline.recentHistory()).toBeNull();
   });
+
+  // The unread pill is the room's, counted from what the timeline put on
+  // screen. It is a seam rather than an import because the count belongs to the
+  // channel list, which the timeline never touches.
+  test("the room is told what has been shown to it", () => {
+    const onShown = vi.fn();
+    const timeline = createTimeline(deps({ onShown }));
+    const root = said("shall we move the review");
+    timeline.open(room([ root, said("morning") ]));
+    expect(onShown).toHaveBeenCalledTimes(2);
+
+    timeline.add(said("and one more"));
+    expect(onShown).toHaveBeenCalledTimes(3);
+
+    // A reply drawn in the thread panel is not something the room has shown.
+    timeline.add(said("yes", { parent_id: root.id, author: person("Bob") }));
+    expect(onShown).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("what the agent is told the room said", () => {
-  test("the history is the record, not what is on screen", () => {
+  test("the turn's history is the record, not the page", () => {
+    const timeline = createTimeline(deps());
+    const many = Array.from({ length: ON_SCREEN + 5 }, (_, i) => said(`later, number ${i}`));
+    timeline.open(room(many));
+
+    // The room keeps the recent end on screen and says so.
+    expect(document.querySelectorAll("#messages .msg")).toHaveLength(ON_SCREEN);
+    expect($("messages").textContent).toContain("earlier messages are not shown");
+
+    // Called the way the turn calls it — no argument. The record answers, so
+    // what a message says is what was said, not the row that drew it.
+    const recent = many.slice(-20).map((m) => `Alice: ${m.body}`);
+    expect(timeline.recentHistory()).toBe(`Recently in this channel:\n\n${recent.join("\n")}`);
+  });
+
+  test("a room past the cap still hands over what scrolled off it", () => {
     const timeline = createTimeline(deps());
     const oldest = said("the oldest thing said here");
     const rest = Array.from({ length: ON_SCREEN }, (_, i) => said(`later, number ${i}`));
     timeline.open(room([ oldest, ...rest ]));
 
-    // The room keeps the recent end on screen and says so.
-    expect(document.querySelectorAll("#messages .msg")).toHaveLength(ON_SCREEN);
-    expect($("messages").textContent).toContain("earlier messages are not shown");
     expect($("messages").textContent).not.toContain("the oldest thing said here");
-
-    // The turn reads the record, so a message scrolled out of the page is
-    // still part of the conversation the agent is answering.
-    const history = timeline.recentHistory(ON_SCREEN + 20)!;
-    expect(history).toContain("Alice: the oldest thing said here");
-    expect(history).toContain("Alice: later, number 199");
+    expect(timeline.recentHistory(ON_SCREEN + 20)).toContain("Alice: the oldest thing said here");
   });
 
   test("an agent's answer is attributed to the agent", () => {
@@ -111,9 +140,26 @@ describe("what the agent is told the room said", () => {
       said("we decided to wait", { author: theirAgent("Alice") }),
     ]));
 
+    expect(timeline.recentHistory()).toBe(
+      "Recently in this channel:\n\n"
+      + "Alice: @agent what did we decide\n"
+      + "Alice's agent: we decided to wait");
+  });
+
+  // The record holds every reply; the room holds what the room said. Handing
+  // the side conversations to the agent would change what a turn is answering,
+  // and this card changes where history comes from, not what it is.
+  test("a side conversation is not part of what the room said", () => {
+    const timeline = createTimeline(deps());
+    const root = said("shall we move the review");
+    timeline.open(room([ root ]));
+    timeline.add(said("only between us", { parent_id: root.id, author: person("Bob") }));
+    timeline.add(said("agreed, moved it", { parent_id: root.id, author: theirAgent("Alice") }));
+
     const history = timeline.recentHistory()!;
-    expect(history).toContain("Alice: @agent what did we decide");
-    expect(history).toContain("Alice's agent: we decided to wait");
+    expect(history).not.toContain("only between us");
+    // An agent answering in a thread answered the room, and the room read it.
+    expect(history).toContain("Alice's agent: agreed, moved it");
   });
 
   test("a room where nothing was said has no history to give", () => {
@@ -207,13 +253,21 @@ describe("what the run is doing", () => {
     expect(holder.hidden).toBe(false);
   });
 
-  test("steps the person asked not to see are drawn hidden", () => {
-    const timeline = createTimeline(deps({ showSteps: () => false }));
+  test("steps go away and come back with the preference, whenever they arrived", () => {
+    const timeline = createTimeline(deps());
     timeline.open(room([]));
-
     timeline.addStep(7, "read the minutes", 41);
 
-    expect(document.querySelector<HTMLElement>('#messages .steps[data-run="7"]')!.hidden).toBe(true);
+    timeline.revealSteps(false);
+    expect(document.querySelector<HTMLElement>('.steps[data-run="7"]')!.hidden).toBe(true);
+
+    // A run that starts while they are off does not put them back on screen.
+    timeline.addStep(8, "read the thread", 43);
+    expect(document.querySelector<HTMLElement>('.steps[data-run="8"]')!.hidden).toBe(true);
+
+    timeline.revealSteps(true);
+    expect([ ...document.querySelectorAll<HTMLElement>(".steps") ].map((el) => el.hidden))
+      .toEqual([ false, false ]);
   });
 
   test("the latest plan replaces the one on screen", () => {
@@ -239,5 +293,75 @@ describe("what the run is doing", () => {
     timeline.addArtifact({ id: 3, name: "minutes.md", kind: "transcript" });
 
     expect(document.querySelector("#messages .artifact")?.textContent).toContain("minutes.md");
+  });
+});
+
+describe("the agent waiting on a person", () => {
+  const asked: Asked = {
+    id: "req-1", title: "Run the test suite?",
+    options: [ { id: "allow", name: "Allow" }, { id: "deny", name: "Deny" } ],
+  };
+
+  test("the options are the agent's, and the answer goes back to it", async () => {
+    const permit = vi.fn(async () => {});
+    const timeline = createTimeline(deps({ permit }));
+    timeline.open(room([]));
+
+    timeline.askPermission("claude", asked);
+    const ask = document.querySelector<HTMLElement>("#messages .offer.ask")!;
+    expect(ask.textContent).toContain("Run the test suite?");
+    expect([ ...ask.querySelectorAll("button") ].map((b) => b.textContent))
+      .toEqual([ "Allow", "Deny" ]);
+
+    ask.querySelectorAll<HTMLButtonElement>("button")[0].click();
+    // Nothing is answered twice while the first answer is in flight.
+    expect([ ...ask.querySelectorAll("button") ].every((b) => b.disabled)).toBe(true);
+
+    await vi.waitFor(() => expect(permit).toHaveBeenCalledWith("claude", "req-1", "allow"));
+    await vi.waitFor(() => expect(ask.textContent).toBe("Run the test suite? — allow"));
+  });
+});
+
+describe("what the run wrote, offered one file at a time", () => {
+  test("a file is offered, and sharing it is what sends it", async () => {
+    const attach = vi.fn(async () => {});
+    const timeline = createTimeline(deps({
+      produced: async () => [ { path: "minutes.md", bytes: 2048 } ],
+      readFile: async () => "bWludXRlcw==",
+      attach,
+    }));
+    timeline.open(room([]));
+
+    await timeline.offerProduced(11, "/work/meetings");
+    const offer = document.querySelector<HTMLElement>("#messages .offer")!;
+    expect(offer.textContent).toContain("minutes.md");
+    expect(offer.textContent).toContain("2 kB");
+
+    offer.querySelector<HTMLButtonElement>("button")!.click();
+    await vi.waitFor(() =>
+      expect(attach).toHaveBeenCalledWith(11, "minutes.md", "bWludXRlcw==", "text/markdown"));
+    // Shared once: the row that offered it is gone.
+    await vi.waitFor(() => expect(document.querySelector("#messages .offer")).toBeNull());
+  });
+
+  test("an offer nobody could read says what it left out", async () => {
+    const many = Array.from({ length: 14 }, (_, i) => ({ path: `note-${i}.md`, bytes: 10 }));
+    const timeline = createTimeline(deps({ produced: async () => many }));
+    timeline.open(room([]));
+
+    await timeline.offerProduced(11, "/work/meetings");
+
+    expect(document.querySelectorAll("#messages .offer:not(.muted)")).toHaveLength(12);
+    expect(document.querySelector("#messages .offer.muted")?.textContent)
+      .toBe("2 more files changed and are not offered.");
+  });
+
+  test("a turn that wrote nothing offers nothing", async () => {
+    const timeline = createTimeline(deps({ produced: async () => [ { path: "empty.md", bytes: 0 } ] }));
+    timeline.open(room([]));
+
+    await timeline.offerProduced(11, "/work/meetings");
+
+    expect(document.querySelector("#messages .offer")).toBeNull();
   });
 });
