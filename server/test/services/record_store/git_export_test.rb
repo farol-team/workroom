@@ -142,6 +142,12 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     # months apart.
     front = front_matter(read("memory/acme-wants-monthly-reporting.md"))
     assert_in_delta entries.second.created_at, front["recorded"].to_time, 5
+
+    # And the month's file is named for when the message happened — for every
+    # fixture created at export time the two months are the same string, so
+    # only a travelled entry separates "the month it happened" from "the month
+    # the export ran".
+    assert_path_exists File.join(@path, "messages/#{month_of(entries.first)}.jsonl")
   end
 
   # The shape spike #45 printed: readable markdown, and every field a memory
@@ -180,10 +186,19 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
   #
   # Memory::Store's own base class is the store that answers nothing — every
   # read on it raises — which makes this the whole claim in one line: with the
-  # room's knowledge unreachable, the mirror still comes out complete.
+  # room's knowledge unreachable, the mirror still comes out complete. And the
+  # envelope says something the store does not, so an export that quietly read
+  # the store's row directly (past the seam, Article S1) is caught as well as
+  # one that called the store.
   test "the export replays the journal and asks the memory store nothing" do
-    detail = "Acme's ops lead asked for monthly rollups."
-    memory(title: "Acme wants monthly reporting", detail:)
+    Memory::Store.current.write(@channel, title: "Acme wants monthly reporting",
+                                detail: "what the store holds", trust: "human", author: @alice)
+    RecordStore::Append.call(
+      channel: @channel, kind: "memory", subject: nil,
+      payload: { action: "written", uri: memory_uri("Acme wants monthly reporting"),
+                 title: "Acme wants monthly reporting", detail: "what the envelope holds",
+                 trust: "human", author_id: @alice.id }
+    )
     posted(body: "shall we meet Tuesday")
     artifact(name: "notes.txt")
 
@@ -192,7 +207,10 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     end
 
     assert_equal 3, shas.length
-    assert_includes read("memory/acme-wants-monthly-reporting.md"), detail
+    body = read("memory/acme-wants-monthly-reporting.md")
+    assert_includes body, "what the envelope holds"
+    assert_not_includes body, "what the store holds",
+                        "the mirror replays the envelope, not whatever the store holds today"
   end
 
   test "an artifact is the file itself, under the name it was given" do
@@ -476,6 +494,8 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     # said, one commit back.
     current = read(file)
     assert_includes current, "contradicted by a later call", "the mirror says why it was corrected"
+    assert_not_includes current, "First Tuesday of the month.",
+                        "the correction says why, not what — the what is one commit back"
     assert_equal memory_uri("Acme wants monthly reporting"), front_matter(current)["uri"]
     assert_match(/\Asupersede: /, subject_of(shas.last))
 
