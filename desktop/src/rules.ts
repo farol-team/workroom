@@ -377,6 +377,22 @@ export function worthOffering(files: Array<{ path: string; bytes: number }>): bo
 export interface TurnProduced {
   files: Array<{ path: string; bytes: number }>;
   pre_existing: number;
+  /// The turn's work as a commit, when it landed one (#206). Always present
+  /// from the bridge, null outside a repository or when HEAD never moved.
+  committed?: { branch: string; commits: number; stat: string; on_default: boolean } | null;
+}
+
+/// Where a branch can be looked at, when the room's repository is on GitHub
+/// (#206). Anything else — a local path, another host — is no link at all,
+/// and the caller hides the control rather than offering a dead one.
+export function githubTreeUrl(repositoryUrl: string | null, branch: string): string | null {
+  const url = repositoryUrl?.trim();
+  if (!url) return null;
+  const match = /^git@github\.com:([^/]+)\/(.+)$/.exec(url)
+    ?? /^https:\/\/github\.com\/([^/]+)\/(.+)$/.exec(url);
+  if (!match) return null;
+  const repo = match[2].replace(/\.git\/?$/, "").replace(/\/$/, "");
+  return `https://github.com/${match[1]}/${repo}/tree/${branch}`;
 }
 
 /// A quiet account of what the turn was *not* credited with — without it,

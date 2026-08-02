@@ -154,6 +154,10 @@ dialog input[readonly] { color: var(--muted); }
 .plan-entry.completed { color: var(--muted); text-decoration: line-through; }
 
 .offer, .artifact { margin-left: 46px; font-size: 13px; color: var(--muted); }
+/* The one offer that can ship: a commit that landed on the repository's
+   mainline is marked in the accent colour, where every other row stays quiet
+   (#206). */
+.offer.committed .on-default { color: var(--accent); font-weight: 600; }
 .artifact { padding: 4px 0; }
 
 #session-options { display: flex; gap: 8px; padding: 8px 16px 0; }

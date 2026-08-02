@@ -134,18 +134,41 @@ pub fn parse_porcelain(out: &str) -> Vec<String> {
 }
 
 /// What a turn is measured against. In a repository the answer is the
-/// porcelain path set; anywhere else it is a filesystem snapshot. Taken when
-/// a turn begins, so work the person's hands got to first is never offered
-/// as the run's (#202).
+/// porcelain path set *and where HEAD stood*; anywhere else it is a
+/// filesystem snapshot. Taken when a turn begins, so work the person's hands
+/// got to first is never offered as the run's (#202).
 pub enum Baseline {
-    Git(std::collections::HashSet<String>),
+    Git(GitLine),
     Fs(Snapshot),
+}
+
+/// A repository as the line saw it (#206). The dirty paths alone cannot tell
+/// a commit from a clean tree — both are an empty porcelain set — so the
+/// branch and the sha are kept alongside: their moving is how a later offer
+/// knows the turn committed rather than did nothing.
+#[derive(Clone)]
+pub struct GitLine {
+    pub dirty: std::collections::HashSet<String>,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+}
+
+/// Measure a repository the way the line needs it measured. Branch is read
+/// with symbolic-ref, the way `repo_info` reads it: an unborn branch is
+/// still a branch, and a detached HEAD is none. `rev-parse HEAD` failing is
+/// a repository with no commits yet — null, not an error.
+fn git_line(dir: &Path, changed: Vec<String>) -> GitLine {
+    GitLine {
+        dirty: changed.into_iter().collect(),
+        branch: git_answer(dir, &["symbolic-ref", "--short", "HEAD"]),
+        head: git_answer(dir, &["rev-parse", "HEAD"]),
+    }
 }
 
 /// Measure a directory the way a turn start needs it measured.
 fn measure(dir: &Path) -> Baseline {
     match git_changes(dir) {
-        Some(changed) => Baseline::Git(changed.into_iter().collect()),
+        Some(changed) => Baseline::Git(git_line(dir, changed)),
         None => Baseline::Fs(snapshot(dir)),
     }
 }
@@ -217,12 +240,71 @@ pub fn turn_start(shots: &Workspaces, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// What a turn's offer is made of: the files, and how many changed paths
-/// were held back because they were dirty before the turn began.
+/// What a turn's offer is made of: the files, how many changed paths
+/// were held back because they were dirty before the turn began, and the
+/// commit the turn landed when it landed one (#206).
 #[derive(serde::Serialize)]
 pub struct TurnProduced {
     pub files: Vec<Produced>,
     pub pre_existing: usize,
+    /// Always present, null when the turn did not commit: the client reads
+    /// one shape either way.
+    pub committed: Option<Committed>,
+}
+
+/// The turn's work as a commit: where it landed, how much, and whether the
+/// branch it landed on is the repository's mainline — the one case a person
+/// must read as shipping-adjacent (#206).
+#[derive(serde::Serialize)]
+pub struct Committed {
+    pub branch: String,
+    pub commits: u32,
+    pub stat: String,
+    pub on_default: bool,
+}
+
+/// What the repository calls its mainline, read the one way everywhere it
+/// matters (#203 reads it for the warning, #206 for the mark): origin/HEAD
+/// once somebody has fetched, the checkout's own branch before that.
+fn default_branch(dir: &Path) -> Option<String> {
+    git_answer(
+        dir,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .map(|head| head.trim_start_matches("origin/").to_string())
+    .or_else(|| git_answer(dir, &["symbolic-ref", "--short", "HEAD"]))
+}
+
+/// What the turn committed, measured between the line and now. `None` when
+/// HEAD stands where the line left it — a dirty tree is the files' story,
+/// not a commit's. The range is `then..HEAD`; from the empty tree when the
+/// line predates the first commit (the empty tree's sha is a constant of
+/// git's, not something to compute).
+fn committed_since(dir: &Path, line: &GitLine, now: &GitLine) -> Option<Committed> {
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    now.head.as_ref()?;
+    if line.head == now.head {
+        return None;
+    }
+    let from = line.head.as_deref().unwrap_or(EMPTY_TREE);
+    let range = format!("{from}..HEAD");
+    let commits = git_answer(dir, &["rev-list", "--count", &range])
+        .and_then(|n| n.parse::<u32>().ok())
+        .unwrap_or(0);
+    // Head moved without a commit the range can see — a reset, a rebase.
+    // That is history being rewritten, not work the turn produced.
+    if commits == 0 {
+        return None;
+    }
+    let stat = git_answer(dir, &["diff", "--shortstat", &range]).unwrap_or_default();
+    let branch = now.branch.clone().unwrap_or_else(|| "HEAD".into());
+    let on_default = default_branch(dir).is_some_and(|d| now.branch.as_ref() == Some(&d));
+    Some(Committed {
+        branch,
+        commits,
+        stat,
+        on_default,
+    })
 }
 
 /// What this turn wrote or changed, and the line moved to where it ends.
@@ -239,20 +321,26 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
     // changed in it — by their ignore rules, not ours. Since #202 the line
     // applies here too: porcelain minus what was dirty when the turn began.
     if let Some(changed) = git_changes(dir) {
+        let now = git_line(dir, changed.clone());
         let mut state = shots
             .0
             .lock()
             .map_err(|_| "workspace state is poisoned".to_string())?;
         let (paths, pre_existing) = match state.get(dir) {
-            Some(Baseline::Git(line)) => turn_delta(&changed, line),
+            Some(Baseline::Git(line)) => turn_delta(&changed, &line.dirty),
             // No line, or one taken before this folder was a repository:
             // the whole porcelain answer, as before.
             _ => (changed.clone(), 0),
         };
-        state.insert(
-            dir.to_path_buf(),
-            Baseline::Git(changed.into_iter().collect()),
-        );
+        // A commit empties the porcelain set, so it never appears in `paths`:
+        // without this, the turn that did the tidiest work would read as the
+        // turn that did nothing (#206). Only a Git line can see it — a folder
+        // that became a repository mid-turn has no head to measure from.
+        let committed = match state.get(dir) {
+            Some(Baseline::Git(line)) => committed_since(dir, line, &now),
+            _ => None,
+        };
+        state.insert(dir.to_path_buf(), Baseline::Git(now));
         let files = paths
             .into_iter()
             .filter_map(|path| {
@@ -263,6 +351,7 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
         return Ok(TurnProduced {
             files,
             pre_existing,
+            committed,
         });
     }
 
@@ -292,6 +381,9 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
     Ok(TurnProduced {
         files,
         pre_existing: 0,
+        // Outside a repository there is no commit to see: the snapshot diff
+        // is the whole answer.
+        committed: None,
     })
 }
 
@@ -329,17 +421,9 @@ pub struct RepoInfo {
 /// that is not a repository answers every question with nothing.
 pub fn repo_info(dir: &Path) -> RepoInfo {
     let remote = git_answer(dir, &["remote", "get-url", "origin"]);
-    // origin/HEAD names the mainline only once somebody has fetched; before
-    // that the checkout's own branch is the best answer there is. Asked with
-    // symbolic-ref rather than rev-parse: a repository with no commits yet
-    // still has an unborn branch, and rev-parse cannot name one. A detached
-    // HEAD answers neither, which is correct — it is not a branch.
-    let default_branch = git_answer(
-        dir,
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    )
-    .map(|head| head.trim_start_matches("origin/").to_string())
-    .or_else(|| git_answer(dir, &["symbolic-ref", "--short", "HEAD"]));
+    // One reading, shared with the offer's on_default mark: origin/HEAD once
+    // somebody has fetched, the checkout's own branch before that (#206).
+    let default_branch = default_branch(dir);
 
     // A cheap heuristic, and named as one: a GitHub workflow whose text
     // mentions both `push` and the default branch is read as "merging ships
@@ -1208,5 +1292,172 @@ mod bound_folder_tests {
 
         assert_eq!(produced, vec!["report.md", "src/main.rs"]);
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod commit_aware_offer_tests {
+    //! The turn that *commits* (#206). A commit empties the porcelain set, so
+    //! without a head on the line the offer would say such a turn did nothing.
+    //! Real repositories, the way the line is really taken: origin/HEAD is
+    //! written directly rather than fetched, because what matters is the
+    //! reading — which branch the mainline is — not the fetch.
+
+    use super::*;
+    use std::io::Write;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-commit-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+    }
+
+    /// A repository on `main`, with origin/HEAD naming main as the mainline.
+    fn repository(name: &str) -> PathBuf {
+        let dir = temp(name);
+        run(&dir, &["init", "-q", "-b", "main", "."]);
+        run(&dir, &["config", "user.email", "a@b"]);
+        run(&dir, &["config", "user.name", "a"]);
+        write(&dir, "src.rs", "fn main() {}");
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-qm", "init"]);
+        run(
+            &dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://example.test/acme/widgets.git",
+            ],
+        );
+        let sha = String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        run(&dir, &["update-ref", "refs/remotes/origin/main", &sha]);
+        run(
+            &dir,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        dir
+    }
+
+    #[test]
+    fn a_turn_that_commits_is_offered_as_a_commit_not_as_files() {
+        let dir = repository("commits");
+        run(&dir, &["checkout", "-qb", "agent/weekly-notes"]);
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        write(&dir, "notes.md", "findings\n");
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-qm", "the turn's work"]);
+
+        let got = offer(&shots, &dir).unwrap();
+
+        let committed = got.committed.expect("a turn that committed says so");
+        assert_eq!(committed.branch, "agent/weekly-notes");
+        assert_eq!(committed.commits, 1);
+        assert!(
+            committed.stat.contains("1 file changed"),
+            "{}",
+            committed.stat
+        );
+        assert!(!committed.on_default, "an agent branch is not the mainline");
+        assert!(
+            got.files.is_empty(),
+            "committed files left the porcelain set; offering them too would count them twice"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_only_dirties_is_offered_as_files_with_no_commit() {
+        let dir = repository("dirties");
+        run(&dir, &["checkout", "-qb", "agent/weekly-notes"]);
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        write(&dir, "report.md", "findings\n");
+
+        let got = offer(&shots, &dir).unwrap();
+
+        assert!(got.committed.is_none());
+        assert_eq!(got.files.len(), 1);
+        assert_eq!(got.files[0].path, "report.md");
+    }
+
+    #[test]
+    fn a_turn_committing_onto_the_mainline_is_marked_on_default() {
+        let dir = repository("on-main");
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        write(&dir, "hotfix.rs", "fn hotfix() {}\n");
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-qm", "straight onto main"]);
+
+        let got = offer(&shots, &dir).unwrap();
+
+        let committed = got.committed.expect("the commit is the turn's work");
+        assert_eq!(committed.branch, "main");
+        assert!(
+            committed.on_default,
+            "the one offer a person must read as shipping-adjacent"
+        );
+    }
+
+    #[test]
+    fn a_commit_from_an_older_line_counts_every_commit_since() {
+        let dir = repository("several");
+        run(&dir, &["checkout", "-qb", "agent/weekly-notes"]);
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        for i in 1..=2 {
+            write(&dir, &format!("part-{i}.md"), "more\n");
+            run(&dir, &["add", "-A"]);
+            run(&dir, &["commit", "-qm", "part"]);
+        }
+
+        let got = offer(&shots, &dir).unwrap();
+
+        let committed = got.committed.expect("two commits are two");
+        assert_eq!(committed.commits, 2);
+        assert!(
+            committed.stat.contains("2 files changed"),
+            "{}",
+            committed.stat
+        );
     }
 }

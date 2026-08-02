@@ -4,7 +4,7 @@
 // from the record and the page is only how much of it fits.
 
 import type { Channel, Message } from "./api";
-import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, type Asked, type PlanEntry, type TurnProduced } from "./rules";
+import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, githubTreeUrl, type Asked, type PlanEntry, type TurnProduced } from "./rules";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -27,6 +27,12 @@ export interface TimelineDeps {
   attach: (runId: number, path: string, base64: string, contentType: string) => Promise<void>;
   exportSession: (name: string, sessionId: string) => Promise<string | null>;
   attachTranscript: (runId: number, name: string, body: string) => Promise<void>;
+  /// The room's repository, for the commit row's link (#206). Where the link
+  /// would lead nowhere — no url, not GitHub — the control is hidden, not
+  /// offered dead.
+  repositoryUrl?: () => string | null;
+  copyText?: (text: string) => Promise<void>;
+  openUrl?: (url: string) => Promise<void>;
 }
 
 export interface Timeline {
@@ -313,12 +319,49 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     box.scrollTop = box.scrollHeight;
   }
 
+  /// The turn's work as a commit (#206). It leads the offer: a commit is the
+  /// turn saying "done", and the uncommitted files after it are the work
+  /// still on the table. The mark on a mainline commit is the one thing in
+  /// the room drawn in the accent colour — the one offer that can ship.
+  function commitRow(c: NonNullable<TurnProduced["committed"]>): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "offer committed";
+    const plural = c.commits === 1 ? "commit" : "commits";
+    el.append(document.createTextNode(
+      `⎇ ${c.branch} · ${c.commits} ${plural}${c.stat ? ` · ${c.stat}` : ""} `));
+
+    if (c.on_default) {
+      const mark = document.createElement("span");
+      mark.className = "on-default";
+      mark.textContent = `on ${c.branch}`;
+      el.append(mark, document.createTextNode(" "));
+    }
+
+    // "Copied" staying on the button is the confirmation; there is no other
+    // sign the clipboard took it.
+    el.append(ghostButton("Copy branch name", "Copied", async () => {
+      await deps.copyText?.(c.branch);
+    }));
+
+    const url = githubTreeUrl(deps.repositoryUrl?.() ?? null, c.branch);
+    if (url && deps.openUrl) {
+      // Not ghostButton: the row outlives the action, and a button left
+      // saying "Opening…" forever would read as a broken one.
+      const open = document.createElement("button");
+      open.className = "ghost";
+      open.textContent = "Open on GitHub";
+      open.onclick = () => { deps.openUrl!(url).catch(() => {}); };
+      el.append(open);
+    }
+    return el;
+  }
+
   /// What the run wrote in its working directory, offered one file at a time.
   /// Offered, not uploaded: work product belongs to the channel (Article D3), but
   /// what leaves this machine stays the person's decision.
   async function offerProduced(runId: number, workspace: string) {
-    const { files: produced, pre_existing } = await deps.produced(workspace);
-    if (!worthOffering(produced)) {
+    const { files: produced, pre_existing, committed } = await deps.produced(workspace);
+    if (!committed && !worthOffering(produced)) {
       // A quiet account of what the turn was not credited with — without it,
       // "the agent did nothing" and "the offer is broken" look the same.
       const notice = preExistingNotice(pre_existing);
@@ -333,6 +376,7 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     const { files, omitted } = offerable(produced, AT_MOST_OFFERED);
 
     const box = $("messages");
+    if (committed) box.append(commitRow(committed));
     for (const file of files) {
       const el = document.createElement("div");
       el.className = "offer";

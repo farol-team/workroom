@@ -12,6 +12,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { getVersion } from "@tauri-apps/api/app";
 import * as settings from "./settings";
 import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -50,7 +51,16 @@ const timeline = createTimeline({
   },
   exportSession: (name, sessionId) => agents.exportSession(name, sessionId),
   attachTranscript: async (runId, name, body) => { await api.attachArtifact(runId, name, body); },
+  repositoryUrl: () => current?.repository_url ?? null,
+  copyText: (text) => navigator.clipboard.writeText(text),
+  openUrl: (url) => openUrl(url),
 });
+
+// The preview photographs states that have no natural trigger — a turn's
+// offer exists only after a turn, and no button leads there. Named and
+// narrow: this is how `bin/preview` stages the commit row (#206), not a
+// public API.
+(window as unknown as { __workroom: unknown }).__workroom = { timeline };
 
 const panel = createAgentsPanel({
   agents,
