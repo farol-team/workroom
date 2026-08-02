@@ -35,6 +35,21 @@ class ChannelRecordTest < ActiveSupport::TestCase
     assert_not ChannelRecord.exists?(written.id)
   end
 
+  # And it is the association that takes it, not the database. The composite key
+  # to channels is NO ACTION, like every sibling's, so a channel deleted behind
+  # Active Record's back is refused while its journal stands. Worth pinning
+  # because the opposite reading is tempting: drop `dependent:` believing the
+  # foreign key covers it and room deletion stops working altogether.
+  test "the database will not clear a journal by itself" do
+    entry
+
+    assert_raises ActiveRecord::InvalidForeignKey do
+      as_the_owner do
+        ActiveRecord::Base.connection.execute("DELETE FROM channels WHERE id = #{@channel.id}")
+      end
+    end
+  end
+
   # There is nothing to update, so there is no column claiming there might be.
   # The absence is the guarantee: no code path can quietly start touching one.
   test "the row has no updated_at, because it is never updated" do
