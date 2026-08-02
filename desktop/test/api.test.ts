@@ -54,6 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("the live socket", () => {
@@ -180,6 +181,47 @@ describe("catching up after an outage", () => {
 
     last().connected();
     expect(resync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("what the outage missed", () => {
+  const message = (id: number) => ({ id, body: `#${id}`, parent_id: null, author: { kind: "user", name: "alice" } });
+
+  /// The channel as the server answers it. `meanwhile` runs while the request is
+  /// in flight, which is where the case worth testing lives.
+  function serves(messages: unknown[], meanwhile: () => void = () => {}) {
+    vi.stubGlobal("fetch", async () => {
+      meanwhile();
+      return { ok: true, status: 200, json: async () => ({ slug: "meetings", messages }) };
+    });
+  }
+
+  test("is whatever the channel holds past the newest message on hand", async () => {
+    serves([ message(1), message(2), message(3) ]);
+
+    const missed = await new Api("http://127.0.0.1:3000", "tok").caughtUp("meetings", [ message(1) ]);
+
+    expect(missed).toEqual([ message(2), message(3) ]);
+  });
+
+  test("is nothing at all when the room did not move", async () => {
+    serves([ message(1), message(2) ]);
+
+    const missed = await new Api("http://127.0.0.1:3000", "tok").caughtUp("meetings", [ message(1), message(2) ]);
+
+    expect(missed).toEqual([]);
+  });
+
+  // The mark has to be read before the channel is asked, not after. #4 lands on
+  // the socket while the request is in flight; measuring afterwards would call
+  // the room caught up at #4 and throw away the two the outage actually ate.
+  test("is measured before the refetch, so a live message mid-round-trip hides nothing", async () => {
+    const held = [ message(1) ];
+    serves([ message(1), message(2), message(3), message(4) ], () => held.push(message(4)));
+
+    const missed = await new Api("http://127.0.0.1:3000", "tok").caughtUp("meetings", held);
+
+    expect(missed).toEqual([ message(2), message(3), message(4) ]);
   });
 });
 
