@@ -72,7 +72,8 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
     })));
 
   /// The one command an install would run, or null where there is nothing to
-  /// fetch — the agent that ships in the bundle is never offered one.
+  /// fetch — an agent already on this machine, or one this project never
+  /// pinned and therefore cannot name a package for.
   function commandFor(card: OnboardingCard): string | null {
     if (card.action !== "install") return null;
     const profile = profileFor(card.name);
