@@ -4,6 +4,7 @@ import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
+import { createProvision, type FolderState } from "./provision";
 import { showOnboarding } from "./onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -81,6 +82,19 @@ const channelSettings = createChannelSettings({
     renderBinding();
   },
   copyText: (text) => navigator.clipboard.writeText(text),
+});
+
+/// The channel's folder, made ready on its own when the room names a
+/// repository (#204). Local from end to end: the rows are this machine's
+/// process, never said to the room.
+const provision = createProvision({
+  bindings: () => bindings,
+  derivedPath: (slug) => invoke<string>("agent_derived_path",
+    { workspace: rooms.current!, channel: slug }),
+  folderState: (dir) => invoke<FolderState>("agent_folder_state", { dir }),
+  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
+  isOpen: (slug) => current?.slug === slug,
+  openSettings: () => channelSettings.open(),
 });
 
 function renderChannels() {
@@ -208,6 +222,11 @@ async function open(slug: string) {
   // through `onShown`, and setting the count afterwards would throw that away.
   seenCount.set(slug, full.messages.length);
   timeline.open(full);
+
+  // After the room is drawn, and never in its way: provisioning is this
+  // machine making the channel's folder ready, not something the room waits
+  // on (#204).
+  provision.consider(full);
 
   renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }

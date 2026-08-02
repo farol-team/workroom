@@ -14,6 +14,24 @@ const wanted = new URLSearchParams(location.search).get("open");
 // picture of that state cannot be staged against silence — so these states get
 // exactly the answers they are staging, named here rather than implied.
 const stagingSettings = (wanted ?? "").startsWith("channel-settings");
+
+// The second exception, for the state that asks to see a failed provision
+// (#204): the row exists only when the room names a repository and the clone
+// answers with git's own refusal. No seed names one, so the room's answer is
+// amended on the way in — the staged fact, named here, not implied.
+const stagingProvision = wanted === "provision-failed";
+if (stagingProvision) {
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await realFetch(...args);
+    const url = String(args[0]?.url ?? args[0]);
+    if (!/\/api\/v1\/channels\/[^/]+$/.test(url)) return res;
+    const body = await res.json();
+    body.repository_url = "https://example.test/acme/widgets";
+    return new Response(JSON.stringify(body), { status: res.status, headers: res.headers });
+  };
+}
+
 window.__TAURI_INTERNALS__ = {
   invoke: (command) => {
     if (stagingSettings && command === "plugin:dialog|open") {
@@ -22,6 +40,15 @@ window.__TAURI_INTERNALS__ = {
     if (stagingSettings && command === "agent_repo_info") {
       return Promise.resolve({ remote: "https://github.com/acme/widgets",
                                default_branch: "main", deploys_on_push: true });
+    }
+    if (stagingProvision && command === "agent_derived_path") {
+      return Promise.resolve("~/WorkRoom/workroom/marketing");
+    }
+    if (stagingProvision && command === "agent_folder_state") {
+      return Promise.resolve({ exists: false, empty: true, remote: null });
+    }
+    if (stagingProvision && command === "agent_clone") {
+      return Promise.reject("fatal: repository 'https://example.test/acme/widgets' not found");
     }
     return new Promise(() => {});
   },

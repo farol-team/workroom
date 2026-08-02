@@ -289,6 +289,42 @@ async fn agent_clone(url: String, dir: String) -> Result<(), String> {
     .map_err(|e| format!("cloning did not finish: {e}"))?
 }
 
+/// Where the channel would work, answered *without* making it (#204).
+/// `agent_workspace` creates on sight, which is right when a session is about
+/// to start and wrong here: provisioning is only deciding what to do, and a
+/// decision that creates the folder would make every later answer — empty?
+/// missing? — a question about a directory we just made ourselves.
+#[tauri::command]
+async fn agent_derived_path(
+    app: AppHandle,
+    workspace: String,
+    channel: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
+        Ok(workspace::workspace_path(&root, &workspace, &channel)
+            .to_string_lossy()
+            .into_owned())
+    })
+    .await
+    .map_err(|e| format!("deriving the path did not finish: {e}"))?
+}
+
+/// What the channel's folder currently is — there or not, empty or not, and
+/// which repository when it is one (#204). Read-only by construction: the
+/// answer decides between cloning, leaving alone, and warning, and every one
+/// of those needs the folder as it actually is.
+#[tauri::command]
+async fn agent_folder_state(dir: String) -> Result<workspace::FolderState, String> {
+    tokio::task::spawn_blocking(move || workspace::folder_state(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("looking at the folder did not finish: {e}"))
+}
+
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
@@ -625,6 +661,8 @@ pub fn run() {
             agent_turn_start,
             agent_repo_info,
             agent_clone,
+            agent_derived_path,
+            agent_folder_state,
             agent_read,
             agent_new_session,
             agent_load_session,
@@ -851,6 +889,20 @@ mod what_the_commands_delegate {
                 "workspace::produced(",
                 ".lock()",
             ],
+        ),
+        // Provisioning's two questions (#204): the path is derived by the same
+        // function that derives it for a session, and the folder is read by
+        // the function the tests can reach — a second copy of either in the
+        // command would be logic no test can see.
+        (
+            "agent_derived_path",
+            "workspace::workspace_path(",
+            &["create_dir_all"],
+        ),
+        (
+            "agent_folder_state",
+            "workspace::folder_state(",
+            &["create_dir_all"],
         ),
     ];
 
