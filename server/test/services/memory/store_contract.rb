@@ -102,6 +102,128 @@ module Memory
                       "history is corrected by superseding, never by editing (Article P6)"
     end
 
+    # --- the write policy ------------------------------------------------------
+    #
+    # What a key is derived from, what a collision does, and what fills the tiers
+    # a caller left out. Both stores wrote those rules out for themselves, in
+    # their own words — and two copies of a rule are two rules from the day one
+    # of them is touched. The answer must not depend on which store the workspace
+    # happens to be on, so every case below is asked of the store under test and
+    # of no particular store (#177).
+    #
+    # What a correction leaves behind is asserted through what the room knows,
+    # never through where the old entry went: one store leaves a superseded row,
+    # the other moves the file to another scope, and no method on this seam reads
+    # either — a store that deleted the old entry outright would satisfy every
+    # case below. That superseding is not deleting is pinned where it can be
+    # seen: `Memory::LocalTest`, against the row, for `write` and `write_skill`
+    # alike, since the policy being unified here covers both (Article P6).
+
+    def test_a_title_written_again_corrects_what_was_there_however_often
+      @store.write(@channel, title: "Reporting cadence", detail: "Weekly.")
+      @store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
+
+      assert_equal [ "Monthly." ], @store.all(@channel).map(&:detail),
+                   "a title is a key: writing under it again corrects rather than adds (Article P6)"
+
+      @store.write(@channel, title: "Reporting cadence", detail: "Quarterly.")
+
+      assert_equal [ "Quarterly." ], @store.all(@channel).map(&:detail),
+                   "the third correction is the same act as the second"
+      # A short deadline on purpose: this is a number that is already right or a
+      # number that is wrong, and waiting out the full retrieval window for the
+      # second kind turns a red run into a stalled one.
+      assert_equal 1, retrieving(seconds: 10) { c = @store.count(@channel); c == 1 ? c : nil },
+                   "a room that was told one thing three times knows one thing"
+    end
+
+    def test_a_skill_written_again_under_the_same_title_supersedes_the_old_one
+      first  = @store.write_skill(@channel, title: "Running a client call", body: "Agenda first.")
+      second = @store.write_skill(@channel, title: "Running a client call",
+                                  body: "Agenda out the day before.")
+
+      refute_equal first.uri, second.uri, "a uri identifies an entry; two of them cannot share one"
+      assert_equal [ "Agenda out the day before." ], @store.skills(@channel).map(&:detail),
+                   "a procedure is corrected the way a fact is (Article P6)"
+    end
+
+    # A title and a blank are two different things, and the policy owes them two
+    # different answers. This is the first: "?!" is something a person wrote and
+    # meant, and only its *key* is missing — so the entry is written, under a key
+    # derived for it, with the tiers the write did not state filled in. What a
+    # blank title gets is the case below.
+    #
+    # The second write is the half that matters here: a fallback key that is the
+    # same string every time would file two unrelated entries under one name and
+    # supersede the first with the second, which is a room forgetting rather than
+    # being corrected.
+    def test_a_title_with_no_key_in_it_is_still_written_and_still_gets_the_rest
+      first  = @store.write(@channel, title: "?!", detail: "The whole story.")
+      second = @store.write(@channel, title: "?!", detail: "A different story.")
+
+      assert first.uri.start_with?(@channel.memory_uri),
+             "#{first.uri}: a title with no key in it is still filed under the channel"
+      refute_equal first.uri, second.uri,
+                   "a key the title could not give is this write's own, not a constant every write shares"
+      assert_equal 2, @store.all(@channel).size,
+                   "two entries nothing connects, because nothing in their titles does"
+      assert_equal "The whole story.", first.overview, "the orientation tier falls back to the detail"
+      assert_equal "?!", first.abstract, "and the discovery tier to the title"
+    end
+
+    # An overview nobody wrote is the detail cut short, and the cut is the point
+    # of it. `Store#context_for` renders overviews and nothing else, so this is
+    # the length of what every session opens with — a fallback that keeps the
+    # whole detail turns the orientation tier into the detail tier and pushes
+    # kilobytes into an agent's opening context, one entry at a time, which no
+    # assertion about the tier being *present* would ever notice.
+    OVERVIEW_LIMIT = 400
+
+    def test_an_overview_nobody_wrote_is_the_detail_cut_to_a_length
+      detail = ("Everything the room worked out about the reporting cadence. " * 40).strip
+      entry = @store.write(@channel, title: "The long story", detail: detail)
+      skill = @store.write_skill(@channel, title: "The long procedure", body: detail)
+
+      [ [ "an entry", entry ], [ "a skill", skill ] ].each do |what, written|
+        assert_operator written.overview.length, :<=, OVERVIEW_LIMIT,
+                        "#{what}: the tier a session opens with is bounded"
+        refute_equal detail, written.overview,
+                     "#{what}: an overview the size of the detail is not an overview"
+        assert written.overview.start_with?("Everything the room worked out"),
+               "#{what}: cut from the front of the detail, not composed from somewhere else"
+      end
+
+      assert_equal detail, @store.fetch(entry.uri).detail,
+                   "and nothing was cut from the tier that is fetched on purpose"
+    end
+
+    # And the second answer: a blank title is refused. Not a key that could not
+    # be derived — nothing to derive one from, and an entry the room could never
+    # name afterwards.
+    #
+    # This is the one input the two stores answer differently today, and the
+    # reason the policy becomes one. `Memory::Local#write` asks a nil title for
+    # its parameterized form and hands back a NoMethodError from inside itself;
+    # `Memory::OpenViking#write` derives a random key and writes a document with
+    # no title in it that nothing will ever find. Neither is an answer a caller
+    # can act on. Refusing was decided on the card rather than here, and an
+    # ArgumentError is what a caller gets — through both doors, in the same
+    # words, leaving the room knowing nothing new (#177).
+    def test_a_write_the_room_could_not_name_is_refused_the_same_way_by_every_store
+      [ nil, "", "   " ].each do |untitled|
+        assert_raises(ArgumentError, "#{untitled.inspect} is not a title") do
+          @store.write(@channel, title: untitled, detail: "Something worth knowing.")
+        end
+
+        assert_raises(ArgumentError, "#{untitled.inspect} is not a title for a skill either") do
+          @store.write_skill(@channel, title: untitled, body: "Something worth doing.")
+        end
+      end
+
+      assert_empty @store.all(@channel), "a write nobody can name is not what the room knows"
+      assert_empty @store.skills(@channel), "and is not how work is done here either"
+    end
+
     # --- provenance -----------------------------------------------------------
     #
     # Article P3 removed the human gate on the strength of provenance being

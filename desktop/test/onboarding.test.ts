@@ -39,26 +39,32 @@ const OK = { ok: true, code: 0, stdoutTail: "", stderrTail: "" };
 
 type Call = { command: string; args: Record<string, unknown> };
 
+/// One command's answer. Each takes different arguments, so the map is typed by
+/// what actually crosses the bridge — a record of JSON — and the answers that
+/// care narrow it themselves.
+type Answer = (args: Record<string, unknown>) => unknown;
+
 /// The Rust side, answering as the machine would. `where` is what the probe
 /// finds, which is the whole of what "ready" means for an agent that does not
 /// ship here.
-function bridge(over: Record<string, (args: never) => unknown> = {}) {
+function bridge(over: Record<string, Answer> = {}) {
   const calls: Call[] = [];
   const where = new Map<string, string>();
-  const answers: Record<string, (args: never) => unknown> = {
-    agent_probe: ({ commands }: never & { commands: string[] }) =>
-      commands.map((c) => where.get(c) ?? null),
+  const answers: Record<string, Answer> = {
+    agent_probe: ({ commands }) =>
+      (commands as string[]).map((c) => where.get(c) ?? null),
     agent_start: () => null,
     agent_stop: () => null,
     agent_install: () => OK,
     ...over,
   };
 
-  vi.mocked(invoke).mockImplementation(async (command: string, args: Record<string, unknown>) => {
-    calls.push({ command, args });
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    const asked = (args ?? {}) as Record<string, unknown>;
+    calls.push({ command, args: asked });
     const answer = answers[command];
     if (!answer) throw new Error(`nothing doubles ${command}`);
-    return answer(args as never);
+    return answer(asked);
   });
 
   return { calls, where, of: (command: string) => calls.filter((c) => c.command === command) };
@@ -96,7 +102,7 @@ function hooks(agents: Agents, panel: AgentsPanel,
 const cards = () => [ ...document.querySelectorAll<HTMLElement>("#ob-cards .ob-card") ];
 const rows = () => [ ...document.querySelectorAll<HTMLElement>("#agents .agent-row") ];
 /// The one thing to do about an agent: the last button of its drawing.
-const actionIn = (el: HTMLElement) => [ ...el.querySelectorAll<HTMLButtonElement>("button") ].at(-1)!;
+const actionIn = (el: HTMLElement) => [ ...el.querySelectorAll<HTMLButtonElement>("button") ].pop()!;
 /// The state it is really in, said the same way in both drawings.
 const saysIn = (el: HTMLElement) => el.querySelector<HTMLElement>(".muted")!.textContent;
 
@@ -248,7 +254,7 @@ describe("the agents panel, acting", () => {
     await panel.install("codex");
 
     expect(rust.of("agent_install")[0].args).toEqual({ command: INSTALL });
-    expect(rust.of("agent_probe").at(-1)!.args)
+    expect(rust.of("agent_probe").pop()!.args)
       .toEqual({ commands: [ "claude-agent-acp", "codex-acp" ] });
     expect(saysIn(rows()[1])).toBe("ready");
     expect(actionIn(rows()[1]).textContent).toBe("Start");

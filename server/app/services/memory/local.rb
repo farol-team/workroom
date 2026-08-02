@@ -29,13 +29,9 @@ module Memory
     end
 
     def write_skill(channel, title:, body:, key: nil, author: nil)
-      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{channel.skills_uri}#{key}"
-      MemoryEntry.current.find_by(uri: uri)&.supersede!
-
       MemoryEntry.create!(
-        channel:, author:, trust: "human", uri:, title:, detail: body,
-        overview: body.to_s.truncate(400), abstract: title
+        channel:, author:, trust: "human",
+        **write_policy(channel.skills_uri, title: title, detail: body, key: key)
       )
     end
 
@@ -71,20 +67,23 @@ module Memory
 
     def write(channel, title:, detail:, overview: nil, abstract: nil,
               trust: "agent", author: nil, source: nil, key: nil)
-      key ||= title.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{channel.memory_uri}#{key}"
-
-      existing = MemoryEntry.current.find_by(uri: uri)
-      existing&.supersede!
-
       MemoryEntry.create!(
         channel:, author:, source:, trust:,
-        uri: existing ? "#{uri}-#{SecureRandom.hex(3)}" : uri,
-        title:,
-        detail:,
-        overview: overview.presence || detail.to_s.truncate(400),
-        abstract: abstract.presence || title
+        **write_policy(channel.memory_uri, title:, detail:, overview:, abstract:, key:)
       )
+    end
+
+    # A row keeps its name after it stops being current, so what is filed under
+    # a key is the plain uri or whatever a correction left it under. The tilde
+    # is the store's own naming (see Store#write_policy) and nothing else can
+    # sit there, which is what makes the prefix safe to search by.
+    def displace(root, key, extension)
+      entry = MemoryEntry.current
+                         .where("uri = ? OR uri LIKE ?",
+                                "#{root}#{key}#{extension}", "#{root}#{key}~%#{extension}")
+                         .first
+      entry&.supersede!
+      entry
     end
   end
 end

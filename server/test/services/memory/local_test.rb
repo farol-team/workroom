@@ -31,6 +31,21 @@ class Memory::LocalTest < ActiveSupport::TestCase
     assert_equal [ second ], @channel.memory_entries.current.to_a
   end
 
+  # The contract asks what the room has after a procedure is written again, and
+  # a store that deleted the old one answers that question correctly. Only the
+  # row can be asked what became of it — the context database moves a file
+  # instead, and nothing on the seam reads either place — so the half that says
+  # "corrected, not erased" is asked here, as it already is for `write` above.
+  test "a skill rewritten under the same title supersedes the previous one" do
+    first = @store.write_skill(@channel, title: "Running a client call", body: "Agenda first.")
+    second = @store.write_skill(@channel, title: "Running a client call",
+                                body: "Agenda out the day before.")
+
+    assert first.reload.superseded_at, "the previous procedure must be superseded, not deleted"
+    assert_nil second.superseded_at
+    assert_equal [ second ], @store.skills(@channel).to_a
+  end
+
   test "search finds an entry by its detail" do
     @store.write(@channel, title: "Acme", detail: "asked for monthly rollups")
     assert_equal [ "Acme" ], @store.search(@channel, "rollups").map(&:title)
