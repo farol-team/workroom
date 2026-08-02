@@ -115,6 +115,7 @@ approval queue. A wrong entry is corrected by superseding it.
   then:
 
   ```bash
+  docker compose --profile memory build openviking
   docker compose --profile memory up -d openviking
   curl -s -X POST http://127.0.0.1:1933/api/v1/admin/accounts \
     -H "X-API-Key: <root_api_key from ov.conf>" -H "Content-Type: application/json" \
@@ -123,6 +124,10 @@ approval queue. A wrong entry is corrected by superseding it.
   export OPENVIKING_URL=http://127.0.0.1:1933 OPENVIKING_API_KEY=<user_key>
   bin/prototype
   ```
+
+  The image is built once and then starts in seconds — the `pip install` used to
+  run on every container start; now it runs at `docker compose build` time, and
+  the OpenViking version pin lives in `docker/openviking/Dockerfile`.
 
   Nothing else changes: the same channels, the same rail, the same client. What
   changes is that a question finds an entry that shares no words with it.
@@ -146,6 +151,42 @@ approval queue. A wrong entry is corrected by superseding it.
   With a provider configured it opens your own browser, your provider answers,
   and the client ends up holding the same bearer token it would have got the
   development way — no token of the provider's reaches it.
+
+## Memory, locally, with no credentials
+
+The context database above asks for an embedding credential. If you would rather
+not hand one out, Ollama serves the same models from your own machine, and the
+memory store cannot tell the difference.
+
+```bash
+brew install ollama   # or https://ollama.com
+ollama pull nomic-embed-text qwen3:4b
+cp ov.conf.ollama.example ov.conf
+docker compose --profile memory up -d openviking
+```
+
+`ov.conf.ollama.example` points both the embedder (`nomic-embed-text`) and the
+VLM (`qwen3:4b`) at the Ollama on the host — `host.docker.internal` is how the
+container reaches it. Two things in that file look wrong and are not: `api_key`
+is a placeholder because OpenViking requires the field even when Ollama ignores
+it, and the VLM's `api_base` has no `/v1` suffix because it speaks Ollama's
+native API, where the suffix is a 404.
+
+Then give the workspace its own account in the store:
+
+```bash
+bin/rails workspace:provision WORKSPACE=workroom \
+  OPENVIKING_URL=http://127.0.0.1:1933 OPENVIKING_ROOT_KEY=change-me
+```
+
+(`change-me` is the `root_api_key` placeholder in the example config — use
+whatever you put there.) The live-gated memory tests run against this setup too:
+
+```bash
+OPENVIKING_URL=http://127.0.0.1:1933 \
+OPENVIKING_API_KEY=$(bin/rails runner 'print Workspace.find_by(slug: "workroom").openviking_api_key') \
+  bin/rails test test/services/memory/open_viking_test.rb
+```
 
 ## Releasing, and how an update reaches people
 
