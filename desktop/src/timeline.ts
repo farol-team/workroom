@@ -44,7 +44,7 @@ export interface Timeline {
   revealSteps(on: boolean): void;
   showPlan(runId: number, entries: PlanEntry[]): void;
   addArtifact(a: { id: number; name: string; kind: string | null }): void;
-  askPermission(name: string, asked: Asked): void;
+  askPermission(name: string, asked: Asked, note?: string | null): void;
   offerProduced(runId: number, workspace: string): Promise<void>;
   offerTranscript(runId: number, name: string, sessionId: string): void;
 }
@@ -272,11 +272,22 @@ export function createTimeline(deps: TimelineDeps): Timeline {
 
   /// The agent is waiting on a person, so this goes where that person is looking.
   /// It is process rather than outcome, so it is theirs alone (Article S2).
-  function askPermission(name: string, asked: Asked) {
+  ///
+  /// `note` is what the ask means, computed by whoever knows the workspace —
+  /// a push to a deploying branch is not the same question as a push to a
+  /// feature branch (#205). Annotation only: the options stay the agent's.
+  function askPermission(name: string, asked: Asked, note?: string | null) {
     const box = $("messages");
     const el = document.createElement("div");
     el.className = "offer ask";
     el.append(document.createTextNode(`${asked.title} `));
+
+    if (note) {
+      const line = document.createElement("div");
+      line.className = "ask-note muted";
+      line.textContent = note;
+      el.append(line);
+    }
 
     const answer = async (optionId: string | null) => {
       el.querySelectorAll("button").forEach((b) => (b.disabled = true));

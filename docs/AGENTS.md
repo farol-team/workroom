@@ -273,6 +273,19 @@ different for each of them, and a filesystem layout is not something the workspa
 learn. It is also deliberate: an agent in somebody's real repository can change anything in
 it, which is normal for a coding agent and normal precisely because the person opened it there.
 
+A session whose workspace is a git repository gets **standing rules appended to its
+boundary** (#205): work on `agent/<topic>` branches, never commit or push to the default
+branch, never merge a pull request without an explicit human request, and end every commit
+message with a `Co-Authored-By:` trailer naming the agent — authorship stays the person whose
+machine the agent runs on, attribution rides in the trailer, the same convention this
+repository's own commits follow. The same rules are shown to people: the memory panel lists
+them with an `AUTO` mark (client-rendered, never written into the room's memory), and a
+permission ask that is `git push` or `git commit` is annotated with what it means — named
+branch, and an explicit warning when the repository deploys on merge. These rules are
+**prompt-level, honestly**: the agent is told, and a well-behaved agent complies. The
+structural guarantee is branch protection on the repository itself, which is why the
+settings dialog says so and hands over a checklist rather than pretending the prompt is one.
+
 When a turn ends, the directory is compared with how it was when the session opened. Files
 that appeared or changed are **offered**; files the agent deleted, and files it never
 touched, are not. Hidden entries are skipped, so `.git` and `.env` are never in the offer.

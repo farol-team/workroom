@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, type RoomTemplate, type RunSignal } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -140,11 +140,62 @@ function entryEl(into: string, mark: string, title: string, overview: string | n
   $(into).append(el);
 }
 
+/// What the folder a channel works in is, asked once per folder per window.
+/// The answer — a repository's mainline, whether merging ships something —
+/// changes rarely and never mid-turn, so every consumer (the turn's boundary,
+/// the memory panel, a permission ask) reads the same promise rather than
+/// each shelling out for itself (#205).
+const repoInfoCache = new Map<string, Promise<RepoInfo | null>>();
+
+function repoInfoFor(folder: string): Promise<RepoInfo | null> {
+  let pending = repoInfoCache.get(folder);
+  if (!pending) {
+    pending = invoke<RepoInfo>("agent_repo_info", { path: folder }).catch(() => null);
+    repoInfoCache.set(folder, pending);
+  }
+  return pending;
+}
+
+/// The open channel's repository, when its folder is one. A bound folder is
+/// asked directly; an unbound one is the derived path — asked for, not
+/// created, because looking is not provisioning (#204). A folder that is no
+/// repository answers both questions with null, which reads as: nothing
+/// standing here to say.
+async function channelRepo(slug: string): Promise<RepoInfo | null> {
+  const folder = boundFolder(slug, bindings)
+    ?? await invoke<string>("agent_derived_path",
+      { workspace: rooms.current!, channel: slug }).catch(() => null);
+  if (!folder) return null;
+  const info = await repoInfoFor(folder);
+  return info?.default_branch ? info : null;
+}
+
+/// The standing rules every session in a repository works under, drawn with
+/// what the room has learned but never written into it — they are this
+/// client's prompt to the agent, not the room's memory (#205). First in the
+/// list, because they are always true while every learned entry ages; the
+/// AUTO mark is what keeps a rule nobody learned from reading as a fact
+/// somebody taught.
+function renderGitBoundary(info: RepoInfo) {
+  const el = document.createElement("div");
+  el.className = "entry auto";
+  el.innerHTML = `<div class="t"><span class="auto-badge">AUTO</span></div><div class="o"></div>`;
+  el.querySelector(".t")!.append("Repository session boundary");
+  el.querySelector<HTMLElement>(".o")!.textContent =
+    `Sessions here work on agent/<topic> branches and never commit or push to ` +
+    `${info.default_branch}. Commits carry a Co-Authored-By trailer.`;
+  $("memory-list").prepend(el);
+}
+
 async function renderMemory() {
   if (!current) return;
-  const entries = await api.memory(current.slug);
+  const [ entries, repo ] = await Promise.all([
+    api.memory(current.slug),
+    channelRepo(current.slug),
+  ]);
   $("memory-uri").textContent = current.memory_uri;
   $("memory-list").innerHTML = "";
+  if (repo) renderGitBoundary(repo);
   for (const e of entries) {
     entryEl("memory-list", e.trust === "human" ? "●" : "○", e.title, e.overview ?? null, e.trust);
   }
@@ -303,8 +354,21 @@ async function send(text: string) {
                                  agents.modelFor(name, current.slug));
   panel.renderOptions();
 
+  // A workspace that is a repository has standing rules of its own (#205),
+  // appended to the room's boundary for exactly the turns that run in it.
+  // Asked once per folder, not per message — git does not change its mind
+  // between two turns.
+  const repo = await repoInfoFor(workspace);
+  const guard = repo?.default_branch ? gitBoundary(repo.default_branch) : null;
+
   let reply = "";
-  const stopAsking = await agents.onAsk(sessionId, (asked) => timeline.askPermission(name, asked));
+  const stopAsking = await agents.onAsk(sessionId, (asked) => {
+    // What the ask means, when the ask is git. The command the agent typed if
+    // it said one, its title otherwise — shell asks often carry it there.
+    const note = gitAskNote(asked.command ?? asked.title,
+                            repo?.default_branch ?? null, repo?.deploys_on_push ?? false);
+    timeline.askPermission(name, asked, note);
+  });
   const stop = await agents.onUpdate(sessionId, (u: Update) => {
     if (u.kind === "text") reply += u.text;
     // Process: recorded against the run, never pushed at the room.
@@ -327,7 +391,7 @@ async function send(text: string) {
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
     await agents.prompt(name, sessionId, withClosing(body),
-                        [ boundary, context ].filter(Boolean).join("\n\n") || null, history);
+                        [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
     timeline.offerTranscript(run.id, name, sessionId);

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -991,5 +991,64 @@ describe("the shape a room can be added with", () => {
   test("a cancelled dialog asks for nothing", () => {
     expect(channelToCreate(null)).toBeNull();
     expect(channelToCreate({ name: "Pricing" })).toBeNull();
+  });
+});
+
+describe("the standing rules of a git-backed session (#205)", () => {
+  test("the boundary names the real default branch, not a placeholder", () => {
+    const text = gitBoundary("main");
+
+    expect(text).toContain("main");
+    // The rules the card stands on: branches of one's own, never the
+    // mainline, and authorship that stays the person's.
+    expect(text).toContain("agent/");
+    expect(text).toMatch(/never (commit|push)/i);
+    expect(text).toContain("Co-Authored-By");
+  });
+
+  test("another repository's mainline is the one named", () => {
+    expect(gitBoundary("trunk")).toContain("trunk");
+    expect(gitBoundary("trunk")).not.toContain("main");
+  });
+});
+
+describe("what a permission ask means in a repository (#205)", () => {
+  test("a push to a feature branch says where it goes, calmly", () => {
+    expect(gitAskNote("git push origin agent/readme-fixes", "main", false))
+      .toBe("Push to origin (agent/readme-fixes)");
+  });
+
+  test("a push to the default branch of a repository that deploys is a warning", () => {
+    const note = gitAskNote("git push origin main", "main", true);
+
+    expect(note).toContain("main");
+    expect(note).toContain("deploys on merge to main");
+  });
+
+  test("a push to the default branch without a deploy is still named", () => {
+    const note = gitAskNote("git push origin main", "main", false);
+
+    expect(note).toContain("main");
+    expect(note).not.toContain("deploys");
+  });
+
+  test("a command that is not git is not annotated", () => {
+    expect(gitAskNote("rm -rf node_modules", "main", true)).toBeNull();
+    expect(gitAskNote("npm test", "main", false)).toBeNull();
+  });
+
+  test("a commit away from the default branch is local, and stays quiet", () => {
+    expect(gitAskNote("git commit -m 'wip'", "main", true)).toBeNull();
+  });
+
+  test("a commit onto the default branch of a deploying repository is a warning", () => {
+    const note = gitAskNote("git checkout main && git commit -m 'wip'", "main", true);
+
+    expect(note).toContain("main");
+    expect(note).toContain("deploys on merge to main");
+  });
+
+  test("a push with no named branch still says what it is", () => {
+    expect(gitAskNote("git push", "main", true)).toBe("Push to origin");
   });
 });

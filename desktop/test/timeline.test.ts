@@ -320,6 +320,29 @@ describe("the agent waiting on a person", () => {
     await vi.waitFor(() => expect(permit).toHaveBeenCalledWith("claude", "req-1", "allow"));
     await vi.waitFor(() => expect(ask.textContent).toBe("Run the test suite? — allow"));
   });
+
+  test("a git ask carries its consequence, muted, beside the question (#205)", () => {
+    const timeline = createTimeline(deps());
+    timeline.open(room([]));
+
+    timeline.askPermission("claude", asked, "Push to origin (main) — deploys on merge to main.");
+
+    const ask = document.querySelector<HTMLElement>("#messages .offer.ask")!;
+    const note = ask.querySelector<HTMLElement>(".ask-note")!;
+    expect(note.textContent).toContain("deploys on merge to main");
+    // The mechanics are untouched: the options are still the agent's own.
+    expect([ ...ask.querySelectorAll("button") ].map((b) => b.textContent))
+      .toEqual([ "Allow", "Deny" ]);
+  });
+
+  test("an ask without a consequence gets no annotation", () => {
+    const timeline = createTimeline(deps());
+    timeline.open(room([]));
+
+    timeline.askPermission("claude", asked);
+
+    expect(document.querySelector("#messages .ask-note")).toBeNull();
+  });
 });
 
 describe("what the run wrote, offered one file at a time", () => {
