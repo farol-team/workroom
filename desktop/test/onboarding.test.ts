@@ -272,6 +272,20 @@ describe("the agents panel, acting", () => {
     expect(actionIn(rows()[1]).textContent).toBe("Install");
   });
 
+  // A press is the one place the work is started and nobody is waiting on the
+  // promise. What the bridge refused has to arrive somewhere a person can read
+  // it — an unhandled rejection is a button that did nothing and said nothing.
+  test("a stop the bridge refuses is said, not swallowed", async () => {
+    bridge({ agent_stop: () => { throw new Error("no such process"); } });
+    const { panel, onTrouble } = panelWith();
+    await panel.start("claude");
+    panel.render();
+
+    actionIn(rows()[0]).click();   // Stop
+
+    await vi.waitFor(() => expect(onTrouble.mock.calls[0][0]).toContain("no such process"));
+  });
+
   test("the one that ships is never offered an install", () => {
     bridge();
     const { panel } = panelWith();
@@ -344,6 +358,20 @@ describe("the setup and the agents panel, one answer", () => {
 
     finish();
     await vi.waitFor(() => expect(panel.busy.has("codex")).toBe(false));
+  });
+
+  // The same press, through the other door: what the bridge refused is said
+  // there too, because it is the panel's press either way.
+  test("an install the bridge could not run is said in the setup too", async () => {
+    bridge({ agent_install: () => { throw new Error("npm is not on the PATH"); } });
+    const { agents, panel, onTrouble } = panelWith();
+    panel.render();
+    showOnboarding(hooks(agents, panel));
+
+    actionIn(cards()[1]).click();
+
+    await vi.waitFor(() =>
+      expect(onTrouble.mock.calls[0][0]).toContain("npm is not on the PATH"));
   });
 
   test("an install started in the setup is busy in the agents panel too", async () => {
