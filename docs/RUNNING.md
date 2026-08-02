@@ -80,12 +80,12 @@ any window is opened.
 
 ## Seeing the idea work
 
-**A turn is already there.** Open `# meetings` before starting anything. There is
+**A turn is already there.** Open `# marketing` before starting anything. There is
 a question, the plan the agent followed, and the answer it posted. The steps
 between are recorded against the run and are not in the channel — process is
 recorded, never pushed.
 
-**Rehydration.** With your agent running, ask:
+**Rehydration.** With your agent running, open `# meetings` and ask:
 
 > @agent what did we agree with Acme about reporting?
 
