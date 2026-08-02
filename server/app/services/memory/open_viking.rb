@@ -137,6 +137,18 @@ module Memory
       entry
     end
 
+    # The journal lineage of a write this store holds, written next to the
+    # entry as a dot-sidecar: machine-readable provenance a reader of the
+    # entry can follow back to the record of the write (#213, Article P4).
+    # An index, not the record — a store that refuses it answers like a tag
+    # that did not stick, because the journal is the source of truth.
+    def annotate(uri, **lineage)
+      post("/api/v1/content/write", uri: sidecar_uri(uri), content: lineage.to_json,
+           mode: "create", wait: false)
+    rescue Error
+      nil
+    end
+
     # Nothing is destroyed: the entry moves out of what the room currently knows
     # and into what it used to (Article P6).
     def supersede(uri, reason: nil)
@@ -146,6 +158,7 @@ module Memory
 
       mkdir(archive.rpartition("/").first + "/")
       post("/api/v1/fs/mv", from_uri: uri, to_uri: archive)
+      move_sidecar(uri, to: archive)
       entry
     end
 
@@ -162,6 +175,27 @@ module Memory
       raise Error, "no archive path for #{uri}" if rest == uri.to_s || !rest.include?("/")
 
       "#{prefix}resources/superseded/#{rest}"
+    end
+
+    # Where an entry's lineage lives: a dot-file next to it, in the entry's own
+    # directory — including under superseded/, so the mapping works the same
+    # before and after a move. OpenViking's semantic layer skips dot-names at
+    # every stage (indexing, ls, glob, grep), so the sidecar is never
+    # summarized, embedded, or surfaced, and this adapter's own `internal?`
+    # filter keeps it out of what the room lists (#213).
+    def sidecar_uri(uri)
+      dir, _, name = uri.to_s.rpartition("/")
+      "#{dir}/.#{name.delete_suffix(".md")}.meta.json"
+    end
+
+    # The sidecar travels with the entry it describes — an archive the record
+    # cannot be found from is half a correction (Article P6). An index, not
+    # the record: a sidecar that was never written, or a store that refuses
+    # the move, does not stop a supersession.
+    def move_sidecar(uri, to:)
+      post("/api/v1/fs/mv", from_uri: sidecar_uri(uri), to_uri: sidecar_uri(to))
+    rescue Error
+      nil
     end
 
     def root_of(channel)

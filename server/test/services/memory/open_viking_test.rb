@@ -266,9 +266,9 @@ class Memory::OpenVikingSidecarTest < ActiveSupport::TestCase
     moves = requests.select { |r| r[:path] == "/api/v1/fs/mv" }
                     .map { |r| [ r[:body]["from_uri"], r[:body]["to_uri"] ] }
     assert_equal 2, moves.length, "the entry and its lineage travel together (Article P6)"
-    assert_includes moves, [ stale, "viking://resources/superseded/channels/meetings/cadence.md" ]
+    assert_includes moves, [ stale, "viking://resources/superseded/meetings/cadence.md" ]
     assert_includes moves, [ "viking://resources/channels/meetings/.cadence.meta.json",
-                             "viking://resources/superseded/channels/meetings/.cadence.meta.json" ]
+                             "viking://resources/superseded/meetings/.cadence.meta.json" ]
   end
 
   test "a missing sidecar does not stop a supersession" do

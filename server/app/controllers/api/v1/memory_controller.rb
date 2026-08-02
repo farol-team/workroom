@@ -29,11 +29,19 @@ module Api
         # text back from the store later is not open to the mirror: by then the
         # entry may be superseded, and the store rightly answers with what the
         # room knows now rather than what it was told then.
-        RecordStore::Append.call(
+        journaled = RecordStore::Append.call(
           channel: channel!, kind: "memory", subject: nil,
           payload: { action: "written", uri: entry.uri, title:, detail: entry.detail, trust:,
                      author_id: current_user.id }
         )
+        # After the append, never before — the store keeps the journal lineage
+        # beside the entry, so a reader of the entry finds the record of the
+        # write (#213). The journal is the source of truth; the sidecar is only
+        # its index.
+        Memory::Store.current.annotate(entry.uri, action: "written", uri: entry.uri, title:,
+                                       detail: entry.detail, trust:, author_id: current_user.id,
+                                       seq: journaled.seq, entry_hash: journaled.entry_hash,
+                                       recorded_at: journaled.created_at)
         render json: serialize(entry), status: :created
       end
 
