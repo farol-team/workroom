@@ -23,6 +23,22 @@ export type { RoomTemplate } from "./rules";
 
 import type { RoomTemplate } from "./rules";
 
+/// The whole of what this client uses a WebSocket for. Naming it is what lets a
+/// test hand `live()` a socket of its own without impersonating a browser.
+export interface CableSocket {
+  send(data: string): void;
+  close(): void;
+  onopen: ((ev: any) => void) | null;
+  onmessage: ((ev: any) => void) | null;
+  onclose: ((ev: any) => void) | null;
+}
+
+/// A subscription, which outlives any one socket under it. Closing it is the
+/// caller saying it is done — not the network saying so.
+export interface Live {
+  close(): void;
+}
+
 export class Api {
   constructor(public base = "http://127.0.0.1:3000", public token = "") {}
 
@@ -238,22 +254,56 @@ export class Api {
 
   /// Two streams. The room carries what the room shares; the user stream
   /// carries what only its owner needs — their own steps, whatever level they chose.
-  live(slug: string, onEvent: (e: any) => void) {
+  ///
+  /// A socket dies for reasons nobody chose — the server restarts, a proxy times
+  /// the connection out, a laptop closes — and the room it fed then looks exactly
+  /// like a room nobody is writing in (#180). So a close is answered with another
+  /// attempt, and `onResync` lets the caller ask for what arrived while nobody was
+  /// listening; only the caller knows what being caught up means. `Socket` is the
+  /// seam a test stands a fake in, and the only one.
+  live(slug: string, onEvent: (e: any) => void, onResync: () => void = () => {},
+       Socket: new (url: string) => CableSocket = WebSocket): Live {
     const url = this.base.replace(/^http/, "ws") + `/cable?token=${encodeURIComponent(this.token)}`;
-    const ws = new WebSocket(url);
     const subscriptions = [
       JSON.stringify({ channel: "RoomChannel", slug }),
       JSON.stringify({ channel: "UserChannel" }),
     ];
 
-    ws.onopen = () =>
-      subscriptions.forEach((identifier) =>
-        ws.send(JSON.stringify({ command: "subscribe", identifier })));
-    ws.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.type) return;              // welcome / ping / confirm_subscription
-      if (data.message) onEvent(data.message);
+    let attempt = 0;
+    let deliberate = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const connect = (missed: boolean): CableSocket => {
+      const ws = new Socket(url);
+      ws.onopen = () => {
+        attempt = 0;                      // a socket that lived earns a fresh first wait
+        subscriptions.forEach((identifier) =>
+          ws.send(JSON.stringify({ command: "subscribe", identifier })));
+        if (missed) onResync();
+      };
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.type) return;              // welcome / ping / confirm_subscription
+        if (data.message) onEvent(data.message);
+      };
+      ws.onclose = () => {
+        if (deliberate) return;             // leaving a room is not an outage
+        // Doubling from a second and capped at half a minute, so a server that
+        // stays down is not hammered; jittered down from there, so a server
+        // coming back does not take every client's attempt in the same tick.
+        const wait = Math.min(1000 * 2 ** attempt++, 30_000);
+        retry = setTimeout(() => { socket = connect(true); }, wait * (0.5 + Math.random() / 2));
+      };
+      return ws;
     };
-    return ws;
+
+    let socket = connect(false);
+    return {
+      close() {
+        deliberate = true;
+        clearTimeout(retry);
+        socket.close();
+      },
+    };
   }
 }
