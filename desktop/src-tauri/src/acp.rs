@@ -923,11 +923,28 @@ mod against_a_real_agent {
         }
 
         pub(super) fn saw(&self, event: &str) -> bool {
+            self.count(event) > 0
+        }
+
+        pub(super) fn count(&self, event: &str) -> usize {
             self.heard
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|(e, _, _)| e == event)
+                .filter(|(e, _, _)| e == event)
+                .count()
+        }
+
+        /// Every question the agent is waiting on an answer to, in the order it
+        /// asked them.
+        pub(super) fn asks(&self) -> Vec<Value> {
+            self.heard
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(event, _, _)| event == "acp://ask")
+                .map(|(_, payload, _)| payload.clone())
+                .collect()
         }
 
         /// The one event of this kind, and what the map looked like as it went.
@@ -1117,8 +1134,7 @@ mod against_a_real_agent {
 #[cfg(test)]
 mod when_the_agent_dies {
     use super::against_a_real_agent::{
-        a_turn_that_answers, a_turn_that_waits, launched, launched_with, permission_granted,
-        session_on, until, Watcher,
+        a_turn_that_waits, launched, launched_with, permission_granted, session_on, until, Watcher,
     };
     use super::*;
 
@@ -1140,45 +1156,61 @@ mod when_the_agent_dies {
         }
     }
 
+    /// A turn on its own session, in flight and waiting on a person.
+    fn turn_on(
+        agent: &Arc<Agent>,
+        session: &str,
+    ) -> tokio::task::JoinHandle<Result<Value, String>> {
+        let (agent, session) = (agent.clone(), session.to_string());
+        tokio::spawn(async move {
+            agent
+                .request("session/prompt", a_turn_that_waits(&session))
+                .await
+        })
+    }
+
     #[tokio::test]
-    async fn a_turn_waiting_on_an_agent_that_died_is_told_the_agent_closed() {
+    async fn every_turn_waiting_on_an_agent_that_died_is_told_the_agent_closed() {
         let watcher = Watcher::new();
         let agent = launched(&watcher, "claude").await;
         watcher.watching(agent.pending.clone());
-        let session = session_on(&agent, json!([])).await;
+
+        // Two, because one agent serves every channel a person has open, and
+        // the drain that reaches only the first one leaves the second reading
+        // "working" for the ten minutes this card exists to remove.
+        let here = session_on(&agent, json!([])).await;
+        let there = session_on(&agent, json!([])).await;
 
         let started = Instant::now();
-        let turn = tokio::spawn({
-            let (agent, session) = (agent.clone(), session.clone());
-            async move {
-                agent
-                    .request("session/prompt", a_turn_that_waits(&session))
-                    .await
-            }
-        });
+        let turns = vec![turn_on(&agent, &here), turn_on(&agent, &there)];
 
-        until(
-            "the agent must be waiting on us before it is killed",
-            || watcher.saw("acp://ask"),
-        )
+        until("both turns must be waiting on the agent", || {
+            watcher.count("acp://ask") == 2
+        })
         .await;
+        assert_eq!(
+            agent.pending.lock().await.len(),
+            2,
+            "both are filed while they wait, or a reply arriving now reaches nobody"
+        );
 
-        // The process dies under the turn: killed, crashed, out of memory.
+        // The process dies under them: killed, crashed, out of memory.
         agent.shutdown().await;
 
-        let error = tokio::time::timeout(Duration::from_secs(5), turn)
-            .await
-            .expect("the wait ends when the process does, not ten idle minutes later")
-            .unwrap()
-            .expect_err("a turn whose agent died did not succeed");
-
-        assert_eq!(
-            error, "agent closed",
-            "the turn is told what happened, in the words the interface already shows"
-        );
+        for turn in turns {
+            let error = tokio::time::timeout(Duration::from_secs(5), turn)
+                .await
+                .expect("the wait ends when the process does, not ten idle minutes later")
+                .unwrap()
+                .expect_err("a turn whose agent died did not succeed");
+            assert_eq!(
+                error, "agent closed",
+                "every turn is told what happened, not whichever one the drain reached first"
+            );
+        }
         assert!(
             started.elapsed() < Duration::from_secs(2),
-            "and told at once — the ten idle minutes compiled in cannot be what ended it ({:?})",
+            "and told at once — the ten idle minutes compiled in cannot be what ended them ({:?})",
             started.elapsed()
         );
         assert!(
@@ -1199,7 +1231,7 @@ mod when_the_agent_dies {
             drained,
             Some(true),
             "empty the map, drop its lock, then say the agent closed. Told in the other order, a \
-             room shows a stopped agent with a turn still spinning in it"
+             room shows a stopped agent with turns still spinning in it"
         );
     }
 
@@ -1226,8 +1258,9 @@ mod when_the_agent_dies {
             .expect_err("a frame that could not be written is not a request that was made");
 
         assert!(
-            !error.contains("said nothing for"),
-            "it failed at the write, not by waiting out a deadline: {error}"
+            error.contains("Broken pipe"),
+            "the pipe is what failed and the pipe is what the caller is told about — not a \
+             deadline nobody waited out, and not silence: {error}"
         );
         assert!(
             agent.pending.lock().await.is_empty(),
@@ -1242,59 +1275,76 @@ mod when_the_agent_dies {
         // is working, and the long turns are what this product is for — read as
         // total elapsed instead, the deadline kills exactly the work it was
         // built to protect.
+        //
+        // Every sign of life here is the agent's own. This side says nothing
+        // about this session after the turns are sent: `answer` is not a
+        // request and stamps no clock, so what keeps the long turn alive is the
+        // reader hearing the agent, which is the only thing that ever will in
+        // front of a person.
         let watcher = Watcher::new();
         let agent =
             launched_with(&watcher, "claude", clocks(IDLE, Duration::from_secs(3600))).await;
         let session = session_on(&agent, json!([])).await;
 
-        let started = Instant::now();
-        let turn = tokio::spawn({
-            let (agent, session) = (agent.clone(), session.clone());
-            async move {
-                agent
-                    .request("session/prompt", a_turn_that_waits(&session))
-                    .await
-            }
-        });
-        until("the agent must be waiting on us", || {
-            watcher.saw("acp://ask")
+        let long_turn = turn_on(&agent, &session);
+        until("the long turn must be the first one asked about", || {
+            watcher.count("acp://ask") == 1
         })
         .await;
 
-        // Eight signs of life about this session, each one inside the deadline
-        // and the lot of them several times past it. This is a streaming turn,
-        // said in the only vocabulary the scripted agent has.
-        for _ in 0..8 {
+        // Eight more turns on the same session, all asking permission and all
+        // left waiting. Answering one makes the agent say something about this
+        // session — which is what a streaming turn does, in the only vocabulary
+        // the scripted agent has.
+        let companions: Vec<_> = (0..8).map(|_| turn_on(&agent, &session)).collect();
+        until("every turn must be waiting on a person", || {
+            watcher.count("acp://ask") == 9
+        })
+        .await;
+
+        let quiet = Instant::now();
+        let asks = watcher.asks();
+        for ask in asks.iter().skip(1) {
             tokio::time::sleep(IDLE / 2).await;
             agent
-                .request("session/prompt", a_turn_that_answers(&session))
+                .answer(&ask["id"], permission_granted())
                 .await
-                .expect("a turn the agent finishes while another waits is an answer");
+                .expect("the answer must be written");
         }
+
         assert!(
-            started.elapsed() > IDLE * 3,
-            "the wait has to outlast the idle limit several times over for this to mean \
+            quiet.elapsed() > IDLE * 3,
+            "the long turn has to outlive the idle limit several times over for this to mean \
              anything ({:?})",
-            started.elapsed()
+            quiet.elapsed()
+        );
+        assert!(
+            !long_turn.is_finished(),
+            "the long turn is still waiting on a person — nothing about it has gone quiet, and \
+             nothing has answered it"
         );
 
-        // And it ends because the person answered, not because a clock ran out.
-        let (asked, _) = watcher.only("acp://ask");
+        // And it ends because somebody answered, not because a clock ran out.
         agent
-            .answer(&asked["id"], permission_granted())
+            .answer(&asks[0]["id"], permission_granted())
             .await
             .expect("the answer must be written");
-
-        let done = tokio::time::timeout(PATIENCE, turn)
+        let done = tokio::time::timeout(PATIENCE, long_turn)
             .await
             .expect("an answered question ends the turn")
             .unwrap()
             .expect(
                 "a turn whose agent kept talking was never given up on — the clock measures the \
-                 silence since the last sign of life, not how long the turn has run",
+                 silence since the agent's last sign of life, not how long the turn has run",
             );
         assert_eq!(done["stopReason"], "end_turn");
 
+        for companion in companions {
+            companion
+                .await
+                .unwrap()
+                .expect("the turns that kept it alive were answered too");
+        }
         agent.shutdown().await;
     }
 
