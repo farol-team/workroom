@@ -110,11 +110,13 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     said = "Tuesday is fine for me, though we should also cover the reporting cadence " \
            "and whatever Acme asked for last week"
 
-    posted(body: "#{said}\n\nand a second paragraph nobody needs in a subject")
+    entry = posted(body: "#{said}\n\nand a second paragraph nobody needs in a subject")
     RecordStore::GitExport.call(@channel, path: @path)
 
     subject = subject_of(shas.last)
     assert_equal said[0, 60], subject, "the subject is the start of what was said, kept to a line"
+    assert_equal 1, read("messages/#{month_of(entry)}.jsonl").lines.length,
+                 "a multi-line message is still one JSON line"
   end
 
   # The Behavior contract is that `git log` answers when the room learned
@@ -175,8 +177,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
                  "in UTC, because when must not depend on who asks")
     assert_in_delta entry.created_at, front["recorded"].to_time, 5
 
-    assert_includes body, "Acme wants monthly reporting"
-    assert_includes body, detail, "the file says what the room knows, not only that it knows something"
+    assert_includes markdown_body(body), "Acme wants monthly reporting"
+    assert_includes markdown_body(body), detail,
+                    "the file says what the room knows, not only that it knows something"
   end
 
   # The seam is not the journal, and the two disagree constantly: entries get
@@ -208,8 +211,8 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
 
     assert_equal 3, shas.length
     body = read("memory/acme-wants-monthly-reporting.md")
-    assert_includes body, "what the envelope holds"
-    assert_not_includes body, "what the store holds",
+    assert_includes markdown_body(body), "what the envelope holds"
+    assert_not_includes markdown_body(body), "what the store holds",
                         "the mirror replays the envelope, not whatever the store holds today"
   end
 
@@ -429,7 +432,8 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     assert_equal "Alice's agent", front["author"],
                  "an agent's inference is not the person's own assertion (Article P4)"
     assert_equal run.id, front["run"], "the turn it came from, readable offline (Article P4)"
-    assert_includes body, "Setup cost, not price.", "what the agent recorded, not only that it did"
+    assert_includes markdown_body(body), "Setup cost, not price.",
+                    "what the agent recorded, not only that it did"
   end
 
   # An artifact is raw bytes on disk: nothing inside the file says where it came
@@ -493,8 +497,9 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
     # this is and why it no longer stands; the version it replaced says what it
     # said, one commit back.
     current = read(file)
-    assert_includes current, "contradicted by a later call", "the mirror says why it was corrected"
-    assert_not_includes current, "First Tuesday of the month.",
+    assert_includes markdown_body(current), "contradicted by a later call",
+                    "the mirror says why it was corrected"
+    assert_not_includes markdown_body(current), "First Tuesday of the month.",
                         "the correction says why, not what — the what is one commit back"
     assert_equal memory_uri("Acme wants monthly reporting"), front_matter(current)["uri"]
     assert_match(/\Asupersede: /, subject_of(shas.last))
@@ -820,6 +825,12 @@ class RecordStore::GitExportTest < ActiveSupport::TestCase
       assert_not_nil block, "the file opens with no front matter"
       YAML.safe_load(block, permitted_classes: [ Time, Date ])
     end
+
+    # What the file says after the provenance block. A memory file whose words
+    # live only in the front matter is a YAML blob, not the readable markdown
+    # this card promises — so what was recorded is asserted here, not anywhere
+    # in the file.
+    def markdown_body(text) = text[/\A---\n.*?\n---\n(.*)\z/m, 1] || ""
 
     # --- the task ------------------------------------------------------------
 
