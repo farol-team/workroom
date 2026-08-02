@@ -16,6 +16,8 @@ class RoomChannelTest < ActionCable::Channel::TestCase
 
     @private = Channel.create!(slug: "private-#{SecureRandom.hex(3)}", name: "Private",
                                visibility: "private")
+    @other_private = Channel.create!(slug: "private-#{SecureRandom.hex(3)}", name: "Salaries",
+                                     visibility: "private")
     @open = channel
     @member = user(name: "Member")
     @private.memberships.create!(user: @member, role: "owner")
@@ -36,6 +38,19 @@ class RoomChannelTest < ActionCable::Channel::TestCase
 
     assert subscription.rejected?,
            "a workspace token was enough to attach to a private room's stream"
+    assert_no_streams
+  end
+
+  # The one an outsider cannot catch. Somebody with no memberships at all is
+  # refused by any check, including one that asks whether this person belongs to
+  # a channel and forgets to say which — and that check is the wrong-scoping bug
+  # this room is worth having: it hands every private room to anybody who was
+  # ever let into one.
+  test "belonging to one private channel is not belonging to another" do
+    subscribe_as @member, @other_private.slug
+
+    assert subscription.rejected?,
+           "a membership in one private room opened a different one"
     assert_no_streams
   end
 
