@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
 import { profileFor, stateOf as stateOfProfile, type AgentState } from "./agents/catalog";
 export type { Update };
 
@@ -69,15 +69,22 @@ export class Agents {
     return profile ? stateOfProfile(profile, where) : where ? "ready" : "missing";
   }
 
-  /// Where this session works. Derived from who is working, with which agent,
-  /// in which channel — the agent never names its own directory.
-  workspace(user: string, name: string, channel: string) {
-    return invoke<string>("agent_workspace", { user, name, channel });
+  /// Where this session works: `~/WorkRoom/<workspace>/<channel>`, derived
+  /// from the room — the agent never names its own directory.
+  workspace(room: string, channel: string) {
+    return invoke<string>("agent_workspace", { workspace: room, channel });
   }
 
-  /// What the run wrote or changed there, since the directory was opened.
+  /// Mark where a turn begins, so the offer can tell the run's work from
+  /// what was already dirty when it started (#202).
+  turnStart(workspace: string) {
+    return invoke<void>("agent_turn_start", { workspace });
+  }
+
+  /// What the run wrote or changed since the turn began — and how many
+  /// changed paths were held back as pre-existing.
   produced(workspace: string) {
-    return invoke<Array<{ path: string; bytes: number }>>("agent_produced", { workspace });
+    return invoke<TurnProduced>("agent_produced", { workspace });
   }
 
   /// One produced file, base64 — a work product is not always text.
@@ -213,8 +220,6 @@ export class Agents {
     const command = this.defs.find((d) => d.name === name)?.command;
     return invoke<string | null>("agent_export_session", { sessionId, command });
   }
-
-  sessionIdFor(name: string, slug: string) { return this.sessions.get(sessionKey(name, slug)); }
 
   prompt(name: string, sessionId: string, text: string,
          context: string | null, history: string | null = null) {

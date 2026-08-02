@@ -63,11 +63,16 @@ if marketing.memory_entries.none?
 end
 
 # A finished turn, so the channel shows what one looks like before you run yours.
-if meetings.messages.none?
-  question = meetings.messages.create!(
-    author: alice, body: "@agent what did we agree with Acme about reporting?")
+#
+# In marketing, because the client opens the first room it is handed and the
+# list comes back by name — so a turn seeded into meetings is a turn nobody
+# arrives at, and `bin/preview` photographs an empty room instead of a
+# conversation (#183).
+if marketing.messages.none?
+  question = marketing.messages.create!(
+    author: alice, body: "@agent why does setup cost keep coming up on calls?")
 
-  session = AgentSession.create!(user: alice, channel: meetings, agent_kind: "opencode",
+  session = AgentSession.create!(user: alice, channel: marketing, agent_kind: "opencode",
                                  external_id: "ses_seed", status: "idle")
   run = session.agent_runs.create!(
     trigger_message: question, status: "succeeded", model: "opencode/big-pickle",
@@ -75,15 +80,22 @@ if meetings.messages.none?
     started_at: 3.minutes.ago, ended_at: 2.minutes.ago)
 
   run.run_steps.create!(kind: "plan", payload: { entries: [
-    { "content" => "Search what the room knows about Acme", "status" => "completed" },
+    { "content" => "Search what the room knows about the objection", "status" => "completed" },
     { "content" => "Answer from it", "status" => "completed" }
   ] })
-  run.run_steps.create!(kind: "tool_use", label: "search_capabilities: Acme reporting")
+  run.run_steps.create!(kind: "tool_use", label: "search_capabilities: setup cost objection")
   run.run_steps.create!(kind: "tool_result", label: "1 entry")
 
-  meetings.messages.create!(author: run, parent: question,
-    body: "Monthly rollups, first Tuesday of the month. Weekly was creating noise for " \
-          "their team and nobody was reading it.")
+  marketing.messages.create!(author: run, parent: question,
+    body: "Four calls raised onboarding effort unprompted, so the site is not answering " \
+          "it. The room has it down as positioning: a page, rather than a rebuttal.")
+
+  # The room advertises a thread by the people in it — an agent's answer is
+  # already on screen, so counting it would point at a conversation that never
+  # happened. Without a person's reply there is no summary to open the panel by,
+  # and the thread state has nothing to photograph.
+  marketing.messages.create!(author: alice, parent: question,
+    body: "Then it belongs on the site before Thursday's call, not in the deck.")
 end
 
 puts "Seeded #{User.count} people, #{Channel.count} channels, " \

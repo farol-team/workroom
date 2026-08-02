@@ -1,7 +1,12 @@
-import { Api, type Channel, type Message } from "./api";
-import { StepLedger, WorkingSignal, activeAgent, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, onboardingCards, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, pickable, templateNote, threadOf, threadSummary, timeLabel, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RoomTemplate, type RunSignal } from "./rules";
+import { Api, type Channel, type Live } from "./api";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
-import { installCommand, profileFor } from "./agents/catalog";
+import { createTimeline, escape, ghostButton } from "./timeline";
+import { createAgentsPanel } from "./agents-panel";
+import { createChannelSettings, type RepoInfo } from "./channel-settings";
+import { createProvision, type FolderState } from "./provision";
+import { createHumanGate, type HumanChangeSet } from "./human-changes";
+import { createReviewDialog } from "./review-changes";
 import { showOnboarding } from "./onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -9,6 +14,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { getVersion } from "@tauri-apps/api/app";
 import * as settings from "./settings";
 import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
@@ -17,22 +23,152 @@ const agents = new Agents(settings.load());
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let channels: Channel[] = [];
 let current: Channel | null = null;
-let socket: WebSocket | null = null;
-let runSteps = new Map<number, string[]>();
-let me = "";   // who is signed in, so a workspace belongs to a person
+let socket: Live | null = null;
 
 // ---------- rendering ----------
 
 /// What each channel has that you have not seen, and whether anyone's agent is
 /// at work in it. Both read from state, never recomputed per surface.
 const seenCount = new Map<string, number>();
-let held: Message[] = [];      // every message of the open channel
-let openThread: number | null = null;
-const ON_SCREEN = 200;
-const AT_MOST_OFFERED = 12;   // an offer nobody can read is worse than no offer
 let bindings = settings.loadBindings();
+/// Where installs go: a directory this application owns, and the same one the
+/// bridge looks in. An agent installed anywhere else would read as missing the
+/// moment it finished installing.
+let prefix = "";
 /// Where this person is, and what reaches the rooms they have a way into.
-let rooms = settings.loadWorkspaces();   // a room with ten thousand messages is not ten thousand elements
+let rooms = settings.loadWorkspaces();
+
+/// The room, and the agents. Two clusters that own their own state and their
+/// own corner of the page; what is left here is what crosses between them —
+/// boot, the open channel, presence, and the turn.
+const timeline = createTimeline({
+  onShown: () => {
+    if (current) seenCount.set(current.slug, (seenCount.get(current.slug) ?? 0) + 1);
+  },
+  permit: async (name, askedId, optionId) => { await agents.permit(name, askedId, optionId); },
+  produced: (workspace) => agents.produced(workspace),
+  readFile: (workspace, path) => agents.read(workspace, path),
+  attach: async (runId, path, body, contentType) => {
+    await api.attachBytes(runId, path, body, contentType);
+  },
+  exportSession: (name, sessionId) => agents.exportSession(name, sessionId),
+  attachTranscript: async (runId, name, body) => { await api.attachArtifact(runId, name, body); },
+  repositoryUrl: () => current?.repository_url ?? null,
+  copyText: (text) => navigator.clipboard.writeText(text),
+  openUrl: (url) => openUrl(url),
+});
+
+// The preview photographs states that have no natural trigger — a turn's
+// offer exists only after a turn, and no button leads there. Named and
+// narrow: this is how `bin/preview` stages the commit row (#206), not a
+// public API.
+(window as unknown as { __workroom: unknown }).__workroom = { timeline };
+
+const panel = createAgentsPanel({
+  agents,
+  prefix: () => prefix,
+  openSession: async (name) => {
+    if (!current) return;
+    const dir = boundFolder(current.slug, bindings)
+      ?? await agents.workspace(rooms.current!, current.slug);
+    await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
+  },
+  onTrouble: (message) => alert(message),
+  currentChannel: () => current,
+});
+
+/// The room's setting and this machine's folder choice, in one dialog (#203).
+const channelSettings = createChannelSettings({
+  currentChannel: () => current,
+  workspaceSlug: () => rooms.current ?? null,
+  updateChannel: (slug, url) => api.updateChannel(slug, url),
+  bindings: () => bindings,
+  bind: (slug, folder) => { bindings = settings.bind(slug, folder); },
+  chooseFolder: (title) => chooseFolder({ directory: true, title }) as Promise<string | null>,
+  derivedFolder: () => agents.workspace(rooms.current!, current!.slug),
+  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
+  repoInfo: (path) => invoke<RepoInfo>("agent_repo_info", { path }),
+  releaseChannel: (slug) => agents.releaseChannel(slug),
+  applied: (updated) => {
+    current = current ? { ...current, ...updated } : updated;
+    renderBinding();
+  },
+  copyText: (text) => navigator.clipboard.writeText(text),
+});
+
+/// The channel's folder, made ready on its own when the room names a
+/// repository (#204). Local from end to end: the rows are this machine's
+/// process, never said to the room.
+const provision = createProvision({
+  bindings: () => bindings,
+  derivedPath: (slug) => invoke<string>("agent_derived_path",
+    { workspace: rooms.current!, channel: slug }),
+  folderState: (dir) => invoke<FolderState>("agent_folder_state", { dir }),
+  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
+  isOpen: (slug) => current?.slug === slug,
+  openSettings: () => channelSettings.open(),
+});
+
+/// Runs executing right now. While one is, the gate does not measure: the
+/// run's own work is not the person's unreviewed changes (#207).
+let activeRuns = 0;
+
+/// The local agent, asked a local question (#207). No run is started and
+/// nothing is posted: the room never learns the question was asked, because
+/// the summary orients the person in their own unreviewed work — it is not a
+/// turn, and charging the room for it would be a lie about who asked. Null
+/// whenever asking is impossible: no agent running, or one mid-run that
+/// should not be handed a second question.
+function localQuestion(): ((question: string, context: string) => Promise<string>) | null {
+  if (!current || activeRuns > 0) return null;
+  const name = defaultAgent(agents.definitions());
+  if (!name || !agents.isRunning(name)) return null;
+  const channel = current;
+  return async (question, context) => {
+    const workspace = boundFolder(channel.slug, bindings)
+      ?? await agents.workspace(rooms.current!, channel.slug);
+    const sessionId = await agents.sessionFor(name, channel.slug, workspace,
+                                              api.rail(channel.slug));
+    let reply = "";
+    const stop = await agents.onUpdate(sessionId, (u: Update) => {
+      if (u.kind === "text") reply += u.text;
+    });
+    try {
+      await agents.prompt(name, sessionId, question, context, null);
+    } finally {
+      stop();
+    }
+    return reply.trim();
+  };
+}
+
+/// The review dialog: the gate's Review and Commit buttons lead here.
+const reviewDialog = createReviewDialog({
+  fileDiff: (dir, path) => invoke<string>("agent_file_diff", { dir, path }),
+  commit: (dir, paths, message) => invoke<string>("agent_commit", { dir, paths, message }),
+  gitInit: (dir) => invoke<void>("agent_git_init", { dir }),
+  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
+  personName: () => $("who").textContent || "you",
+  askAgent: localQuestion,
+  resolve: (how, sha) => humanGate.resolve(how, sha),
+  recheck: () => { if (current) humanGate.check(current); },
+});
+
+/// Work the person wrote outside any run pauses runs until it is reviewed.
+/// The banner and the feed row are this machine's; the room is never told.
+const humanGate = createHumanGate({
+  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
+  stash: (dir) => invoke<void>("agent_stash", { dir }),
+  folderFor: async (channel) => boundFolder(channel.slug, bindings)
+    ?? await invoke<string>("agent_derived_path",
+      { workspace: rooms.current!, channel: channel.slug }),
+  runActive: () => activeRuns > 0,
+  isOpen: (slug) => current?.slug === slug,
+  // Every Review and Commit button lands in the dialog; the resolutions
+  // come back through `resolve` above, so both doors end the same cycle.
+  openReview: (changes, folder) => reviewDialog.open(changes, folder),
+  onChange: () => renderBinding(),
+});
 
 function renderChannels() {
   $("channels").innerHTML = "";
@@ -65,131 +201,6 @@ function renderChannels() {
   }
 }
 
-function messageEl(m: Message) {
-  const el = document.createElement("div");
-  el.className = `msg ${m.author.kind}`;
-  el.dataset.id = String(m.id);
-  const who = m.author.kind === "agent" ? `${m.author.name}'s agent` : m.author.name;
-  const id = identity(m.author);
-  // A face, then a head line (name, mark, time), then what was said. The name
-  // keeps the `.from` class because `recentHistory` reads the room from the
-  // DOM, and what it reads must stay the name.
-  el.innerHTML =
-    `<span class="avatar${id.isAgent ? " is-agent" : ""}" style="--hue:${id.hue}">` +
-    `${escape(id.initials)}</span><div class="msg-main"><div class="msg-head">` +
-    `<span class="from">${escape(who)}</span>` +
-    (id.isAgent ? `<span class="agent-badge">agent</span>` : "") +
-    `<span class="msg-time">${escape(timeLabel(m.created_at))}</span>` +
-    `</div><div class="body"></div></div>`;
-  const body = el.querySelector<HTMLElement>(".body")!;
-  body.textContent = m.body;
-
-  const root = m.parent_id ?? m.id;
-  const reply = document.createElement("button");
-  reply.className = "reply-action";
-  reply.textContent = "Reply";
-  reply.onclick = () => showThread(root);
-  body.append(document.createElement("br"), reply);
-  return el;
-}
-
-/// What the room is told about a conversation happening beside it.
-function refreshSummaries() {
-  for (const el of document.querySelectorAll<HTMLElement>("#messages .msg")) {
-    el.querySelector(".thread-summary")?.remove();
-    const id = Number(el.dataset.id);
-    const summary = threadSummary(held.filter((m) => m.parent_id === id));
-    if (!summary) continue;
-
-    const button = document.createElement("button");
-    button.className = "thread-summary";
-    button.textContent = summary;
-    button.onclick = () => showThread(id);
-    el.querySelector(".body")!.append(button);
-  }
-}
-
-/// One level, in a panel of its own. Nesting a second level inside the room is
-/// what makes people stop replying at all.
-function showThread(rootId: number) {
-  openThread = rootId;
-  $("thread").hidden = false;
-  const box = $("thread-messages");
-  box.innerHTML = "";
-  for (const m of threadOf(held, rootId)) box.append(messageEl(m));
-  box.scrollTop = box.scrollHeight;
-}
-
-function closeThread() {
-  openThread = null;
-  $("thread").hidden = true;
-}
-
-function addMessage(m: Message) {
-  if (!held.some((h) => h.id === m.id)) held.push(m);
-
-  if (openThread !== null && (m.id === openThread || m.parent_id === openThread)) {
-    showThread(openThread);
-  }
-  if (!inTimeline(m)) { refreshSummaries(); return; }
-
-  const box = $("messages");
-  if (box.querySelector(`[data-id="${m.id}"]`)) return;
-  box.querySelector(".intro")?.remove();
-
-  const day = m.created_at.slice(0, 10);
-  if (!box.querySelector(`.day[data-day="${day}"]`)) {
-    const divider = document.createElement("div");
-    divider.className = "day";
-    divider.dataset.day = day;
-    divider.textContent = dayLabel(m.created_at);
-    box.append(divider);
-  }
-
-  box.append(messageEl(m));
-  box.scrollTop = box.scrollHeight;
-
-  if (current) seenCount.set(current.slug, (seenCount.get(current.slug) ?? 0) + 1);
-  refreshSummaries();
-}
-
-/// A new room is not a blank page. It says what it is for and what to try.
-function showIntro(channel: Channel) {
-  const el = document.createElement("div");
-  el.className = "intro";
-  const purpose = channel.purpose ? `${channel.purpose}\n\n` : "";
-  el.textContent = `${purpose}Nothing has been said here yet. Talk to the room, ` +
-    `or address your agent with @agent and it will start from what this room knows.`;
-  $("messages").append(el);
-}
-
-const stepLedger = new StepLedger();
-
-/// Steps are why a minutes-long turn is legible instead of silent. Under the
-/// default level only the owner receives them, so a colleague sees the run line
-/// and not the forty tool calls behind it.
-function addStep(runId: number, label: string, id?: number) {
-  if (!stepLedger.admit(id)) return;   // may arrive on both streams
-  addStepLine(runId, label);
-}
-
-function addStepLine(runId: number, label: string) {
-  const box = $("messages");
-  let holder = box.querySelector<HTMLElement>(`.steps[data-run="${runId}"]`);
-  if (!holder) {
-    holder = document.createElement("div");
-    holder.className = "steps";
-    holder.dataset.run = String(runId);
-    holder.hidden = !showSteps;
-    box.append(holder);
-  }
-  const line = document.createElement("div");
-  line.textContent = `· ${label}`;
-  holder.append(line);
-  box.scrollTop = box.scrollHeight;
-  runSteps.set(runId, [...(runSteps.get(runId) ?? []), label]);
-}
-
 /// One line of a panel: a mark, a title, and the overview under it. Memory and
 /// skills are listed the same way and marked differently, because a fact and a
 /// procedure are read the same way and must not be mistaken for each other.
@@ -202,11 +213,62 @@ function entryEl(into: string, mark: string, title: string, overview: string | n
   $(into).append(el);
 }
 
+/// What the folder a channel works in is, asked once per folder per window.
+/// The answer — a repository's mainline, whether merging ships something —
+/// changes rarely and never mid-turn, so every consumer (the turn's boundary,
+/// the memory panel, a permission ask) reads the same promise rather than
+/// each shelling out for itself (#205).
+const repoInfoCache = new Map<string, Promise<RepoInfo | null>>();
+
+function repoInfoFor(folder: string): Promise<RepoInfo | null> {
+  let pending = repoInfoCache.get(folder);
+  if (!pending) {
+    pending = invoke<RepoInfo>("agent_repo_info", { path: folder }).catch(() => null);
+    repoInfoCache.set(folder, pending);
+  }
+  return pending;
+}
+
+/// The open channel's repository, when its folder is one. A bound folder is
+/// asked directly; an unbound one is the derived path — asked for, not
+/// created, because looking is not provisioning (#204). A folder that is no
+/// repository answers both questions with null, which reads as: nothing
+/// standing here to say.
+async function channelRepo(slug: string): Promise<RepoInfo | null> {
+  const folder = boundFolder(slug, bindings)
+    ?? await invoke<string>("agent_derived_path",
+      { workspace: rooms.current!, channel: slug }).catch(() => null);
+  if (!folder) return null;
+  const info = await repoInfoFor(folder);
+  return info?.default_branch ? info : null;
+}
+
+/// The standing rules every session in a repository works under, drawn with
+/// what the room has learned but never written into it — they are this
+/// client's prompt to the agent, not the room's memory (#205). First in the
+/// list, because they are always true while every learned entry ages; the
+/// AUTO mark is what keeps a rule nobody learned from reading as a fact
+/// somebody taught.
+function renderGitBoundary(info: RepoInfo) {
+  const el = document.createElement("div");
+  el.className = "entry auto";
+  el.innerHTML = `<div class="t"><span class="auto-badge">AUTO</span></div><div class="o"></div>`;
+  el.querySelector(".t")!.append("Repository session boundary");
+  el.querySelector<HTMLElement>(".o")!.textContent =
+    `Sessions here work on agent/<topic> branches and never commit or push to ` +
+    `${info.default_branch}. Commits carry a Co-Authored-By trailer.`;
+  $("memory-list").prepend(el);
+}
+
 async function renderMemory() {
   if (!current) return;
-  const entries = await api.memory(current.slug);
+  const [ entries, repo ] = await Promise.all([
+    api.memory(current.slug),
+    channelRepo(current.slug),
+  ]);
   $("memory-uri").textContent = current.memory_uri;
   $("memory-list").innerHTML = "";
+  if (repo) renderGitBoundary(repo);
   for (const e of entries) {
     entryEl("memory-list", e.trust === "human" ? "●" : "○", e.title, e.overview ?? null, e.trust);
   }
@@ -239,153 +301,6 @@ async function renderSkills() {
     entryEl("skill-list", "▸", s.title, s.overview ?? null, "skill");
   }
 }
-
-/// The agent is waiting on a person, so this goes where that person is looking.
-/// It is process rather than outcome, so it is theirs alone (Article S2).
-function askPermission(name: string, asked: import("./rules").Asked) {
-  const box = $("messages");
-  const el = document.createElement("div");
-  el.className = "offer ask";
-  el.append(document.createTextNode(`${asked.title} `));
-
-  const answer = async (optionId: string | null) => {
-    el.querySelectorAll("button").forEach((b) => (b.disabled = true));
-    try {
-      await agents.permit(name, asked.id, optionId);
-      el.textContent = `${asked.title} — ${optionId ?? "not answered"}`;
-    } catch (err) {
-      el.querySelectorAll("button").forEach((b) => (b.disabled = false));
-      alert(String(err));
-    }
-  };
-
-  // The options are the agent's. Nothing is added and nothing is reinterpreted.
-  for (const option of asked.options) {
-    const button = document.createElement("button");
-    button.className = "ghost";
-    button.textContent = option.name;
-    button.onclick = () => answer(option.id);
-    el.append(button);
-  }
-
-  box.append(el);
-  box.scrollTop = box.scrollHeight;
-}
-
-/// The latest revision replaces the one on screen; the record keeps them all.
-const PLAN_MARK: Record<string, string> = {
-  completed: "\u2713", in_progress: "\u2192", pending: "\u00b7",
-};
-
-function addArtifact(a: { id: number; name: string; kind: string | null }) {
-  const el = document.createElement("div");
-  el.className = "artifact";
-  el.textContent = `\u{1F4CE} ${a.name}`;
-  $("messages").append(el);
-}
-
-function showPlan(runId: number, entries: PlanEntry[]) {
-  const box = $("messages");
-  const id = `plan-${runId}`;
-  const el = document.getElementById(id) ?? document.createElement("div");
-  el.id = id;
-  el.className = "plan";
-  el.innerHTML = "";
-  for (const e of entries) {
-    const line = document.createElement("div");
-    line.className = `plan-entry ${e.status ?? ""}`;
-    line.textContent = `${PLAN_MARK[e.status ?? "pending"] ?? "\u00b7"} ${e.content}`;
-    el.append(line);
-  }
-  if (!el.isConnected) box.append(el);
-  box.scrollTop = box.scrollHeight;
-}
-
-/// What the run wrote in its working directory, offered one file at a time.
-/// Offered, not uploaded: work product belongs to the channel (Article D3), but
-/// what leaves this machine stays the person's decision.
-async function offerProduced(runId: number, workspace: string) {
-  const produced = await agents.produced(workspace);
-  if (!worthOffering(produced)) return;
-  const { files, omitted } = offerable(produced, AT_MOST_OFFERED);
-
-  const box = $("messages");
-  for (const file of files) {
-    const el = document.createElement("div");
-    el.className = "offer";
-    el.append(document.createTextNode(`${file.path} · ${Math.ceil(file.bytes / 1024)} kB `));
-
-    el.append(ghostButton("Share with the channel", "Sharing…", async () => {
-      const body = await agents.read(workspace, file.path);
-      await api.attachBytes(runId, file.path, body, contentTypeFor(file.path));
-      el.remove();
-    }));
-    box.append(el);
-  }
-  if (omitted) {
-    const note = document.createElement("div");
-    note.className = "offer muted";
-    note.textContent = `${omitted} more files changed and are not offered.`;
-    box.append(note);
-  }
-  box.scrollTop = box.scrollHeight;
-}
-
-/// Attaching is a decision made with the work in front of you, so it is an
-/// action on the finished run rather than a setting chosen once in the abstract.
-function offerTranscript(runId: number, name: string, sessionId: string) {
-  const box = $("messages");
-  const el = document.createElement("div");
-  el.className = "offer";
-
-  el.append(ghostButton("Attach transcript", "Attaching…", async () => {
-    const body = await agents.exportSession(name, sessionId);
-    if (!body) { el.textContent = "This agent keeps no transcript."; return; }
-    await api.attachArtifact(runId, transcriptName(runId, new Date()), body);
-    el.remove();
-  }));
-  box.append(el);
-  box.scrollTop = box.scrollHeight;
-}
-
-/// Whatever the agent offers, rendered as it comes. Per channel, because the
-/// session is per channel — a cheap model here and an expensive one there.
-function renderOptions() {
-  const box = $("session-options");
-  box.innerHTML = "";
-  const name = chosenAgent();
-  if (!current || !name || !agents.isRunning(name)) return;
-
-  for (const option of selectable(agents.configFor(name, current.slug))) {
-    const label = document.createElement("label");
-    label.className = "session-option";
-    label.title = option.name;
-
-    const select = document.createElement("select");
-    for (const choice of option.options ?? []) {
-      const el = document.createElement("option");
-      el.value = choice.value;
-      el.textContent = choice.name;
-      el.selected = choice.value === option.currentValue;
-      select.append(el);
-    }
-    select.onchange = async () => {
-      select.disabled = true;
-      try {
-        agents.rememberConfig(name, current!.slug,
-          await agents.setConfig(name, current!.slug, option.id, select.value));
-      } catch (err) { alert(String(err)); }
-      select.disabled = false;
-      renderOptions();
-    };
-
-    label.append(select);
-    box.append(label);
-  }
-}
-
-const escape = (s: string) =>
-  s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 // ---------- channel ----------
 
@@ -427,36 +342,58 @@ async function open(slug: string) {
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
   renderBinding();
-  $("messages").innerHTML = "";
-  held = [ ...full.messages ];
-  closeThread();
+  // Before the timeline draws, not after: what it draws counts itself as seen
+  // through `onShown`, and setting the count afterwards would throw that away.
   seenCount.set(slug, full.messages.length);
+  timeline.open(full);
 
-  const shown = onScreen(full.messages.filter(inTimeline), ON_SCREEN);
-  if (shown.hidden) {
-    const earlier = document.createElement("div");
-    earlier.className = "earlier";
-    earlier.textContent = `${shown.hidden} earlier messages are not shown`;
-    $("messages").append(earlier);
-  }
-  if (full.messages.length) shown.messages.forEach(addMessage);
-  else showIntro(full);
+  // After the room is drawn, and never in its way: provisioning is this
+  // machine making the channel's folder ready, not something the room waits
+  // on (#204).
+  provision.consider(full);
+  // Opening a room is one of the moments the person's unreviewed work is
+  // most likely to be sitting in its folder (#207).
+  humanGate.check(full);
+
   renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
-  renderOptions();
+  panel.renderOptions();
 
   socket?.close();
   socket = api.live(slug, (e) => {
-    if (e.type === "message") addMessage(e.message);
-    if (e.type === "step") addStep(e.step.run_id, e.step.label ?? e.step.kind, e.step.id);
+    if (e.type === "message") timeline.add(e.message);
+    if (e.type === "step") timeline.addStep(e.step.run_id, e.step.label ?? e.step.kind, e.step.id);
     if (e.type === "run") showPresence(e.run);
-    if (e.type === "plan") showPlan(e.plan.run_id, e.plan.entries);
-    if (e.type === "artifact") addArtifact(e.artifact);
+    if (e.type === "plan") timeline.showPlan(e.plan.run_id, e.plan.entries);
+    if (e.type === "artifact") timeline.addArtifact(e.artifact);
     if (e.type === "elsewhere" && e.channel !== current?.slug) {
       const c = channels.find((x) => x.slug === e.channel);
       if (c) { c.message_count = (c.message_count ?? 0) + 1; renderChannels(); }
     }
-  });
+    if (e.type === "channel" && e.channel?.slug === current?.slug) {
+      // The room's setting changed — saved here through the dialog, or on
+      // another machine. Either way what is on screen follows the room (#203).
+      current = { ...current!, ...e.channel };
+      channelSettings.refresh(e.channel);
+      renderBinding();
+    }
+  }, () => catchUp(slug));
+}
+
+/// The cable replays nothing, so a socket that was away came back to a room that
+/// moved without it (#180). What it missed is `api.caughtUp`'s to work out; all
+/// this adds is that the answer is only for the room still on screen — the room
+/// can be left while the request is in flight, and pouring another channel's
+/// messages into this one is worse than staying behind.
+///
+/// The rejection is deliberately not swallowed here: a server that has only just
+/// come back can refuse this request, and `live()` reads the rejection as a room
+/// still behind and asks again. Returning the promise is what makes that work.
+async function catchUp(slug: string) {
+  if (current?.slug !== slug) return;
+  const missed = await api.caughtUp(slug, timeline.held());
+  if (current?.slug !== slug) return;
+  missed.forEach(timeline.add);
 }
 
 // ---------- the turn ----------
@@ -484,24 +421,38 @@ async function send(text: string) {
   // is null there, and a new channel is where an agent has least to go on and
   // most room to wander (#114).
   const { context, boundary, store } = await api.context(current.slug);
-  const history = recentHistory();
+  const history = timeline.recentHistory();
   const workspace = boundFolder(current.slug, bindings)
-    ?? await agents.workspace(me, name, current.slug);
+    ?? await agents.workspace(rooms.current!, current.slug);
   const sessionId = await agents.sessionFor(name, current.slug, workspace,
                                             api.rail(current.slug), store);
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
-  renderOptions();
+  activeRuns += 1;
+  panel.renderOptions();
+
+  // A workspace that is a repository has standing rules of its own (#205),
+  // appended to the room's boundary for exactly the turns that run in it.
+  // Asked once per folder, not per message — git does not change its mind
+  // between two turns.
+  const repo = await repoInfoFor(workspace);
+  const guard = repo?.default_branch ? gitBoundary(repo.default_branch) : null;
 
   let reply = "";
-  const stopAsking = await agents.onAsk(sessionId, (asked) => askPermission(name, asked));
+  const stopAsking = await agents.onAsk(sessionId, (asked) => {
+    // What the ask means, when the ask is git. The command the agent typed if
+    // it said one, its title otherwise — shell asks often carry it there.
+    const note = gitAskNote(asked.command ?? asked.title,
+                            repo?.default_branch ?? null, repo?.deploys_on_push ?? false);
+    timeline.askPermission(name, asked, note);
+  });
   const stop = await agents.onUpdate(sessionId, (u: Update) => {
     if (u.kind === "text") reply += u.text;
     // Process: recorded against the run, never pushed at the room.
     else if (u.kind === "thought") api.step(run.id, "thought", u.text.slice(0, 200)).catch(() => {});
     else if (u.kind === "plan") api.plan(run.id, u.entries).catch(() => {});
     else if (u.kind === "usage") api.reportUsage(run.id, u.used, u.size, u.cost).catch(() => {});
-    else if (u.kind === "config") { agents.rememberConfig(name, current!.slug, u.options); renderOptions(); }
+    else if (u.kind === "config") { agents.rememberConfig(name, current!.slug, u.options); panel.renderOptions(); }
     else api.step(run.id, "tool_use", u.label).catch(() => {});
   });
 
@@ -513,29 +464,27 @@ async function send(text: string) {
   });
 
   try {
+    // The offer at the end of this turn is measured from here: what was
+    // already dirty stays the person's, only the delta is the run's (#202).
+    await agents.turnStart(workspace).catch(() => {});
     await agents.prompt(name, sessionId, withClosing(body),
-                        [ boundary, context ].filter(Boolean).join("\n\n") || null, history);
+                        [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
-    offerTranscript(run.id, name, sessionId);
-    await offerProduced(run.id, workspace).catch(() => {});
+    timeline.offerTranscript(run.id, name, sessionId);
+    await timeline.offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
   } finally {
+    activeRuns -= 1;
     stopTurn();
     stop();
     stopAsking();
+    // The turn's end is the third moment: whatever the person wrote while it
+    // ran is now visible to the gate (#207).
+    if (current) humanGate.check(current);
   }
-}
-
-/// The last few turns of the room, as the agent would read them.
-function recentHistory(limit = 20): string | null {
-  const rows = [...document.querySelectorAll<HTMLElement>("#messages .msg")].map((el) => ({
-    who: el.querySelector(".from")?.textContent?.trim() ?? "?",
-    what: el.querySelector(".body")?.textContent?.trim() ?? "",
-  }));
-  return formatHistory(rows, limit);
 }
 
 // ---------- wiring ----------
@@ -552,7 +501,7 @@ $("input").addEventListener("input", refreshDestination);
 $("summon").addEventListener("click", () => {
   const input = $<HTMLInputElement>("input");
   if (!parseAddress(input.value, agents.definitions()).addressed) {
-    input.value = `@${chosenAgent() ?? "agent"} ${input.value}`;
+    input.value = `@${panel.chosen() ?? "agent"} ${input.value}`;
   }
   input.focus();
   refreshDestination();
@@ -563,201 +512,36 @@ $("composer").addEventListener("submit", async (e) => {
   const input = $<HTMLInputElement>("input");
   const text = input.value.trim();
   if (!text) return;
+  // A run is work on the folder, and unreviewed work there pauses it (#207).
+  // Refused does not mean discarded: the message stays typed, the reason is
+  // said, and a plain message to the room was never the gate's concern.
+  if (humanGate.refuse(parseAddress(text, agents.definitions()).addressed)) return;
   input.value = "";
+  $("gate-refused").textContent = "";
   refreshDestination();
   await send(text).catch((err) => alert(String(err)));
   offerToAdd(text).catch(() => {});
 });
-
-/// The one chosen, kept across windows — a choice that evaporates on restart
-/// reads as never having been offered.
-let picked: string | undefined = settings.loadPicked();
-const chosenAgent = () => activeAgent(agents.definitions(), picked);
-
-function pick(name: string) {
-  picked = name;
-  settings.savePicked(name);
-}
-
-/// What a row is doing right now, when it is doing something. Held here rather
-/// than written into the row, because every render rebuilds it.
-const busy = new Map<string, string>();
-
-/// Where installs go: a directory this application owns, and the same one the
-/// bridge looks in. An agent installed anywhere else would read as missing the
-/// moment it finished installing.
-let prefix = "";
-
-/// One row per agent: what it is called, the state it is really in, and the
-/// single thing to do about it. The state is the machine's answer — an agent
-/// reported as ready that is not there is worse than no panel at all.
-function renderAgents() {
-  const box = $("agents");
-  box.innerHTML = "";
-  const chosen = chosenAgent();
-
-  for (const def of agents.definitions()) {
-    const profile = profileFor(def.name);
-    const state = agents.stateOf(def.name);
-    const running = agents.isRunning(def.name);
-    const command = profile && prefix && state === "missing"
-      ? installCommand(profile, prefix) : null;
-
-    const row = document.createElement("div");
-    row.className = "agent-row";
-
-    // The name is how one of them is chosen — what the picker was for, and the
-    // one thing the panel that replaced it did not carry over. Three agents are
-    // listed for everybody now, so two running at once is ordinary, and the
-    // second one's session options were reachable only by stopping the first.
-    const name = document.createElement("button");
-    name.className = "agent-name";
-    name.style.cssText = "background: none; border: 0; padding: 0; font: inherit; cursor: pointer;"
-      + `color: var(${def.name === chosen ? "--accent" : "--text"});`;
-    name.textContent = profile?.label ?? def.name;
-    name.title = `${[ def.command, ...def.args ].join(" ")} — press to address this one`;
-    name.onclick = () => { pick(def.name); renderAgents(); renderOptions(); };
-
-    const said = document.createElement("span");
-    said.className = "muted";
-    said.textContent = busy.get(def.name) ?? (running ? "running" : state);
-
-    const action = document.createElement("button");
-    action.className = "ghost";
-    action.disabled = busy.has(def.name);
-    if (command) {
-      action.textContent = "Install";
-      action.onclick = () => { installAgent(def.name).catch((err) => alert(String(err))); };
-    } else {
-      action.textContent = running ? "Stop" : "Start";
-      action.onclick = () => { toggleAgent(def.name).catch((err) => alert(String(err))); };
-    }
-
-    row.append(name, said, action);
-    box.append(row);
-
-    // The exact command, before it runs. An application that installs something
-    // without saying what it is about to run has asked for trust it has not
-    // earned — and the answer to "what did that do to my machine" is on screen.
-    if (command) {
-      const shown = document.createElement("code");
-      shown.className = "muted";
-      shown.textContent = command;
-      shown.title = command;
-      box.append(shown);
-    }
-  }
-
-  // The sidebar footer carries the same answer in one line, and is the way
-  // into this panel. Nobody should have to open a dialog to learn whether
-  // their agent is running.
-  const chosenLabel = chosen ? (profileFor(chosen)?.label ?? chosen) : null;
-  $("agents-open").textContent = chosenLabel
-    ? `${chosenLabel} · ${agents.isRunning(chosen!) ? "running" : agents.stateOf(chosen!)}`
-    : "Set up your agent";
-}
-
-/// Ask the machine which of these agents it actually has. Their state is what
-/// the panel is for, and a guess would be worse than the silence it replaced.
-async function refreshAgents() {
-  await agents.probe(agents.definitions().map((d) => d.command));
-  renderAgents();
-}
-
-/// Fetch one agent, on an explicit press. One npm command into a prefix this
-/// application owns — nothing else on the machine is touched, and a failure
-/// says what npm said rather than that something went wrong.
-async function installAgent(name: string) {
-  const profile = profileFor(name);
-  const command = profile && prefix ? installCommand(profile, prefix) : null;
-  if (!command) return;
-
-  busy.set(name, "installing…");
-  renderAgents();
-  try {
-    const out = await agents.install(command);
-    if (!out.ok) {
-      alert(`${profile!.label} was not installed.\n\n${command}\n\n`
-        + `${out.stderrTail || out.stdoutTail || `npm exited ${out.code}`}`);
-    }
-  } finally {
-    busy.delete(name);
-    // Whether it worked is the machine's to say, not the exit code's.
-    await refreshAgents();
-  }
-}
-
-async function toggleAgent(name: string) {
-  pick(name);
-  if (agents.isRunning(name)) {
-    await agents.stop(name);
-    renderAgents();
-    return;
-  }
-  try {
-    await startAgent(name);
-  } catch (err) {
-    alert(`Could not start ${name}.\n\n${String(err)}`);
-  }
-}
-
-/// Start one agent and open its session in the room that is on screen. Shared
-/// with the notice an agent leaves when its process ends (#93) — the person
-/// asks for the restart there, the same way they would here.
-async function startAgent(name: string) {
-  pick(name);
-  busy.set(name, "starting…");
-  renderAgents();
-  try {
-    await agents.start(name);
-    busy.delete(name);
-    renderAgents();
-    if (current) {
-      const dir = boundFolder(current.slug, bindings)
-        ?? await agents.workspace(me, name, current.slug);
-      await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
-      renderOptions();
-    }
-  } catch (err) {
-    busy.delete(name);
-    renderAgents();
-    throw err;
-  }
-}
-
-// A local view preference, not a property of the session. The record is
-// complete either way; this only decides how much of it is on screen.
-let showSteps = true;
 
 /// The first run, and any run asked for again from the agents panel. All the
 /// actions are the panel's own — setup is another door into the same room,
 /// not a room of its own.
 function openOnboarding() {
   showOnboarding({
-    cards: () => onboardingCards(agents.definitions().map((d) => ({
-      name: d.name,
-      label: profileFor(d.name)?.label ?? d.name,
-      state: agents.stateOf(d.name),
-      running: agents.isRunning(d.name),
-    }))),
-    installCommand: (name) => {
-      const profile = profileFor(name);
-      return profile && prefix ? installCommand(profile, prefix) : null;
-    },
-    onInstall: installAgent,
-    onToggle: toggleAgent,
+    cards: () => panel.cards(),
+    agentCard: panel.agentCard,
     onFinish: (chosen) => {
-      if (chosen) pick(chosen);
+      if (chosen) panel.pick(chosen);
       settings.markOnboarded();
-      renderAgents();
-      renderOptions();
+      panel.render();
+      panel.renderOptions();
     },
-    initialPicked: picked,
+    initialPicked: panel.picked(),
   });
 }
 
 $("agents-open").addEventListener("click", () => {
-  renderAgents();
+  panel.render();
   $<HTMLDialogElement>("agents-dialog").showModal();
 });
 
@@ -767,16 +551,19 @@ $("agents-setup").addEventListener("click", () => {
 });
 
 $("show-steps").addEventListener("change", (e) => {
-  showSteps = (e.target as HTMLInputElement).checked;
-  document.querySelectorAll<HTMLElement>(".steps").forEach((el) => {
-    el.hidden = !showSteps;
-  });
+  timeline.revealSteps((e.target as HTMLInputElement).checked);
 });
 
 $("memory-toggle").addEventListener("click", () => {
-  const panel = $("memory");
-  panel.hidden = !panel.hidden;
-  if (!panel.hidden) { renderMemory(); renderSkills(); renderMembers(); }
+  const memory = $("memory");
+  memory.hidden = !memory.hidden;
+  if (!memory.hidden) { renderMemory(); renderSkills(); renderMembers(); }
+});
+
+// Coming back to the window is the other moment: the person has been
+// working somewhere, and that somewhere may be this folder (#207).
+window.addEventListener("focus", () => {
+  if (current) humanGate.check(current);
 });
 
 
@@ -1007,6 +794,10 @@ function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
   const el = $("folder");
   el.textContent = folder ? folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/") : "Use a folder…";
+  // The gate's count rides the folder button: unreviewed work is about this
+  // folder, so that is where the number belongs (#207).
+  const pending = humanGate.pending();
+  if (pending) el.textContent += ` · ${pending}`;
   el.title = folder
     ? `${folder} — this channel's agent works here. Click to change, shift-click to unbind.`
     : "Bind this channel to a folder you already have";
@@ -1016,12 +807,16 @@ function renderBinding() {
 /// Binding is deliberate. An agent in somebody's real repository can change
 /// anything in it — which is normal for a coding agent, and normal precisely
 /// because the person opened it there.
+///
+/// The picker itself moved into the channel settings dialog (#203), where the
+/// choice sits beside the repository it refers to; the shift-click unbind
+/// stayed, because taking a binding back is one gesture, not a dialog.
 $("folder").addEventListener("click", async (e) => {
   if (!current) return;
   const slug = current.slug;
-  const before = boundFolder(slug, bindings);
 
   if ((e as MouseEvent).shiftKey) {
+    const before = boundFolder(slug, bindings);
     bindings = settings.bind(slug, null);
     renderBinding();
     // The session was opened against the old directory and cannot follow it.
@@ -1029,24 +824,23 @@ $("folder").addEventListener("click", async (e) => {
     return;
   }
 
-  const chosen = await chooseFolder({ directory: true, title: `Where # ${slug} works` });
-  if (typeof chosen === "string") {
-    bindings = settings.bind(slug, chosen);
-    if (chosen !== before) await agents.releaseChannel(slug);
-  }
-  renderBinding();
+  channelSettings.open();
 });
 
-$("thread-close").addEventListener("click", closeThread);
+/// The room's name is the other door into the same settings.
+$("channel-name").addEventListener("click", () => channelSettings.open());
+
+$("thread-close").addEventListener("click", () => timeline.closeThread());
 
 $("thread-composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $<HTMLInputElement>("thread-input");
   const text = input.value.trim();
-  if (!current || !text || openThread === null) return;
+  const root = timeline.openThread();
+  if (!current || !text || root === null) return;
   input.value = "";
   try {
-    await api.post(current.slug, text, openThread);
+    await api.post(current.slug, text, root);
   } catch (err) { alert(String(err)); }
 });
 
@@ -1121,27 +915,6 @@ function say(text: string, action?: string, run?: () => Promise<void>): () => vo
   return () => el.remove();
 }
 
-/// A button for something that can fail. While it runs it says so and cannot be
-/// pressed again; if it fails it says why and can be pressed again. Every offer
-/// and every notice wanted the same six lines, and each wrote its own.
-function ghostButton(label: string, busy: string, work: () => Promise<void>): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.className = "ghost";
-  button.textContent = label;
-  button.onclick = async () => {
-    button.disabled = true;
-    button.textContent = busy;
-    try {
-      await work();
-    } catch (err) {
-      button.disabled = false;
-      button.textContent = label;
-      alert(String(err));
-    }
-  };
-  return button;
-}
-
 async function boot() {
   const dialog = $<HTMLDialogElement>("signin");
   const how = await api.methods().catch(() => ({ development: true, provider: false, version: undefined }));
@@ -1155,8 +928,8 @@ async function boot() {
   const { user } = signedInThroughBrowser
     ? await api.whoAmI()
     : await api.signIn($<HTMLInputElement>("email").value.trim());
-  me = user.email;
-  $("who").textContent = user.name;
+  const myName = user.name;
+  $("who").textContent = myName;
 
   // Signing in is where a token for a room arrives. The other place is making
   // one; there is deliberately no third, because a token fetched for another
@@ -1176,13 +949,13 @@ async function boot() {
   agents.use(settings.load());
   for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
   prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
-  renderAgents();
+  panel.render();
   // What each of them is on this machine, said once the room is up. Until it
   // answers a row reads as missing, which is what it was before this existed.
   // The first run asks which agent this person has — after the probe answers,
   // so the cards open with what the machine actually said, and only once;
   // after that the panel carries it and setup is re-opened from there.
-  refreshAgents().catch(() => {}).then(() => {
+  panel.refresh().catch(() => {}).then(() => {
     if (!settings.isOnboarded()) openOnboarding();
   });
 
@@ -1190,10 +963,10 @@ async function boot() {
   // Restarting is offered, never done: the process runs under this person's own
   // credentials and respawning it unasked is not ours to decide.
   await agents.onClosed(({ name, diagnostics }) => {
-    renderAgents();
+    panel.render();
     const who = name ?? "The agent";
     const why = diagnostics.length ? ` It said: ${diagnostics.slice(-3).join(" ")}` : "";
-    if (name) say(`${who} stopped.${why}`, "Start agent", () => startAgent(name));
+    if (name) say(`${who} stopped.${why}`, "Start agent", () => panel.start(name));
     else say(`${who} stopped.${why}`);
   });
 

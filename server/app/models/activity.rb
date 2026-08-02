@@ -8,7 +8,7 @@ class Activity < ApplicationRecord
 
   before_validation { self.created_at ||= Time.current }
 
-  # Append-only: обновление и удаление запрещены на уровне модели.
+  # Append-only: update and destroy are refused at the model (Article P6).
   def readonly? = persisted?
 
   def self.log(actor:, action:, subject: nil, **metadata)

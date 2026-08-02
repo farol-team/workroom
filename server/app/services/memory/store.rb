@@ -129,6 +129,13 @@ module Memory
     # has to be one call or it will not happen.
     def supersede(_uri, reason: nil)      = raise NotImplementedError
 
+    # The journal lineage of a write the server witnessed, kept by the store
+    # beside the entry so a reader of the entry can find the record of it
+    # (#213). The journal is the source of truth and this is only its index,
+    # so a store with no lineage index answers by doing nothing — `Memory::Local`
+    # and any future store inherit this answer unchanged.
+    def annotate(_uri, **_lineage)        = nil
+
     # An agent searches with the question it was asked, not with a keyword.
     # Reading a query into terms belongs to the seam rather than to any one
     # backend: the rail discovers its actions the same way memory is searched,

@@ -28,7 +28,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
+use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
 /// Defaults to the adapter that ships with this application; any other ACP
@@ -205,96 +205,201 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
 }
 
 /// Open the working directory for this session and remember what was in it.
-/// The path is derived from who is working, with which agent, in which channel —
-/// the agent never names its own directory.
+/// The path is derived from the workspace and the channel — the agent never
+/// names its own directory. The root is `~/WorkRoom`: where an agent spends
+/// its days is work, and work should be visible in Finder, not hidden in
+/// app-data like a cache — and it stays out of iCloud's Documents domain,
+/// whose file eviction would corrupt an agent's working tree (#201).
+///
+/// Everything here reads a disk, so it happens on the blocking pool. An async
+/// command that walks a directory inline holds a runtime worker for as long as
+/// the walk takes, and on somebody's real repository that is the whole bridge
+/// answering nothing, mid-turn, for a directory listing (#179).
 #[tauri::command]
 async fn agent_workspace(
     app: AppHandle,
-    shots: State<'_, Workspaces>,
-    user: String,
-    name: String,
+    workspace: String,
     channel: String,
 ) -> Result<String, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("no app data directory: {e}"))?
-        .join("workspaces");
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
 
-    let dir = workspace::workspace_path(&root, &user, &name, &channel);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let dir = workspace::workspace_path(&root, &workspace, &channel);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
-    shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?
-        .insert(dir.clone(), workspace::snapshot(&dir));
-
-    Ok(dir.to_string_lossy().into_owned())
+        workspace::baseline(&app.state::<Workspaces>(), &dir)?;
+        Ok(dir.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("opening the workspace did not finish: {e}"))?
 }
 
 /// What this run wrote or changed, offered rather than uploaded — what leaves
 /// the machine stays the person's decision (Article D3 does not override P2).
+///
+/// The walk and the `git status` are the slow part and belong off the runtime;
+/// which files those are, and where the line between turns now sits, is
+/// `workspace::offer`'s to decide.
 #[tauri::command]
-async fn agent_produced(
-    shots: State<'_, Workspaces>,
+async fn agent_produced(app: AppHandle, workspace: String) -> Result<TurnProduced, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::offer(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("looking at the workspace did not finish: {e}"))?
+}
+
+/// Mark where a turn begins. Everything the offer says about the run is
+/// measured from here — what was already dirty is the person's, and only
+/// the delta is the run's (#202).
+#[tauri::command]
+async fn agent_turn_start(app: AppHandle, workspace: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::turn_start(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("marking the turn's start did not finish: {e}"))?
+}
+
+/// What a folder's repository would mean for an agent about to work in it —
+/// read when the person picks the folder, so the warning that a merge ships
+/// something arrives before the agent does (#203). The reading is `git` and a
+/// directory listing, and belongs off the runtime like every other walk.
+#[tauri::command]
+async fn agent_repo_info(path: String) -> Result<workspace::RepoInfo, String> {
+    tokio::task::spawn_blocking(move || workspace::repo_info(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("looking at the repository did not finish: {e}"))
+}
+
+/// Clone the room's repository into the folder the room works in. The url is
+/// the room's own setting and the directory is derived — like every session
+/// working directory, it is never the agent's to name (#201).
+#[tauri::command]
+async fn agent_clone(url: String, dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::clone_repository(&url, std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("cloning did not finish: {e}"))?
+}
+
+/// Where the channel would work, answered *without* making it (#204).
+/// `agent_workspace` creates on sight, which is right when a session is about
+/// to start and wrong here: provisioning is only deciding what to do, and a
+/// decision that creates the folder would make every later answer — empty?
+/// missing? — a question about a directory we just made ourselves.
+#[tauri::command]
+async fn agent_derived_path(
+    app: AppHandle,
     workspace: String,
-) -> Result<Vec<Produced>, String> {
-    let dir = std::path::PathBuf::from(&workspace);
+    channel: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
+        Ok(workspace::workspace_path(&root, &workspace, &channel)
+            .to_string_lossy()
+            .into_owned())
+    })
+    .await
+    .map_err(|e| format!("deriving the path did not finish: {e}"))?
+}
 
-    // A folder somebody bound is their real work, and git already knows what
-    // changed in it — by their ignore rules, not ours.
-    if let Some(changed) = workspace::git_changes(&dir) {
-        return Ok(changed
-            .into_iter()
-            .filter_map(|path| {
-                let bytes = std::fs::metadata(dir.join(&path)).ok()?.len();
-                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
-            })
-            .collect());
-    }
+/// What the channel's folder currently is — there or not, empty or not, and
+/// which repository when it is one (#204). Read-only by construction: the
+/// answer decides between cloning, leaving alone, and warning, and every one
+/// of those needs the folder as it actually is.
+#[tauri::command]
+async fn agent_folder_state(dir: String) -> Result<workspace::FolderState, String> {
+    tokio::task::spawn_blocking(move || workspace::folder_state(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("looking at the folder did not finish: {e}"))
+}
 
-    let after = workspace::snapshot(&dir);
+/// Work in the folder that no run did (#207). Read-only: the line is the
+/// turn's to move, and the gate that asks this question asks it again on
+/// every focus, every open and every turn's end.
+#[tauri::command]
+async fn agent_human_changes(
+    app: AppHandle,
+    dir: String,
+) -> Result<workspace::HumanChanges, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::human_changes(&app.state::<Workspaces>(), std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("reading the folder did not finish: {e}"))?
+}
 
-    let mut state = shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?;
-    let before = state.get(&dir).cloned().unwrap_or_default();
+/// Set the person's unreviewed work aside so a run can start from a clean
+/// tree (#207). The button says how to bring it back; git keeps it.
+#[tauri::command]
+async fn agent_stash(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::stash(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("stashing did not finish: {e}"))?
+}
 
-    let files = workspace::produced(&before, &after)
-        .into_iter()
-        .filter_map(|rel| {
-            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
-            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
-                path: rel.to_string_lossy().into_owned(),
-                bytes,
-            })
-        })
-        .collect();
+/// A plain folder becomes a repository when the person says so (#207).
+/// Idempotent, and deliberately remote-less.
+#[tauri::command]
+async fn agent_git_init(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::git_init(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("init did not finish: {e}"))?
+}
 
-    // The next turn is measured from here, so one file is not offered twice.
-    state.insert(dir, after);
-    Ok(files)
+/// One file's changes, for the review dialog (#207). The dialog asks one row
+/// at a time, as the person expands them.
+#[tauri::command]
+async fn agent_file_diff(dir: String, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || workspace::file_diff(std::path::Path::new(&dir), &path))
+        .await
+        .map_err(|e| format!("reading the diff did not finish: {e}"))?
+}
+
+/// The reviewed changes, committed as the machine's own git identity (#207).
+/// No configuration is written here: if git cannot name the author, its own
+/// error is the dialog's to show.
+#[tauri::command]
+async fn agent_commit(dir: String, paths: Vec<String>, message: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::commit(std::path::Path::new(&dir), &paths, &message)
+    })
+    .await
+    .map_err(|e| format!("committing did not finish: {e}"))?
 }
 
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
-    let dir = std::path::PathBuf::from(&workspace)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
-    // A path that resolves outside its own workspace is not this session's to read.
-    if !file.starts_with(&dir) {
-        return Err(format!("{path} is outside the workspace"));
-    }
+    tokio::task::spawn_blocking(move || {
+        let dir = std::path::PathBuf::from(&workspace)
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
+        // A path that resolves outside its own workspace is not this session's to read.
+        if !file.starts_with(&dir) {
+            return Err(format!("{path} is outside the workspace"));
+        }
 
-    let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
-    if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
-        return Err(format!("{path} is too large to attach"));
-    }
-    Ok(BASE64.encode(bytes))
+        let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+        if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+            return Err(format!("{path} is too large to attach"));
+        }
+        Ok(BASE64.encode(bytes))
+    })
+    .await
+    .map_err(|e| format!("reading the file did not finish: {e}"))?
 }
 
 /// Sign in through the person's own browser.
@@ -607,6 +712,16 @@ pub fn run() {
             agent_list,
             agent_workspace,
             agent_produced,
+            agent_turn_start,
+            agent_repo_info,
+            agent_clone,
+            agent_derived_path,
+            agent_folder_state,
+            agent_human_changes,
+            agent_stash,
+            agent_git_init,
+            agent_file_diff,
+            agent_commit,
             agent_read,
             agent_new_session,
             agent_load_session,
@@ -792,6 +907,192 @@ mod resolution {
         let said = "é".repeat(TAIL * 2);
 
         assert!(tail(said.as_bytes()).ends_with('é'));
+    }
+}
+
+#[cfg(test)]
+mod what_the_commands_delegate {
+    //! Where the two workspace commands keep their behaviour, which is not in
+    //! themselves.
+    //!
+    //! A `#[tauri::command]` taking `State` cannot be invoked from a test —
+    //! there is no way to build one without a running application — so what
+    //! these commands do with the workspace is written as functions a test can
+    //! call, in `workspace`. That only means anything if the commands actually
+    //! go through those functions and keep no second copy of the logic: a
+    //! correct `offer` beside an `agent_produced` still diffing inline is a
+    //! green suite over a defect that never moved. Read off the source, the
+    //! way the capability list already is, because a command that cannot be
+    //! called leaves nothing else to look at.
+    //!
+    //! Only the delegation is asserted here. That the work then reaches the
+    //! blocking pool is read at the call sites when the card is accepted —
+    //! blocking and not blocking return the same value, and the difference is
+    //! visible only to everything else waiting on the runtime.
+
+    /// Each command, the function it must hand the workspace to, and what it
+    /// must therefore no longer be doing itself. Leaving the old inline copy in
+    /// place is how a suite goes green over a defect that is still there.
+    const DELEGATES: &[(&str, &str, &[&str])] = &[
+        (
+            "agent_workspace",
+            "workspace::baseline(",
+            &["workspace::snapshot(", ".lock()", ".insert("],
+        ),
+        (
+            "agent_produced",
+            "workspace::offer(",
+            &[
+                "workspace::snapshot(",
+                "workspace::git_changes(",
+                "workspace::produced(",
+                ".lock()",
+            ],
+        ),
+        // Provisioning's two questions (#204): the path is derived by the same
+        // function that derives it for a session, and the folder is read by
+        // the function the tests can reach — a second copy of either in the
+        // command would be logic no test can see.
+        (
+            "agent_derived_path",
+            "workspace::workspace_path(",
+            &["create_dir_all"],
+        ),
+        (
+            "agent_folder_state",
+            "workspace::folder_state(",
+            &["create_dir_all"],
+        ),
+        // The gate's three (#207): read the person's work without moving the
+        // line, and the two tree changes a button can ask for. A second copy
+        // of any of them in a command body would be logic no test can see.
+        (
+            "agent_human_changes",
+            "workspace::human_changes(",
+            &[".insert("],
+        ),
+        ("agent_stash", "workspace::stash(", &["create_dir_all"]),
+        (
+            "agent_git_init",
+            "workspace::git_init(",
+            &["create_dir_all"],
+        ),
+        // The review dialog's two (#207 part B): what one file's changes
+        // look like, and the commit that lands them. Same rule: the command
+        // wires, the workspace decides.
+        (
+            "agent_file_diff",
+            "workspace::file_diff(",
+            &["create_dir_all"],
+        ),
+        ("agent_commit", "workspace::commit(", &["create_dir_all"]),
+    ];
+
+    fn source() -> String {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+            .unwrap()
+    }
+
+    /// What one command does, from its signature to the brace that closes it,
+    /// with the commentary taken out — a command that only mentions a function
+    /// in a comment about it is not calling it.
+    fn body(source: &str, name: &str) -> String {
+        let start = source
+            .find(&format!("async fn {name}("))
+            .unwrap_or_else(|| panic!("`{name}` is not a command in this file"));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").expect("a command that ends");
+        rest[..end]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_commands_wire_and_the_workspace_decides() {
+        let source = source();
+
+        for (name, delegate, kept_inline) in DELEGATES {
+            let body = body(&source, name);
+            assert!(
+                body.contains(*delegate),
+                "`{name}` does not name `{delegate}` at all. What it passes is read at the call \
+                 site; that it calls it is read here"
+            );
+            for inline in kept_inline.iter() {
+                assert!(
+                    !body.contains(*inline),
+                    "`{name}` still does `{inline}` itself — a second copy of the line between \
+                     turns, in the one place no test can reach it"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod reading_a_produced_file {
+    //! The one workspace command a test can call: it takes no state, only the
+    //! two strings the panel sends. Its body is about to move inside a closure,
+    //! and the check that a path cannot climb out of its own workspace is the
+    //! kind of thing that survives a move by accident or not at all.
+
+    use super::*;
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-read-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn a_produced_file_comes_back_as_it_was_written() {
+        let dir = temp("plain");
+        std::fs::write(dir.join("report.md"), "findings").unwrap();
+
+        let body = agent_read(dir.to_string_lossy().into_owned(), "report.md".into())
+            .await
+            .unwrap();
+
+        assert_eq!(BASE64.decode(body).unwrap(), b"findings");
+    }
+
+    #[tokio::test]
+    async fn a_path_that_climbs_out_of_the_workspace_is_not_this_sessions_to_read() {
+        // The agent names the path, and the panel passes it through. A session
+        // that can read a sibling's directory by writing `..` is not scoped by
+        // anything.
+        let dir = temp("escape");
+        std::fs::create_dir_all(dir.join("inside")).unwrap();
+        std::fs::write(dir.join("secret.env"), "TOKEN=secret").unwrap();
+
+        let error = agent_read(
+            dir.join("inside").to_string_lossy().into_owned(),
+            "../secret.env".into(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("outside the workspace"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_file_too_large_to_attach_is_refused_rather_than_sent() {
+        // The other guard in this body, and the other one a move could drop.
+        let dir = temp("too-large");
+        std::fs::write(
+            dir.join("dump.bin"),
+            vec![0u8; MAX_ARTIFACT_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let error = agent_read(dir.to_string_lossy().into_owned(), "dump.bin".into())
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("too large to attach"), "{error}");
     }
 }
 

@@ -6,7 +6,12 @@
 module Broadcast
   module_function
 
-  def stream_for(channel)  = "room:#{channel.slug}"
+  # A slug is unique inside a workspace and nowhere else, so a name built from
+  # it alone put two customers' `general` on one stream (#186). The workspace
+  # goes in the name because the name is the whole gate: a subscription is
+  # granted once, and nothing about a stream is refused afterwards. Nothing is
+  # stored to stay compatible with — the name is computed per broadcast.
+  def stream_for(channel)  = "room:#{channel.workspace_id}:#{channel.slug}"
   def user_stream_for(user) = "user:#{user.id}"
 
   def message(m)
@@ -54,6 +59,12 @@ module Broadcast
     to_room(s.agent_run.agent_session.channel, payload)
     to_owner(s.agent_run.agent_session.user, payload)
   end
+
+  # The room itself changed, not something in it. The serialized body is handed
+  # over rather than rebuilt here because it is the API's shape for a channel
+  # (#203) — building a second one in this file would fork that shape, and the
+  # room would hear a different description than the caller just read back.
+  def channel(c, serialized) = to_room(c, { type: "channel", channel: serialized })
 
   # Work product. The room came for this.
   def artifact(a)

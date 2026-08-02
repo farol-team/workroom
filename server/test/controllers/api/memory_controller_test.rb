@@ -99,6 +99,69 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
                  "they were not a turn")
   end
 
+  # However memory was written — by an agent through the rail or by a person
+  # here — the room's journal is one entry longer. A record that only knows
+  # about the agent's writes describes half a room.
+  test "what a person records lengthens the room's journal" do
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+           headers: auth(@alice).merge(@json)
+    end
+
+    assert_equal 1, @channel.channel_records.count, "one write, one entry"
+
+    entry = @channel.channel_records.order(:seq).last
+    payload = JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"]
+
+    assert_equal "written", payload["action"]
+    assert_equal response.parsed_body["uri"], payload["uri"]
+    assert_equal "Monthly rollups", payload["title"]
+    assert_equal "First Tuesday.", payload["detail"],
+                 "the journal holds what the room learned, not only that it learned something"
+    assert_equal "human", payload["trust"]
+    assert_equal @alice.id, payload["author_id"], "an entry nobody can trace back is a defect (Article P4)"
+  end
+
+  test "a write the room refused is in no journal" do
+    assert_no_difference -> { @channel.channel_records.count } do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Missing its detail" }.to_json,
+           headers: auth(@alice).merge(@json)
+    end
+
+    assert_response :unprocessable_content
+  end
+
+  # The person wrote and the server witnessed it, so the store is told the
+  # journal lineage of what it now holds — the same sidecar a write through
+  # the rail carries (#213). The lineage the controller hands over is the
+  # subject here; what the OpenViking adapter does with it is pinned in
+  # open_viking_test.rb against the wire.
+  test "what a person records is annotated with the journal lineage" do
+    # The seam is swapped process-wide, like everywhere else in this file: a
+    # request runs in its own execution context, and a store pinned to this
+    # thread's `Current` never reaches the controller.
+    store = Memory::Local.new
+    annotations = []
+    store.define_singleton_method(:annotate) { |uri, **lineage| annotations << [ uri, lineage ] }
+
+    with_store(store) do
+      post api_v1_channel_memory_path(@channel.slug),
+           params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
+           headers: auth(@alice).merge(@json)
+      assert_response :created
+    end
+
+    record = @channel.channel_records.order(:seq).last
+    assert_equal 1, annotations.length, "a write the server witnessed is annotated"
+    uri, lineage = annotations.first
+    assert_equal response.parsed_body["uri"], uri
+    assert_equal record.seq, lineage[:seq]
+    assert_equal record.entry_hash, lineage[:entry_hash]
+    assert_equal "written", lineage[:action]
+  end
+
   private
 
   def with_store(store)

@@ -24,6 +24,24 @@ module Rail
       @user = user
     end
 
+    # The actions this channel offers: the fixed two, plus `publish` when the
+    # room names a repository (#203). The url is the condition because the
+    # instruction is to commit into the channel's clone — a room without one
+    # has nothing to publish into, and offering the steps there would be a
+    # capability that cannot be performed (#208).
+    def actions
+      ACTIONS.merge(
+        if @channel.repository_url.present?
+          { "workroom://channel/publish" => {
+              title: "Publish a conclusion to the team's repository",
+              summary: "Turn a conclusion in this channel's memory into a document the team keeps, reviewed like any other change.",
+              args: [] } }
+        else
+          {}
+        end
+      )
+    end
+
     # Discovery reads abstracts. The whole entry is loaded only for what was
     # chosen — the rail compresses the tool surface, tiers compress the content.
     def search(query, limit: 10)
@@ -37,7 +55,7 @@ module Rail
     end
 
     def execute(uri, args = {})
-      return run_action(uri, args) if ACTIONS.key?(uri)
+      return run_action(uri, args) if actions.key?(uri)
 
       # Through the store, not the table: search returns uris from whichever
       # store is configured, and the rail must be able to read what it found.
@@ -77,22 +95,49 @@ module Rail
 
     def store = Memory::Store.current
 
+    # Instruction, not bound (#208). A commit happens in the clone on the
+    # person's laptop, under their own git identity and their own credentials
+    # — the server holds the url and never holds the repository, so there is
+    # nothing here to execute. What the rail can honestly do is say exactly
+    # how, which is what RAIL.md calls an instruction capability: text the
+    # agent follows locally, a change to which takes effect on the next call.
+    def publish_text
+      <<~TEXT
+        A conclusion in this channel's memory is a draft: cheap to write, cheap
+        to supersede, read by whoever's agent asks next week. A document the
+        team keeps is different — it is published deliberately, and reviewed.
+
+        To publish, in the channel's working folder (the clone of
+        #{@channel.repository_url}):
+
+        1. Write the conclusion as a markdown file, in your own words.
+        2. Commit it on your agent/<topic> branch — never on the repository's
+           default branch (the session's standing rules).
+        3. Push the branch with the person's own credentials, as them.
+        4. Open a pull request. A human reviews and merges — you never merge
+           yourself, asked or not.
+
+        If any step needs a permission you do not have, stop and say what you
+        would have done. The call is the person's, not yours.
+      TEXT
+    end
+
     # Read the same way knowledge is read: by terms, so an agent describing what
     # it wants to do finds the action that does it.
     def matching_actions(query)
       terms = Memory::Store.terms_in(query)
-      ACTIONS.filter_map do |uri, a|
+      actions.filter_map do |uri, a|
         text = "#{uri} #{a[:title]} #{a[:summary]}".downcase
         next if terms.any? && terms.none? { |t| text.include?(t) }
         { uri: uri, title: a[:title], summary: a[:summary], kind: "action", args: a[:args] }
       end
     end
 
+    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
+
     # The turn this call belongs to. The rail is reached by an agent holding its
     # owner's token, not by the client, so the run is inferred from what that
     # person currently has open in this channel — which is exactly one thing.
-    def skill?(uri) = uri.to_s.start_with?(@channel.skills_uri)
-
     def working_run
       AgentRun.joins(:agent_session)
               .where(agent_sessions: { user_id: @user.id, channel_id: @channel.id })
@@ -103,6 +148,8 @@ module Rail
     def run_action(uri, args)
       args = (args || {}).with_indifferent_access
       case uri
+      when "workroom://channel/publish"
+        [ :ok, publish_text ]
       when "workroom://memory/remember"
         return [ :error, "title and detail are required" ] if args[:title].blank? || args[:detail].blank?
 
@@ -113,6 +160,13 @@ module Rail
         entry = store.write(@channel, title: args[:title], detail: args[:detail],
                             trust: "agent", author: @user, source: run)
         run&.update(distilled_at: Time.current)
+        # What was recorded, not only that something was: the entry's text is in
+        # the journal because the git mirror replays envelopes and the store has
+        # moved on by the time it does. A correction carries a reason instead —
+        # it is the one thing a supersession knows.
+        journaled = record("remember", uri: entry.uri, title: args[:title], detail: entry.detail, run: run)
+        annotate(journaled, action: "remember", uri: entry.uri, title: args[:title],
+                 detail: entry.detail, run: run)
         [ :ok, "Remembered as #{entry.uri}" ]
       when "workroom://memory/supersede"
         # The same question the read branch asks, for the same reason: this rail
@@ -121,9 +175,38 @@ module Rail
         target = args[:uri].to_s
         return [ :error, "no capability at #{target}" ] unless target.start_with?(@channel.memory_uri)
 
+        run = working_run
         entry = store.supersede(target, reason: args[:reason])
-        entry ? [ :ok, "Superseded #{entry.uri}" ] : [ :error, "nothing current at #{target}" ]
+        return [ :error, "nothing current at #{target}" ] unless entry
+
+        journaled = record("supersede", uri: entry.uri, reason: args[:reason], run: run)
+        annotate(journaled, action: "supersede", uri: entry.uri, reason: args[:reason], run: run)
+        [ :ok, "Superseded #{entry.uri}" ]
       end
+    end
+
+    # A write to memory is a thing that happened in the room, so the room's
+    # journal says so — after the write succeeded, never before, and never for
+    # one that was refused. The entry names the uri rather than a row id: the
+    # rail writes to whichever store is configured, and only the uri means the
+    # same thing in both. Who and which turn ride along, because an entry
+    # nobody can trace back is a defect (Article P4). Returns the appended
+    # record: its seq and hash are the lineage the store is told next.
+    def record(action, uri:, run:, **rest)
+      RecordStore::Append.call(
+        channel: @channel, kind: "memory", subject: nil,
+        payload: { action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id }.merge(rest)
+      )
+    end
+
+    # Lineage flows write → append → annotate, so the sidecar never claims a
+    # record that does not exist (#213). The store keeps it beside the entry —
+    # a reader of the entry finds the record of it, and the journal stays the
+    # source of truth the sidecar only indexes.
+    def annotate(journaled, action:, uri:, run:, **rest)
+      store.annotate(uri, action:, uri:, trust: "agent", author_id: @user.id, run_id: run&.id,
+                     seq: journaled.seq, entry_hash: journaled.entry_hash,
+                     recorded_at: journaled.created_at, **rest)
     end
   end
 end

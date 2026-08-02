@@ -1,0 +1,15 @@
+{
+  "server": { "host": "0.0.0.0", "port": 1933, "root_api_key": "change-me", "cors_origins": ["*"] },
+  "storage": {
+    "vectordb": { "backend": "local" },
+    "agfs":     { "backend": "local" }
+  },
+  "embedding": {
+    "dense": { "provider": "ollama", "model": "nomic-embed-text", "api_key": "ollama",
+               "api_base": "http://host.docker.internal:11434/v1",
+               "dimension": 768, "input": "text" }
+  },
+  "vlm": { "provider": "ollama", "model": "qwen3:4b", "api_key": "ollama",
+           "api_base": "http://host.docker.internal:11434",
+           "temperature": 0.0, "max_retries": 2 }
+}

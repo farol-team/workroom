@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_170001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_03_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -98,15 +98,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_170001) do
 
   create_table "artifacts", force: :cascade do |t|
     t.bigint "agent_run_id"
+    t.bigint "byte_size"
     t.bigint "channel_id", null: false
+    t.string "content_type"
     t.datetime "created_at", null: false
     t.string "kind"
     t.string "name", null: false
+    t.string "sha256"
     t.datetime "updated_at", null: false
     t.bigint "workspace_id", null: false
     t.index ["agent_run_id"], name: "index_artifacts_on_agent_run_id"
     t.index ["channel_id"], name: "index_artifacts_on_channel_id"
+    t.index ["sha256"], name: "index_artifacts_on_sha256"
     t.index ["workspace_id"], name: "index_artifacts_on_workspace_id"
+  end
+
+  create_table "channel_records", force: :cascade do |t|
+    t.bigint "channel_id", null: false
+    t.datetime "created_at", null: false
+    t.string "entry_hash", limit: 64, null: false
+    t.string "kind", null: false
+    t.string "prev_hash", limit: 64, null: false
+    t.bigint "seq", null: false
+    t.bigint "subject_id"
+    t.string "subject_type"
+    t.bigint "workspace_id", null: false
+    t.index ["channel_id", "entry_hash"], name: "index_channel_records_on_channel_id_and_entry_hash", unique: true
+    t.index ["channel_id", "seq"], name: "index_channel_records_on_channel_id_and_seq", unique: true
+    t.index ["channel_id"], name: "index_channel_records_on_channel_id"
+    t.index ["subject_type", "subject_id"], name: "index_channel_records_on_subject"
+    t.index ["workspace_id"], name: "index_channel_records_on_workspace_id"
   end
 
   create_table "channels", force: :cascade do |t|
@@ -114,6 +135,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_170001) do
     t.string "memory_uri", null: false
     t.string "name", null: false
     t.text "purpose"
+    t.string "repository_url"
     t.string "slug", null: false
     t.datetime "updated_at", null: false
     t.string "visibility", default: "open", null: false
@@ -257,6 +279,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_170001) do
   add_foreign_key "artifacts", "channels"
   add_foreign_key "artifacts", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "artifacts", "workspaces"
+  add_foreign_key "channel_records", "channels"
+  add_foreign_key "channel_records", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
+  add_foreign_key "channel_records", "workspaces"
   add_foreign_key "channels", "workspaces"
   add_foreign_key "invitations", "users", column: "accepted_by_id"
   add_foreign_key "invitations", "users", column: "invited_by_id"

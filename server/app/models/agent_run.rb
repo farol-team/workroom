@@ -15,8 +15,6 @@ class AgentRun < ApplicationRecord
 
   delegate :channel, :user, to: :agent_session
 
-  # A finished run is a candidate for the room's memory — a candidate only.
-
   # How full the agent says its context is. Derived rather than stored: a ratio
   # kept beside its two operands is a third thing to keep consistent.
   def context_fraction
@@ -24,6 +22,4 @@ class AgentRun < ApplicationRecord
 
     context_used.to_f / context_size
   end
-
-  def duration     = (ended_at && started_at) ? ended_at - started_at : nil
 end

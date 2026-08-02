@@ -8,6 +8,7 @@ class RunStep < ApplicationRecord
 
   validates :kind, inclusion: { in: KINDS }
 
-  # created_at выставляется вручную: таблица append-only, updated_at не нужен.
+  # created_at is set by hand: the table is append-only, so there is no
+  # updated_at for Rails to keep beside it.
   before_validation { self.created_at ||= Time.current }
 end
