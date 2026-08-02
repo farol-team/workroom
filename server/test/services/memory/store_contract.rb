@@ -138,12 +138,17 @@ module Memory
                    "a procedure is corrected the way a fact is (Article P6)"
     end
 
-    # The tiers a write did not state, and the key a title has nothing in it to
-    # give. The second write is the half that matters: a fallback key that is the
+    # A title and a blank are two different things, and the policy owes them two
+    # different answers. This is the first: "?!" is something a person wrote and
+    # meant, and only its *key* is missing — so the entry is written, under a key
+    # derived for it, with the tiers the write did not state filled in. What a
+    # blank title gets is the case below.
+    #
+    # The second write is the half that matters here: a fallback key that is the
     # same string every time would file two unrelated entries under one name and
     # supersede the first with the second, which is a room forgetting rather than
     # being corrected.
-    def test_a_write_that_gives_only_a_title_and_a_detail_gets_the_rest
+    def test_a_title_with_no_key_in_it_is_still_written_and_still_gets_the_rest
       first  = @store.write(@channel, title: "?!", detail: "The whole story.")
       second = @store.write(@channel, title: "?!", detail: "A different story.")
 
@@ -157,13 +162,18 @@ module Memory
       assert_equal "?!", first.abstract, "and the discovery tier to the title"
     end
 
-    # The one input the two stores answer differently today, and the reason the
-    # policy becomes one: `Memory::Local#write` asks a title that is nil for its
-    # parameterized form and gets a NoMethodError from inside the store, while
+    # And the second answer: a blank title is refused. Not a key that could not
+    # be derived — nothing to derive one from, and an entry the room could never
+    # name afterwards.
+    #
+    # This is the one input the two stores answer differently today, and the
+    # reason the policy becomes one. `Memory::Local#write` asks a nil title for
+    # its parameterized form and hands back a NoMethodError from inside itself;
     # `Memory::OpenViking#write` derives a random key and writes a document with
-    # no title in it that nothing can ever find. Neither is an answer a caller
-    # can act on, and a caller that hands over no title is asking for an entry
-    # the room could never name — so both doors refuse it, in the same words.
+    # no title in it that nothing will ever find. Neither is an answer a caller
+    # can act on. Refusing was decided on the card rather than here, and an
+    # ArgumentError is what a caller gets — through both doors, in the same
+    # words, leaving the room knowing nothing new (#177).
     def test_a_write_the_room_could_not_name_is_refused_the_same_way_by_every_store
       [ nil, "", "   " ].each do |untitled|
         assert_raises(ArgumentError, "#{untitled.inspect} is not a title") do
