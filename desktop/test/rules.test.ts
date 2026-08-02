@@ -1137,6 +1137,17 @@ const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as
 const submit = (id: string) =>
   el(id).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
+/// A request this test holds open, so what the window does *while* one is in
+/// flight can be measured at all. `settle()` drains everything pending, and
+/// what it drains is exactly where an optimistic clear hides: a composer that
+/// empties only once the server has answered looks identical afterwards.
+function heldOpen<T = unknown>() {
+  let answer!: (value: T) => void;
+  let refuse!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => { answer = resolve; refuse = reject; });
+  return { promise, answer, refuse };
+}
+
 afterEach(() => { blockingDialog.mockClear(); vi.unstubAllGlobals(); });
 
 describe("a client whose edges all answer", () => {
@@ -1150,11 +1161,14 @@ describe("a client whose edges all answer", () => {
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
-  test("clears the composer the moment a message is sent", async () => {
-    // The optimistic clear stays. Keeping the text on failure must not be
-    // bought by waiting for the server before the composer empties — that
-    // trades a lost sentence for a composer that lags the room.
-    const { server } = await openTheClient();
+  test("clears the composer while the message is still in flight", async () => {
+    // The optimistic clear stays, and it is only observable before the server
+    // answers — so the answer is withheld until it has been looked at. Keeping
+    // the text on failure must not be bought by emptying the composer once the
+    // post comes back: that trades a lost sentence for a composer that lags
+    // the room on every message anybody sends.
+    const inFlight = heldOpen();
+    const { server } = await openTheClient({ server: aServer({ post: vi.fn(() => inFlight.promise) }) });
     el<HTMLInputElement>("input").value = "what did we agree about pricing?";
 
     submit("composer");
@@ -1162,6 +1176,12 @@ describe("a client whose edges all answer", () => {
 
     expect(server.post).toHaveBeenCalled();
     expect(el<HTMLInputElement>("input").value).toBe("");
+
+    inFlight.answer({ id: 5 });
+    await settle();
+
+    expect(el<HTMLInputElement>("input").value).toBe("");
+    expect(notices()).toBe("");
   });
 });
 
@@ -1170,15 +1190,23 @@ describe("what the room says when something goes wrong", () => {
     // The composer clears optimistically, which is right — and until now the
     // failure took the sentence with it. Somebody who learns that lesson starts
     // copying every message before pressing Send.
-    const { server } = await openTheClient({
-      server: aServer({ post: vi.fn(async () => { throw new Error("500 the server said no"); }) }),
-    });
+    //
+    // Both halves in one example, because the cheapest way to keep the text is
+    // to stop clearing until the server answers, and that would read as green
+    // in an example that only looks at the end.
+    const inFlight = heldOpen();
+    const { server } = await openTheClient({ server: aServer({ post: vi.fn(() => inFlight.promise) }) });
     el<HTMLInputElement>("input").value = "what did we agree about pricing?";
 
     submit("composer");
     await settle();
 
     expect(server.post).toHaveBeenCalled();
+    expect(el<HTMLInputElement>("input").value).toBe("");
+
+    inFlight.refuse(new Error("500 the server said no"));
+    await settle();
+
     expect(el<HTMLInputElement>("input").value).toBe("what did we agree about pricing?");
     expect(notices()).toContain("the server said no");
     expect(blockingDialog).not.toHaveBeenCalled();
@@ -1208,10 +1236,9 @@ describe("what the room says when something goes wrong", () => {
   test("a reply that does not go through keeps it too", async () => {
     // A reply is a send. The panel clears its box the same way the room does,
     // so it loses the same sentence, and fixing one of the two is fixing half
-    // a defect.
-    const { server } = await openTheClient({
-      server: aServer({ post: vi.fn(async () => { throw new Error("500 the thread is gone"); }) }),
-    });
+    // a defect — including the half that says the box empties on the press.
+    const inFlight = heldOpen();
+    const { server } = await openTheClient({ server: aServer({ post: vi.fn(() => inFlight.promise) }) });
     document.querySelector<HTMLButtonElement>("#messages .reply-action")!.click();
     el<HTMLInputElement>("thread-input").value = "agreed, and I will write it up";
 
@@ -1219,6 +1246,11 @@ describe("what the room says when something goes wrong", () => {
     await settle();
 
     expect(server.post).toHaveBeenCalled();
+    expect(el<HTMLInputElement>("thread-input").value).toBe("");
+
+    inFlight.refuse(new Error("500 the thread is gone"));
+    await settle();
+
     expect(el<HTMLInputElement>("thread-input").value).toBe("agreed, and I will write it up");
     expect(notices()).toContain("the thread is gone");
     expect(blockingDialog).not.toHaveBeenCalled();
@@ -1251,6 +1283,21 @@ describe("what the room says when something goes wrong", () => {
       },
       attempted: (edges) => edges.bridge.start,
       said: "claude exited 1",
+    },
+    {
+      what: "an agent that will not stop",
+      // The same row, the other press. Starting fails inside `toggleAgent` and
+      // stopping fails out of it, so they are two catches and one of them has
+      // never been looked at.
+      edges: () => ({ bridge: aBridge({
+        stop: vi.fn(async () => { throw new Error("the process would not stop"); }),
+      }) }),
+      drive: async () => {
+        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.stop,
+      said: "the process would not stop",
     },
     {
       what: "an install the bridge never ran",
@@ -1501,14 +1548,15 @@ describe("the start-up says which part of it failed", () => {
   /// load and a bridge that is not answering are three different mornings, and
   /// only the person can act on the difference.
   ///
-  /// Each stage is its own phrase rather than its product noun. "Channel" is
-  /// in half the strings this client can say — a bridge message that mentions
-  /// which channel's agents are missing names the bridge perfectly well, and
-  /// an assertion that forbids the word would be pinning prose instead of the
-  /// distinction.
+  /// Each pattern names a stage as the thing that failed, rather than a word
+  /// that stage tends to use. That is what makes the exclusions safe: "your
+  /// agents could not load" is a bridge message and matches nothing here but
+  /// the bridge; "agents are unavailable in this channel" is one too, and the
+  /// channels pattern does not read on it. What is forbidden of each message
+  /// is only the other two stages claiming to be the one that failed.
   const STAGE = {
     signIn: /signing in/i,
-    channels: /(did not|could not) load/i,
+    channels: /channels (did not|could not|would not|failed)|(load|loading) (the )?channels/i,
     bridge: /bridge/i,
   };
 
@@ -1616,6 +1664,9 @@ describe("a turn that fails at the end", () => {
 
     expect(saidByTheAgent(server)).toContain("here you go");
     expect(saidByTheAgent(server).some((body) => /agent error/i.test(body))).toBe(false);
+    // Not the agent's error, and not nobody's either: swallowing it leaves a
+    // run that reads as still going to everybody looking at the room.
+    expect(notices()).toContain("500 status not recorded");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
