@@ -108,7 +108,8 @@ node desktop/preview/shoot.mjs "$DEBUG_PORT" "http://127.0.0.1:$PORT/" "$OUT" '[
   { "name": "thread",     "query": "&open=thread",  "want": "<aside id=\"thread\">" },
   { "name": "channel-settings",         "query": "&open=channel-settings",         "want": "Channel settings" },
   { "name": "channel-settings-warning", "query": "&open=channel-settings-warning", "want": "deploys on merge" },
-  { "name": "provision-failed",         "query": "&open=provision-failed",         "want": "Retry" }
+  { "name": "provision-failed",         "query": "&open=provision-failed",         "want": "Retry" },
+  { "name": "committed-offer",          "query": "&open=committed-offer",          "want": "on main" }
 ]'
 
 say "written to $OUT"

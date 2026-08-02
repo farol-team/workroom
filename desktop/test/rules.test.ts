@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -1050,5 +1050,25 @@ describe("what a permission ask means in a repository (#205)", () => {
 
   test("a push with no named branch still says what it is", () => {
     expect(gitAskNote("git push", "main", true)).toBe("Push to origin");
+  });
+});
+
+describe("naming a branch on GitHub (#206)", () => {
+  test("an https remote becomes a tree url, .git suffix or not", () => {
+    expect(githubTreeUrl("https://github.com/acme/widgets", "agent/notes"))
+      .toBe("https://github.com/acme/widgets/tree/agent/notes");
+    expect(githubTreeUrl("https://github.com/acme/widgets.git", "main"))
+      .toBe("https://github.com/acme/widgets/tree/main");
+  });
+
+  test("an ssh remote becomes the same tree url", () => {
+    expect(githubTreeUrl("git@github.com:acme/widgets.git", "agent/notes"))
+      .toBe("https://github.com/acme/widgets/tree/agent/notes");
+  });
+
+  test("anything else is no link at all — a control without a target is hidden", () => {
+    expect(githubTreeUrl(null, "main")).toBeNull();
+    expect(githubTreeUrl("https://gitlab.example.test/acme/widgets", "main")).toBeNull();
+    expect(githubTreeUrl("/home/alice/src/widgets", "main")).toBeNull();
   });
 });

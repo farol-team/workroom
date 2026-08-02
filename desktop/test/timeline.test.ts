@@ -400,3 +400,82 @@ describe("what the run wrote, offered one file at a time", () => {
       .toBe("Nothing new this turn (3 pre-existing changes not offered)");
   });
 });
+
+describe("the turn that committed (#206)", () => {
+  const landed = { branch: "agent/notes", commits: 2, stat: "3 files changed", on_default: false };
+
+  function commitDeps(over: Record<string, unknown> = {}) {
+    return deps({
+      produced: vi.fn(async () => ({
+        files: [], pre_existing: 0, committed: { ...landed, ...(over as object) },
+      })),
+      repositoryUrl: () => "https://github.com/acme/widgets",
+      copyText: vi.fn(async () => {}),
+      openUrl: vi.fn(async () => {}),
+    });
+  }
+
+  test("the commit row leads the offer, with its actions", async () => {
+    const d = commitDeps();
+    const timeline = createTimeline(d);
+    timeline.open(room([]));
+
+    await timeline.offerProduced(1, "/tmp/work");
+
+    const row = document.querySelector<HTMLElement>("#messages .offer.committed")!;
+    expect(row.textContent).toContain("⎇ agent/notes · 2 commits · 3 files changed");
+
+    const buttons = [ ...row.querySelectorAll<HTMLButtonElement>("button") ];
+    const copy = buttons.find((b) => b.textContent === "Copy branch name")!;
+    const open = buttons.find((b) => b.textContent === "Open on GitHub")!;
+    copy.click();
+    await vi.waitFor(() => expect(d.copyText).toHaveBeenCalledWith("agent/notes"));
+    open.click();
+    await vi.waitFor(() =>
+      expect(d.openUrl).toHaveBeenCalledWith("https://github.com/acme/widgets/tree/agent/notes"));
+  });
+
+  test("a commit onto the mainline is marked as the one that can ship", async () => {
+    const timeline = createTimeline(commitDeps({ branch: "main", on_default: true }));
+    timeline.open(room([]));
+
+    await timeline.offerProduced(1, "/tmp/work");
+
+    const mark = document.querySelector<HTMLElement>("#messages .offer.committed .on-default")!;
+    expect(mark.textContent).toBe("on main");
+  });
+
+  test("a repository nowhere linkable hides the link and keeps the copy", async () => {
+    const d = commitDeps();
+    d.repositoryUrl = () => null;
+    const timeline = createTimeline(d);
+    timeline.open(room([]));
+
+    await timeline.offerProduced(1, "/tmp/work");
+
+    const buttons = [ ...document.querySelectorAll<HTMLButtonElement>("#messages .offer.committed button") ]
+      .map((b) => b.textContent);
+    expect(buttons).toContain("Copy branch name");
+    expect(buttons).not.toContain("Open on GitHub");
+  });
+
+  test("files the turn left uncommitted follow the commit row", async () => {
+    const d = deps({
+      produced: vi.fn(async () => ({
+        files: [ { path: "draft.md", bytes: 12 } ], pre_existing: 0,
+        committed: { ...landed },
+      })),
+      repositoryUrl: () => null,
+      copyText: vi.fn(async () => {}),
+      openUrl: vi.fn(async () => {}),
+    });
+    const timeline = createTimeline(d);
+    timeline.open(room([]));
+
+    await timeline.offerProduced(1, "/tmp/work");
+
+    const rows = [ ...document.querySelectorAll<HTMLElement>("#messages .offer") ];
+    expect(rows[0].classList.contains("committed")).toBe(true);
+    expect(rows[1].textContent).toContain("draft.md");
+  });
+});

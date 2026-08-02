@@ -20,14 +20,22 @@ const stagingSettings = (wanted ?? "").startsWith("channel-settings");
 // answers with git's own refusal. No seed names one, so the room's answer is
 // amended on the way in — the staged fact, named here, not implied.
 const stagingProvision = wanted === "provision-failed";
-if (stagingProvision) {
+// The third exception, for the commit row (#206): a turn's offer exists only
+// after a turn, so the state drives the real renderer through the window
+// seam main.ts exposes, with the bridge answering what the turn would have.
+const stagingOffer = wanted === "committed-offer";
+if (stagingProvision || stagingOffer) {
   const realFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
     const res = await realFetch(...args);
     const url = String(args[0]?.url ?? args[0]);
     if (!/\/api\/v1\/channels\/[^/]+$/.test(url)) return res;
     const body = await res.json();
-    body.repository_url = "https://example.test/acme/widgets";
+    // provision-failed wants a url that leads nowhere (its clone must fail);
+    // committed-offer wants a GitHub one, or the row's link would be hidden.
+    body.repository_url = stagingOffer
+      ? "https://github.com/acme/widgets"
+      : "https://example.test/acme/widgets";
     return new Response(JSON.stringify(body), { status: res.status, headers: res.headers });
   };
 }
@@ -59,6 +67,11 @@ window.__TAURI_INTERNALS__ = {
       return Promise.resolve({ remote: "https://github.com/acme/widgets",
                                default_branch: "main", deploys_on_push: false });
     }
+    if (stagingOffer && command === "agent_produced") {
+      return Promise.resolve({ files: [], pre_existing: 0, committed: {
+        branch: "main", commits: 2, stat: "3 files changed, 40 insertions(+)",
+        on_default: true } });
+    }
     return new Promise(() => {});
   },
   transformCallback: (callback) => callback,
@@ -88,6 +101,12 @@ if (wanted) {
         : stagingSettings
           ? document.getElementById("folder")
           : null;
+    if (stagingOffer) {
+      if (!document.querySelector("#messages .msg") || !window.__workroom) return;
+      self.disconnect();
+      window.__workroom.timeline.offerProduced(1, "/tmp/staged");
+      return;
+    }
     if (!target || !document.querySelector("#messages .msg")) return;
     self.disconnect();
     target.click();
