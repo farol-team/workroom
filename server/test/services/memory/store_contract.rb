@@ -108,7 +108,14 @@ module Memory
     # a caller left out. Both stores wrote those rules out for themselves, in
     # their own words — and two copies of a rule are two rules from the day one
     # of them is touched. The answer must not depend on which store the workspace
-    # happens to be on, so it is pinned here rather than beside either (#177).
+    # happens to be on, so every case below is asked of the store under test and
+    # of no particular store (#177).
+    #
+    # What a correction leaves behind is asserted through what the room knows,
+    # never through where the old entry went: one store leaves a superseded row,
+    # the other moves the file to another scope, and no method on this seam reads
+    # either. That superseding is not deleting is pinned where it can be seen —
+    # `Memory::LocalTest`, against the row (Article P6).
 
     def test_a_title_written_again_corrects_what_was_there_however_often
       @store.write(@channel, title: "Reporting cadence", detail: "Weekly.")
