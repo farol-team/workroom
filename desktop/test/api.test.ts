@@ -49,6 +49,16 @@ async function droppedAndBack() {
   last().connected();
 }
 
+/// A catch-up that neither answers nor refuses until the test says so — which is
+/// the only way to have one still in flight when the socket drops again.
+function inFlight() {
+  let refuse!: (why: Error) => void;
+  return {
+    answer: () => new Promise<void>((_, no) => { refuse = no; }),
+    refuse: () => refuse(new Error("502 Bad Gateway")),
+  };
+}
+
 /// One drop and the wait that answers it, so a test can walk the backoff out to
 /// wherever it wants to look at it.
 function dropAndWait(ms: number) {
@@ -234,6 +244,59 @@ describe("catching up after an outage", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(resync).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A socket waiting to be opened again and a catch-up waiting to be asked again
+// are two waits, and the moment they share one timer they are one wait: whichever
+// is scheduled second cancels the first. That pairing is not exotic — it is what
+// every real outage looks like, because the machine that refuses the catch-up is
+// the same machine whose socket keeps dropping.
+describe("the socket's wait and the catch-up's wait", () => {
+  test("a refused catch-up leaves the reconnect waiting beside it alone", async () => {
+    const server = inFlight();
+    const { resync } = start(server.answer);
+    last().connected();
+    await droppedAndBack();                    // socket #2 is up, its catch-up in flight
+    expect(resync).toHaveBeenCalledTimes(1);
+
+    last().dropped();                          // the socket goes again, the catch-up unanswered
+    server.refuse();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(opened()).toBe(3);                  // the room is not left with no socket at all
+  });
+
+  test("a catch-up refused over and over does not lengthen the socket's first wait", async () => {
+    start(refused);
+    last().connected();
+    await droppedAndBack();
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2000);   // the catch-up has climbed to a four second wait
+
+    last().dropped();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(opened()).toBe(3);                  // the socket counts its own attempts, from one second
+  });
+
+  test("a catch-up that was answered leaves the next outage's first ask a second away", async () => {
+    const script = [true, true, false, true];  // refused, refused, answered … and refused again
+    let asked = 0;
+    const { resync } = start(() => (script[asked++] ? refused() : Promise.resolve()));
+    last().connected();
+    await droppedAndBack();
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2000);   // the third ask is answered
+    expect(resync).toHaveBeenCalledTimes(3);
+
+    last().dropped();
+    await vi.advanceTimersByTimeAsync(1000);
+    last().connected();                        // fourth ask, refused
+    await vi.advanceTimersByTimeAsync(999);
+    expect(resync).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resync).toHaveBeenCalledTimes(5);
   });
 });
 
