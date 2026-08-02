@@ -868,7 +868,11 @@ mod the_agents_panel {
             name,
             "node",
             &[script.to_string_lossy().into_owned()],
-            // Nothing is listening in a test; what these agents emit is
+            // The clocks a person's agent is really given: nothing here waits
+            // on one, and a panel measured against a test's clock is a panel
+            // nobody has seen.
+            acp::Deadlines::default(),
+            // Nothing is listening in a test either; what these agents emit is
             // asserted where the bridge is, not here.
             |_event: &str, _payload: Value| {},
         )

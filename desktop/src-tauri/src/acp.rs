@@ -873,8 +873,10 @@ mod tests {
 /// agent works and said nothing about `launch`, `request` or `answer`. It is
 /// the real one now (#174).
 ///
-/// The seam that makes it possible is `launch` taking what to emit rather than
-/// an `AppHandle`: a window is the one thing a test cannot have.
+/// Two seams make it possible, and both exist for a reason a test can state:
+/// `launch` takes what to emit rather than an `AppHandle`, because a window is
+/// the one thing a test cannot have; and it takes the clocks a turn is measured
+/// against, because ten idle minutes is not a thing a suite can wait out.
 #[cfg(test)]
 mod against_a_real_agent {
     use super::*;
@@ -937,7 +939,7 @@ mod against_a_real_agent {
                 .unwrap_or_else(|| panic!("nothing was emitted as {event}"));
             assert!(
                 found.next().is_none(),
-                "{event} went out more than once, and it is the end of the connection"
+                "{event} went out more than once, and it is not a thing that happens twice"
             );
             (payload.clone(), *drained)
         }
@@ -961,12 +963,22 @@ mod against_a_real_agent {
 
     /// The scripted agent, launched the way the application launches one.
     pub(super) async fn launched(watcher: &Watcher, name: &str) -> Arc<Agent> {
+        launched_with(watcher, name, Deadlines::default()).await
+    }
+
+    /// The same, on clocks a test can wait out.
+    pub(super) async fn launched_with(
+        watcher: &Watcher,
+        name: &str,
+        clocks: Deadlines,
+    ) -> Arc<Agent> {
         let script =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
         Agent::launch(
             name,
             "node",
             &[script.to_string_lossy().into_owned()],
+            clocks,
             watcher.emit(),
         )
         .await
@@ -995,6 +1007,19 @@ mod against_a_real_agent {
             "sessionId": session,
             "prompt": [ { "type": "text", "text": "[ask] do the thing" } ]
         })
+    }
+
+    /// A turn the agent finishes on its own, and says something about on the
+    /// way — which is what a sign of life is.
+    pub(super) fn a_turn_that_answers(session: &str) -> Value {
+        json!({
+            "sessionId": session,
+            "prompt": [ { "type": "text", "text": "still here" } ]
+        })
+    }
+
+    pub(super) fn permission_granted() -> Value {
+        json!({ "outcome": { "outcome": "selected", "optionId": "yes" } })
     }
 
     /// Waits for something to become true rather than for a duration somebody
@@ -1048,10 +1073,7 @@ mod against_a_real_agent {
         let (asked, _) = watcher.only("acp://ask");
         assert_eq!(asked["request"]["params"]["options"][0]["optionId"], "yes");
         agent
-            .answer(
-                &asked["id"],
-                json!({ "outcome": { "outcome": "selected", "optionId": "yes" } }),
-            )
+            .answer(&asked["id"], permission_granted())
             .await
             .expect("the answer must be written");
 
@@ -1086,7 +1108,7 @@ mod against_a_real_agent {
 }
 
 /// What happens to the people waiting when the process on the other end goes
-/// away (#174).
+/// away, and what must not happen to the ones still being talked to (#174).
 ///
 /// Through `launch` and `request` against the scripted agent, because that is
 /// where the defect lives: a crash nobody notices reads as a turn that says
@@ -1094,9 +1116,29 @@ mod against_a_real_agent {
 /// can see it.
 #[cfg(test)]
 mod when_the_agent_dies {
-    use super::against_a_real_agent::{a_turn_that_waits, launched, session_on, until, Watcher};
+    use super::against_a_real_agent::{
+        a_turn_that_answers, a_turn_that_waits, launched, launched_with, permission_granted,
+        session_on, until, Watcher,
+    };
     use super::*;
-    use std::sync::atomic::AtomicBool;
+
+    /// Long enough that a machine starting node cannot be mistaken for an agent
+    /// that has stopped talking, short enough that the suite can wait it out.
+    const IDLE: Duration = Duration::from_millis(800);
+
+    /// A wait this side of the injected deadline is the deadline working; one
+    /// past it is the ten minutes and the five-second tick still compiled in.
+    const PATIENCE: Duration = Duration::from_secs(6);
+
+    fn clocks(idle: Duration, hard: Duration) -> Deadlines {
+        Deadlines {
+            idle,
+            hard,
+            // The wait wakes up often enough that the limits above are what the
+            // measurement is about, rather than the tick they are noticed on.
+            tick: Duration::from_millis(20),
+        }
+    }
 
     #[tokio::test]
     async fn a_turn_waiting_on_an_agent_that_died_is_told_the_agent_closed() {
@@ -1194,56 +1236,85 @@ mod when_the_agent_dies {
         );
     }
 
-    /// The two clocks, at limits a test can wait out. Not through `launch`: the
-    /// production values are ten idle minutes and a two-hour wall clock, and an
-    /// agent launched with milliseconds instead would have to answer its own
-    /// handshake inside one — which measures how fast node starts on the
-    /// machine running the suite, and nothing this card is about.
-    async fn agent_with(idle: Duration, hard: Duration) -> Agent {
-        // `cat` holds a pipe open and says nothing of its own accord, which is
-        // the silence these two are about.
-        let mut child = tokio::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .expect("cat is required to hold a pipe open");
-        let stdin = child.stdin.take().unwrap();
-        Agent {
-            stdin: Mutex::new(stdin),
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Mutex::new(0),
-            child: Mutex::new(child),
-            handshake: Mutex::new(Value::Null),
-            diagnostics: Arc::new(Mutex::new(VecDeque::new())),
-            activity: Arc::new(Mutex::new(HashMap::new())),
-            alive: Arc::new(AtomicBool::new(true)),
-            idle_limit: idle,
-            hard_limit: hard,
-            tick: Duration::from_millis(5),
-        }
-    }
+    #[tokio::test]
+    async fn a_turn_that_keeps_talking_is_never_given_up_on() {
+        // The clock measures silence, not length. A turn that streams for hours
+        // is working, and the long turns are what this product is for — read as
+        // total elapsed instead, the deadline kills exactly the work it was
+        // built to protect.
+        let watcher = Watcher::new();
+        let agent =
+            launched_with(&watcher, "claude", clocks(IDLE, Duration::from_secs(3600))).await;
+        let session = session_on(&agent, json!([])).await;
 
-    /// What the caller is told, or a failure inside two seconds. Without the
-    /// bound, deadlines left reading the constants hang the suite for ten
-    /// minutes before the assertion below gets its turn.
-    async fn asked_and_given_up_on(agent: &Agent) -> String {
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            agent.request("session/prompt", json!({ "sessionId": "s1" })),
-        )
-        .await
-        .expect("the deadline this agent was given is the one that fires")
-        .expect_err("silence past the deadline is not an answer")
+        let started = Instant::now();
+        let turn = tokio::spawn({
+            let (agent, session) = (agent.clone(), session.clone());
+            async move {
+                agent
+                    .request("session/prompt", a_turn_that_waits(&session))
+                    .await
+            }
+        });
+        until("the agent must be waiting on us", || {
+            watcher.saw("acp://ask")
+        })
+        .await;
+
+        // Eight signs of life about this session, each one inside the deadline
+        // and the lot of them several times past it. This is a streaming turn,
+        // said in the only vocabulary the scripted agent has.
+        for _ in 0..8 {
+            tokio::time::sleep(IDLE / 2).await;
+            agent
+                .request("session/prompt", a_turn_that_answers(&session))
+                .await
+                .expect("a turn the agent finishes while another waits is an answer");
+        }
+        assert!(
+            started.elapsed() > IDLE * 3,
+            "the wait has to outlast the idle limit several times over for this to mean \
+             anything ({:?})",
+            started.elapsed()
+        );
+
+        // And it ends because the person answered, not because a clock ran out.
+        let (asked, _) = watcher.only("acp://ask");
+        agent
+            .answer(&asked["id"], permission_granted())
+            .await
+            .expect("the answer must be written");
+
+        let done = tokio::time::timeout(PATIENCE, turn)
+            .await
+            .expect("an answered question ends the turn")
+            .unwrap()
+            .expect(
+                "a turn whose agent kept talking was never given up on — the clock measures the \
+                 silence since the last sign of life, not how long the turn has run",
+            );
+        assert_eq!(done["stopReason"], "end_turn");
+
+        agent.shutdown().await;
     }
 
     #[tokio::test]
     async fn a_turn_that_hears_nothing_is_given_up_on_at_its_idle_deadline() {
-        let idle = Duration::from_millis(50);
-        let agent = agent_with(idle, Duration::from_secs(3600)).await;
-        let started = Instant::now();
+        let watcher = Watcher::new();
+        let agent =
+            launched_with(&watcher, "claude", clocks(IDLE, Duration::from_secs(3600))).await;
+        let session = session_on(&agent, json!([])).await;
 
-        let error = asked_and_given_up_on(&agent).await;
+        // Asked, answered with a question, and then nothing — nobody answers
+        // the agent, so nobody hears from it again either.
+        let started = Instant::now();
+        let error = tokio::time::timeout(
+            PATIENCE,
+            agent.request("session/prompt", a_turn_that_waits(&session)),
+        )
+        .await
+        .expect("the deadline this agent was given is the one that fires")
+        .expect_err("silence past the deadline is not an answer");
 
         assert!(error.contains("said nothing for"), "{error}");
         assert!(
@@ -1251,8 +1322,8 @@ mod when_the_agent_dies {
             "the person is told what is still theirs to do: {error}"
         );
         assert!(
-            (idle..Duration::from_secs(1)).contains(&started.elapsed()),
-            "not earlier than the deadline this agent was given, and not on the ten minutes and \
+            (IDLE..Duration::from_secs(3)).contains(&started.elapsed()),
+            "not before the deadline this agent was given, and not on the ten minutes and \
              five-second tick compiled in ({:?})",
             started.elapsed()
         );
@@ -1260,6 +1331,8 @@ mod when_the_agent_dies {
             agent.pending.lock().await.is_empty(),
             "a turn given up on is unfiled on the way out"
         );
+
+        agent.shutdown().await;
     }
 
     #[tokio::test]
@@ -1267,11 +1340,19 @@ mod when_the_agent_dies {
         // An agent can be talkative and stuck at the same time, so the idle
         // limit is given all the room in the world here and the wall clock
         // none: whichever fires, it is not the idle one.
-        let hard = Duration::from_millis(50);
-        let agent = agent_with(Duration::from_secs(3600), hard).await;
-        let started = Instant::now();
+        let watcher = Watcher::new();
+        let agent =
+            launched_with(&watcher, "claude", clocks(Duration::from_secs(3600), IDLE)).await;
+        let session = session_on(&agent, json!([])).await;
 
-        let error = asked_and_given_up_on(&agent).await;
+        let started = Instant::now();
+        let error = tokio::time::timeout(
+            PATIENCE,
+            agent.request("session/prompt", a_turn_that_waits(&session)),
+        )
+        .await
+        .expect("the wall clock this agent was given is the one that fires")
+        .expect_err("a turn past its wall clock is given up on");
 
         assert!(error.contains("has been at it for"), "{error}");
         assert!(
@@ -1279,9 +1360,11 @@ mod when_the_agent_dies {
             "the same sentence a person is given when a turn goes quiet: {error}"
         );
         assert!(
-            (hard..Duration::from_secs(1)).contains(&started.elapsed()),
-            "the wall clock this agent was given is the one that fired ({:?})",
+            (IDLE..Duration::from_secs(3)).contains(&started.elapsed()),
+            "the wall clock fired where it was set, not where it was compiled ({:?})",
             started.elapsed()
         );
+
+        agent.shutdown().await;
     }
 }
