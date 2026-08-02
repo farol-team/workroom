@@ -40,6 +40,26 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
     assert_equal second.entry_hash, third.prev_hash
   end
 
+  # The same chain, read where it will actually be read. record:verify and the
+  # git mirror get the envelope out of the object store; a chain that lives
+  # only in a column is one the bytes cannot be checked against, and the row
+  # could then say anything the exported record does not.
+  #
+  # A non-genesis entry, because on a room's first entry seq is 1, prev_hash is
+  # a constant and the kind is whatever the spec passes most often — three
+  # values an envelope could hardcode and still look right.
+  test "the stored envelope carries the chain, not only the row" do
+    first = append
+    second = append(kind: "memory.written")
+
+    envelope = envelope_of(second)
+
+    assert_equal first.entry_hash, envelope["prev_hash"]
+    assert_equal 2, envelope["seq"]
+    assert_equal "memory.written", envelope["kind"]
+    assert_equal second.entry_hash, Digest::SHA256.hexdigest(RecordStore::Objects.current.get(second.entry_hash))
+  end
+
   # A journal per room, not per server: two rooms both hold a first entry, and
   # neither one's numbering says anything about the other's.
   test "every room counts for itself" do
@@ -94,23 +114,22 @@ class RecordStore::AppendTest < ActiveSupport::TestCase
   end
 
   # The reason canonical form is worth the code: two writers holding the same
-  # facts in a differently ordered hash must hash the same, or the chain
-  # records the order of somebody's ruby literal.
+  # facts in a differently ordered hash must produce the same bytes, or the
+  # chain records the order of somebody's ruby literal.
   #
-  # Two rooms, because an entry_hash also covers channel_id, seq and prev_hash
-  # — no two entries in one chain can hash alike, by design. The payload
-  # rendering is where a canonicaliser that respected insertion order would be
-  # caught, and the digest follows the bytes: the spec above pins entry_hash to
-  # the SHA-256 of exactly what was stored, so identical bytes cannot hash
-  # differently.
-  test "the same facts hash the same, however the input was ordered" do
+  # Bytes rather than hashes, and two rooms rather than one: an entry_hash
+  # covers channel_id, seq, prev_hash and the time it happened, so no two
+  # entries anywhere can hash alike and no spec can compare two of them
+  # directly. The payload rendering is where a canonicaliser that respected
+  # insertion order gets caught, and the digest follows the bytes — entry_hash
+  # is pinned to the SHA-256 of exactly what was stored above, so identical
+  # bytes cannot hash differently.
+  test "the same facts render the same bytes, however the input was ordered" do
     scrambled = append(payload: { "z" => 1, "a" => { "d" => 4, "b" => 2 } })
     ordered = append(channel: channel(name: "Marketing"),
                      payload: { "a" => { "b" => 2, "d" => 4 }, "z" => 1 })
 
     assert_equal payload_bytes(scrambled), payload_bytes(ordered)
-    assert_equal Digest::SHA256.hexdigest(payload_bytes(scrambled)),
-                 Digest::SHA256.hexdigest(payload_bytes(ordered))
   end
 
   # The lock serializes writers; this index is what catches the case where it
