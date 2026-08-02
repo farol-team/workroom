@@ -365,6 +365,21 @@ export function worthOffering(files: Array<{ path: string; bytes: number }>): bo
   return files.some((f) => f.bytes > 0);
 }
 
+/// What a turn's offer is made of: the files, and how many changed paths
+/// were held back because they were dirty before the turn began (#202).
+export interface TurnProduced {
+  files: Array<{ path: string; bytes: number }>;
+  pre_existing: number;
+}
+
+/// A quiet account of what the turn was *not* credited with — without it,
+/// "the agent produced nothing" and "the offer is broken" look the same.
+export function preExistingNotice(count: number): string | null {
+  return count > 0
+    ? `Nothing new this turn (${count} pre-existing changes not offered)`
+    : null;
+}
+
 /// The distiller is the agent, not a job on the server. It already runs on this
 /// person's machine under their credentials, and it already reaches the room's
 /// memory through the rail — so it needs no mechanism, only to be asked.

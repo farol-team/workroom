@@ -278,6 +278,9 @@ async function send(text: string) {
   });
 
   try {
+    // The offer at the end of this turn is measured from here: what was
+    // already dirty stays the person's, only the delta is the run's (#202).
+    await agents.turnStart(workspace).catch(() => {});
     await agents.prompt(name, sessionId, withClosing(body),
                         [ boundary, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());

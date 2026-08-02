@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
 import { profileFor, stateOf as stateOfProfile, type AgentState } from "./agents/catalog";
 export type { Update };
 
@@ -75,9 +75,16 @@ export class Agents {
     return invoke<string>("agent_workspace", { user, name, channel });
   }
 
-  /// What the run wrote or changed there, since the directory was opened.
+  /// Mark where a turn begins, so the offer can tell the run's work from
+  /// what was already dirty when it started (#202).
+  turnStart(workspace: string) {
+    return invoke<void>("agent_turn_start", { workspace });
+  }
+
+  /// What the run wrote or changed since the turn began — and how many
+  /// changed paths were held back as pre-existing.
   produced(workspace: string) {
-    return invoke<Array<{ path: string; bytes: number }>>("agent_produced", { workspace });
+    return invoke<TurnProduced>("agent_produced", { workspace });
   }
 
   /// One produced file, base64 — a work product is not always text.
