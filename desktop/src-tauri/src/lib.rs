@@ -28,7 +28,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
+use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
 /// Defaults to the adapter that ships with this application; any other ACP
@@ -244,12 +244,24 @@ async fn agent_workspace(
 /// which files those are, and where the line between turns now sits, is
 /// `workspace::offer`'s to decide.
 #[tauri::command]
-async fn agent_produced(app: AppHandle, workspace: String) -> Result<Vec<Produced>, String> {
+async fn agent_produced(app: AppHandle, workspace: String) -> Result<TurnProduced, String> {
     tokio::task::spawn_blocking(move || {
         workspace::offer(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
     })
     .await
     .map_err(|e| format!("looking at the workspace did not finish: {e}"))?
+}
+
+/// Mark where a turn begins. Everything the offer says about the run is
+/// measured from here — what was already dirty is the person's, and only
+/// the delta is the run's (#202).
+#[tauri::command]
+async fn agent_turn_start(app: AppHandle, workspace: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::turn_start(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("marking the turn's start did not finish: {e}"))?
 }
 
 /// Read one produced file, as base64 — a work product is not always text.
@@ -585,6 +597,7 @@ pub fn run() {
             agent_list,
             agent_workspace,
             agent_produced,
+            agent_turn_start,
             agent_read,
             agent_new_session,
             agent_load_session,

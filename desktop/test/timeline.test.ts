@@ -326,7 +326,7 @@ describe("what the run wrote, offered one file at a time", () => {
   test("a file is offered, and sharing it is what sends it", async () => {
     const attach = vi.fn(async () => {});
     const timeline = createTimeline(deps({
-      produced: async () => [ { path: "minutes.md", bytes: 2048 } ],
+      produced: async () => ({ files: [ { path: "minutes.md", bytes: 2048 } ], pre_existing: 0 }),
       readFile: async () => "bWludXRlcw==",
       attach,
     }));
@@ -346,7 +346,7 @@ describe("what the run wrote, offered one file at a time", () => {
 
   test("an offer nobody could read says what it left out", async () => {
     const many = Array.from({ length: 14 }, (_, i) => ({ path: `note-${i}.md`, bytes: 10 }));
-    const timeline = createTimeline(deps({ produced: async () => many }));
+    const timeline = createTimeline(deps({ produced: async () => ({ files: many, pre_existing: 0 }) }));
     timeline.open(room([]));
 
     await timeline.offerProduced(11, "/work/meetings");
@@ -357,11 +357,23 @@ describe("what the run wrote, offered one file at a time", () => {
   });
 
   test("a turn that wrote nothing offers nothing", async () => {
-    const timeline = createTimeline(deps({ produced: async () => [ { path: "empty.md", bytes: 0 } ] }));
+    const timeline = createTimeline(deps({ produced: async () => ({ files: [ { path: "empty.md", bytes: 0 } ], pre_existing: 0 }) }));
     timeline.open(room([]));
 
     await timeline.offerProduced(11, "/work/meetings");
 
     expect(document.querySelector("#messages .offer")).toBeNull();
+  });
+
+  test("an empty offer with pre-existing changes says so, quietly", async () => {
+    const timeline = createTimeline(deps({
+      produced: async () => ({ files: [], pre_existing: 3 }),
+    }));
+    timeline.open(room([]));
+
+    await timeline.offerProduced(11, "/work/meetings");
+
+    expect(document.querySelector("#messages .offer.muted")?.textContent)
+      .toBe("Nothing new this turn (3 pre-existing changes not offered)");
   });
 });

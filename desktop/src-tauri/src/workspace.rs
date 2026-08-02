@@ -134,10 +134,45 @@ pub fn parse_porcelain(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// The snapshots taken when each session's directory was opened, so what a run
-/// produced can be told from what was already there.
+/// What a turn is measured against. In a repository the answer is the
+/// porcelain path set; anywhere else it is a filesystem snapshot. Taken when
+/// a turn begins, so work the person's hands got to first is never offered
+/// as the run's (#202).
+pub enum Baseline {
+    Git(std::collections::HashSet<String>),
+    Fs(Snapshot),
+}
+
+/// Measure a directory the way a turn start needs it measured.
+fn measure(dir: &Path) -> Baseline {
+    match git_changes(dir) {
+        Some(changed) => Baseline::Git(changed.into_iter().collect()),
+        None => Baseline::Fs(snapshot(dir)),
+    }
+}
+
+/// What the turn itself changed: the current porcelain minus what was
+/// already dirty when it began, and how many paths that minus excluded.
+/// The granularity is a file — an agent's edit inside a file the person had
+/// already touched keeps the whole file out of the offer, because there is
+/// no hunk-level truth here to separate them.
+pub fn turn_delta(
+    current: &[String],
+    baseline: &std::collections::HashSet<String>,
+) -> (Vec<String>, usize) {
+    let mut files: Vec<String> = current
+        .iter()
+        .filter(|p| !baseline.contains(*p))
+        .cloned()
+        .collect();
+    files.sort();
+    let pre_existing = current.len() - files.len();
+    (files, pre_existing)
+}
+
+/// The line each workspace's turns are measured from.
 #[derive(Default)]
-pub struct Workspaces(pub std::sync::Mutex<HashMap<PathBuf, Snapshot>>);
+pub struct Workspaces(pub std::sync::Mutex<HashMap<PathBuf, Baseline>>);
 
 /// A file worth offering: where it is, and how big.
 #[derive(serde::Serialize)]
@@ -166,8 +201,29 @@ pub fn baseline(shots: &Workspaces, dir: &Path) -> Result<(), String> {
         .map_err(|_| "workspace state is poisoned".to_string())?;
     state
         .entry(dir.to_path_buf())
-        .or_insert_with(|| snapshot(dir));
+        .or_insert_with(|| measure(dir));
     Ok(())
+}
+
+/// A turn begins: the line moves to now, deliberately. Opening a workspace
+/// takes the line only if there is none, because clicking back into a channel
+/// mid-turn is not the start of a turn — but a prompt going out is, and from
+/// here everything already dirty is the person's, not the run's (#202).
+pub fn turn_start(shots: &Workspaces, dir: &Path) -> Result<(), String> {
+    shots
+        .0
+        .lock()
+        .map_err(|_| "workspace state is poisoned".to_string())?
+        .insert(dir.to_path_buf(), measure(dir));
+    Ok(())
+}
+
+/// What a turn's offer is made of: the files, and how many changed paths
+/// were held back because they were dirty before the turn began.
+#[derive(serde::Serialize)]
+pub struct TurnProduced {
+    pub files: Vec<Produced>,
+    pub pre_existing: usize,
 }
 
 /// What this turn wrote or changed, and the line moved to where it ends.
@@ -179,18 +235,36 @@ pub fn baseline(shots: &Workspaces, dir: &Path) -> Result<(), String> {
 /// hold the map, a file offered by neither and then left behind the line. Under
 /// the lock the second turn diffs against what the first one left, which is
 /// nothing (#179).
-pub fn offer(shots: &Workspaces, dir: &Path) -> Result<Vec<Produced>, String> {
+pub fn offer(shots: &Workspaces, dir: &Path) -> Result<TurnProduced, String> {
     // A folder somebody bound is their real work, and git already knows what
-    // changed in it — by their ignore rules, not ours. There is no line to hold
-    // here: git answers from the repository every turn.
+    // changed in it — by their ignore rules, not ours. Since #202 the line
+    // applies here too: porcelain minus what was dirty when the turn began.
     if let Some(changed) = git_changes(dir) {
-        return Ok(changed
+        let mut state = shots
+            .0
+            .lock()
+            .map_err(|_| "workspace state is poisoned".to_string())?;
+        let (paths, pre_existing) = match state.get(dir) {
+            Some(Baseline::Git(line)) => turn_delta(&changed, line),
+            // No line, or one taken before this folder was a repository:
+            // the whole porcelain answer, as before.
+            _ => (changed.clone(), 0),
+        };
+        state.insert(
+            dir.to_path_buf(),
+            Baseline::Git(changed.into_iter().collect()),
+        );
+        let files = paths
             .into_iter()
             .filter_map(|path| {
                 let bytes = fs::metadata(dir.join(&path)).ok()?.len();
                 (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
             })
-            .collect());
+            .collect();
+        return Ok(TurnProduced {
+            files,
+            pre_existing,
+        });
     }
 
     let mut state = shots
@@ -198,7 +272,10 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<Vec<Produced>, String> {
         .lock()
         .map_err(|_| "workspace state is poisoned".to_string())?;
     let after = snapshot(dir);
-    let before = state.get(dir).cloned().unwrap_or_default();
+    let before = match state.get(dir) {
+        Some(Baseline::Fs(snap)) => snap.clone(),
+        _ => Snapshot::default(),
+    };
 
     let files = produced(&before, &after)
         .into_iter()
@@ -212,8 +289,11 @@ pub fn offer(shots: &Workspaces, dir: &Path) -> Result<Vec<Produced>, String> {
         .collect();
 
     // The next turn is measured from here, so one file is not offered twice.
-    state.insert(dir.to_path_buf(), after);
-    Ok(files)
+    state.insert(dir.to_path_buf(), Baseline::Fs(after));
+    Ok(TurnProduced {
+        files,
+        pre_existing: 0,
+    })
 }
 
 #[cfg(test)]
@@ -431,8 +511,8 @@ mod the_offer_a_turn_leaves {
             (one.join().unwrap(), two.join().unwrap())
         });
 
-        let mut both = paths(&first);
-        both.extend(paths(&second));
+        let mut both = paths(&first.files);
+        both.extend(paths(&second.files));
         both
     }
 
@@ -470,7 +550,7 @@ mod the_offer_a_turn_leaves {
             turn.join().unwrap()
         });
 
-        assert_eq!(paths(&files), vec!["late.md"]);
+        assert_eq!(paths(&files.files), vec!["late.md"]);
     }
 
     #[test]
@@ -485,7 +565,10 @@ mod the_offer_a_turn_leaves {
 
         baseline(&shots, &dir).unwrap();
 
-        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        assert_eq!(
+            paths(&offer(&shots, &dir).unwrap().files),
+            vec!["report.md"]
+        );
     }
 
     #[test]
@@ -499,7 +582,7 @@ mod the_offer_a_turn_leaves {
         baseline(&shots, &dir).unwrap();
         write(&dir, "new.md", "this turn");
 
-        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["new.md"]);
+        assert_eq!(paths(&offer(&shots, &dir).unwrap().files), vec!["new.md"]);
     }
 
     #[test]
@@ -509,17 +592,89 @@ mod the_offer_a_turn_leaves {
         baseline(&shots, &dir).unwrap();
         write(&dir, "report.md", "findings");
 
-        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
+        assert_eq!(
+            paths(&offer(&shots, &dir).unwrap().files),
+            vec!["report.md"]
+        );
         assert!(
-            offer(&shots, &dir).unwrap().is_empty(),
+            offer(&shots, &dir).unwrap().files.is_empty(),
             "the next turn is measured from where the last one ended"
         );
     }
 
     #[test]
+    fn a_turn_is_measured_from_its_own_start() {
+        // Dirty when the turn began: the person's. Appeared during it: the
+        // run's. The offer is the difference, and the difference only.
+        let baseline: std::collections::HashSet<String> =
+            ["draft.md".to_string()].into_iter().collect();
+        let current = vec!["draft.md".to_string(), "report.md".to_string()];
+
+        let (files, pre_existing) = turn_delta(&current, &baseline);
+
+        assert_eq!(files, vec!["report.md"]);
+        assert_eq!(pre_existing, 1);
+    }
+
+    #[test]
+    fn a_file_in_both_stays_the_persons() {
+        // The granularity is a file: the agent touched something that was
+        // already dirty, and there is no hunk-level truth to separate them
+        // here. The file stays out of the offer, and the count says why.
+        let baseline: std::collections::HashSet<String> =
+            ["notes.md".to_string()].into_iter().collect();
+        let current = vec!["notes.md".to_string()];
+
+        let (files, pre_existing) = turn_delta(&current, &baseline);
+
+        assert!(files.is_empty());
+        assert_eq!(pre_existing, 1);
+    }
+
+    #[test]
+    fn without_a_line_everything_is_offered() {
+        // An older client that never marks a turn start gets yesterday's
+        // behavior, not a broken bridge.
+        let current = vec!["a.md".to_string(), "b.md".to_string()];
+
+        let (files, pre_existing) = turn_delta(&current, &std::collections::HashSet::new());
+
+        assert_eq!(files, current);
+        assert_eq!(pre_existing, 0);
+    }
+
+    #[test]
+    fn a_repository_with_no_line_answers_whole() {
+        // The same fallback at the bridge: no turn_start, no baseline call —
+        // the whole porcelain answer, as before #202.
+        let dir = temp("noline");
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "a@b"]);
+        run(&["config", "user.name", "a"]);
+        write(&dir, "src.rs", "fn main() {}");
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+        write(&dir, "draft.md", "dirty before anything we know");
+
+        let shots = Workspaces::default();
+
+        let got = offer(&shots, &dir).unwrap();
+        assert_eq!(paths(&got.files), vec!["draft.md"]);
+        assert_eq!(got.pre_existing, 0);
+    }
+
+    #[test]
     fn a_bound_repository_is_still_answered_by_git() {
-        // The line does not apply to somebody's real repository: git already
-        // knows what changed there, by their ignore rules rather than ours.
+        // In somebody's real repository git answers what changed, by their
+        // ignore rules rather than ours. Since #202 the line applies here
+        // too: the answer is measured from the turn's start.
         let dir = temp("bound");
         let run = |args: &[&str]| {
             std::process::Command::new("git")
@@ -541,18 +696,73 @@ mod the_offer_a_turn_leaves {
         write(&dir, "report.md", "findings");
         write(&dir, "node_modules/left-pad/index.js", "junk");
 
-        assert_eq!(paths(&offer(&shots, &dir).unwrap()), vec!["report.md"]);
-        // And again, because a bound repository holds no line between turns and
-        // this is the one place "offered once" deliberately does not hold: the
-        // file is still uncommitted, so git still calls it changed, and the
-        // room is offered it again next turn. Two turns racing here are told
-        // the same true thing rather than one of them being told a stale one.
-        // Written down because the difference is invisible otherwise, and the
-        // next person to read the race specs will wonder why it stops here.
         assert_eq!(
-            paths(&offer(&shots, &dir).unwrap()),
-            vec!["report.md"],
-            "git answers every turn, and answers the same until the work is committed"
+            paths(&offer(&shots, &dir).unwrap().files),
+            vec!["report.md"]
+        );
+        // Still uncommitted, still not offered twice: the line moved to the
+        // porcelain set the first offer saw, so the second offer of the same
+        // turn's end is empty — and says one path was held back as already
+        // accounted for.
+        let second = offer(&shots, &dir).unwrap();
+        assert!(
+            second.files.is_empty(),
+            "offered once, in a repository too — the turn's start is the line"
+        );
+        assert_eq!(second.pre_existing, 1);
+    }
+
+    #[test]
+    fn a_turns_own_start_is_the_line_in_a_repository() {
+        // The attribution hole #202 closes: work a person left uncommitted
+        // before the turn is measured separately from what the turn did.
+        let dir = temp("dirty");
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "a@b"]);
+        run(&["config", "user.name", "a"]);
+        write(&dir, "src.rs", "fn main() {}");
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        // The person's unfinished edit, sitting in the tree before any turn.
+        write(&dir, "draft.md", "half a thought");
+        let shots = Workspaces::default();
+        turn_start(&shots, &dir).unwrap();
+
+        // The turn: the agent writes its report.
+        write(&dir, "report.md", "findings");
+
+        let got = offer(&shots, &dir).unwrap();
+        assert_eq!(paths(&got.files), vec!["report.md"]);
+        assert_eq!(
+            got.pre_existing, 1,
+            "the person's draft is not the run's work"
+        );
+    }
+
+    #[test]
+    fn a_new_turn_re_takes_the_line() {
+        // Editing between turns must not leak into the next turn's offer:
+        // the prompt going out re-takes the line (#202), while merely
+        // re-entering the channel does not (#179, the re-entry spec above).
+        let dir = temp("between");
+        let shots = Workspaces::default();
+        baseline(&shots, &dir).unwrap();
+
+        write(&dir, "mine.md", "edited by hand between turns");
+        turn_start(&shots, &dir).unwrap();
+        write(&dir, "report.md", "the turn's own work");
+
+        assert_eq!(
+            paths(&offer(&shots, &dir).unwrap().files),
+            vec!["report.md"]
         );
     }
 }

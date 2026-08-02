@@ -4,7 +4,7 @@
 // from the record and the page is only how much of it fits.
 
 import type { Channel, Message } from "./api";
-import { StepLedger, contentTypeFor, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, type Asked, type PlanEntry } from "./rules";
+import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, type Asked, type PlanEntry, type TurnProduced } from "./rules";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -22,7 +22,7 @@ export interface TimelineDeps {
   /// this person has seen.
   onShown: (m: Message) => void;
   permit: (name: string, askedId: unknown, optionId: string | null) => Promise<void>;
-  produced: (workspace: string) => Promise<Array<{ path: string; bytes: number }>>;
+  produced: (workspace: string) => Promise<TurnProduced>;
   readFile: (workspace: string, path: string) => Promise<string>;
   attach: (runId: number, path: string, base64: string, contentType: string) => Promise<void>;
   exportSession: (name: string, sessionId: string) => Promise<string | null>;
@@ -306,8 +306,19 @@ export function createTimeline(deps: TimelineDeps): Timeline {
   /// Offered, not uploaded: work product belongs to the channel (Article D3), but
   /// what leaves this machine stays the person's decision.
   async function offerProduced(runId: number, workspace: string) {
-    const produced = await deps.produced(workspace);
-    if (!worthOffering(produced)) return;
+    const { files: produced, pre_existing } = await deps.produced(workspace);
+    if (!worthOffering(produced)) {
+      // A quiet account of what the turn was not credited with — without it,
+      // "the agent did nothing" and "the offer is broken" look the same.
+      const notice = preExistingNotice(pre_existing);
+      if (notice) {
+        const note = document.createElement("div");
+        note.className = "offer muted";
+        note.textContent = notice;
+        $("messages").append(note);
+      }
+      return;
+    }
     const { files, omitted } = offerable(produced, AT_MOST_OFFERED);
 
     const box = $("messages");

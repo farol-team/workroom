@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -432,6 +432,13 @@ describe("work product", () => {
     expect(worthOffering([])).toBe(false);
     expect(worthOffering([{ path: "a.md", bytes: 0 }])).toBe(false);
     expect(worthOffering([{ path: "a.md", bytes: 12 }])).toBe(true);
+  });
+
+  test("an empty offer with pre-existing changes says so, quietly", () => {
+    expect(preExistingNotice(0)).toBeNull();
+    expect(preExistingNotice(3)).toBe(
+      "Nothing new this turn (3 pre-existing changes not offered)",
+    );
   });
 });
 
