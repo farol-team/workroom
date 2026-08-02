@@ -1,4 +1,4 @@
-import { Api, type Channel, type Message } from "./api";
+import { Api, type Channel, type Live, type Message } from "./api";
 import { StepLedger, WorkingSignal, activeAgent, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, contentTypeFor, driftNotice, updateNotice, onboardingCards, orAfter, dayLabel, identity, inTimeline, offerable, onScreen, pickable, templateNote, threadOf, threadSummary, timeLabel, defaultAgent, formatHistory, occupancyLabel, parseAddress, selectable, transcriptName, unreadCount, withClosing, worthOffering, type PlanEntry, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { installCommand, profileFor } from "./agents/catalog";
@@ -17,7 +17,7 @@ const agents = new Agents(settings.load());
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let channels: Channel[] = [];
 let current: Channel | null = null;
-let socket: WebSocket | null = null;
+let socket: Live | null = null;
 let runSteps = new Map<number, string[]>();
 let me = "";   // who is signed in, so a workspace belongs to a person
 
@@ -456,7 +456,23 @@ async function open(slug: string) {
       const c = channels.find((x) => x.slug === e.channel);
       if (c) { c.message_count = (c.message_count ?? 0) + 1; renderChannels(); }
     }
-  });
+  }, () => catchUp(slug));
+}
+
+/// The cable replays nothing, so a socket that was away came back to a room that
+/// moved without it (#180). What it missed is `api.caughtUp`'s to work out; all
+/// this adds is that the answer is only for the room still on screen — the room
+/// can be left while the request is in flight, and pouring another channel's
+/// messages into this one is worse than staying behind.
+///
+/// The rejection is deliberately not swallowed here: a server that has only just
+/// come back can refuse this request, and `live()` reads the rejection as a room
+/// still behind and asks again. Returning the promise is what makes that work.
+async function catchUp(slug: string) {
+  if (current?.slug !== slug) return;
+  const missed = await api.caughtUp(slug, held);
+  if (current?.slug !== slug) return;
+  missed.forEach(addMessage);
 }
 
 // ---------- the turn ----------
