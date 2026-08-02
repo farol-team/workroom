@@ -54,14 +54,14 @@ cat <<'NEXT'
 
       cd desktop && pnpm install && pnpm tauri dev
 
-  Sign in as alice@farol.run. Open # meetings — a finished turn is already
+  Sign in as alice@farol.run. Open # marketing — a finished turn is already
   there, with the plan its agent followed and the answer it posted.
 
   To run your own turn you need your own agent, under your own credentials:
 
       npm i -g opencode-ai && opencode auth login
 
-  Press Start agent, then ask:
+  Press Start agent, then open # meetings and ask:
 
       @agent what did we agree with Acme about reporting?
 
