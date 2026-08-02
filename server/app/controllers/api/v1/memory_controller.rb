@@ -12,11 +12,21 @@ module Api
       # Direct write. Distillation proposes a Promotion instead; this path is
       # for a person deliberately recording something the room should know.
       def create
+        title = params.require(:title)
+        trust = params[:trust] || "human"
         entry = Memory::Store.current.write(
-          channel!, title: params.require(:title), detail: params.require(:detail),
-          overview: params[:overview], trust: params[:trust] || "human", author: current_user
+          channel!, title:, detail: params.require(:detail),
+          overview: params[:overview], trust:, author: current_user
         )
         Activity.log(actor: current_user, action: "memory.written", subject: entry)
+
+        # However memory was written — by an agent through the rail or by a
+        # person here — the room's journal is one entry longer. A record that
+        # only knows about the agent's writes describes half a room.
+        RecordStore::Append.call(
+          channel: channel!, kind: "memory", subject: nil,
+          payload: { action: "written", uri: entry.uri, title:, trust:, author_id: current_user.id }
+        )
         render json: serialize(entry), status: :created
       end
 

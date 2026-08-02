@@ -55,6 +55,11 @@ Rails.application.routes.draw do
 
     get  "channels/:channel_slug/artifacts", to: "artifacts#index",  as: :channel_artifacts
     post "runs/:run_id/artifacts",           to: "artifacts#create", as: :run_artifacts
+
+    # The bytes behind an artifact, addressed by what they are. The channel is
+    # in the url because a digest is not a permission — it names the same file
+    # wherever it was stored.
+    get "channels/:channel_slug/record/:sha256", to: "records#show", as: :channel_record
     post "runs/:id/messages", to: "runs#message", as: :run_messages
   end
     end
