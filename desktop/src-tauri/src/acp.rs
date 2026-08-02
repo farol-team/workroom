@@ -863,124 +863,21 @@ mod tests {
     }
 }
 
-/// Against a second implementation of the protocol, over a real pipe.
+/// Against a second implementation of the protocol, over a real pipe — and
+/// through this client rather than around it.
 ///
-/// Everything else in this file is exercised against strings we wrote. Both
-/// defects in #68 — a header shape the agent cannot read, and a question nobody
-/// answers — were invisible from the inside and obvious from the outside.
+/// Everything above is exercised against strings we wrote. Both defects in #68
+/// — a header shape the agent cannot read, and a question nobody answers — were
+/// invisible from the inside and obvious from the outside. What used to be
+/// outside was a hand-rolled client in this file, which proved the scripted
+/// agent works and said nothing about `launch`, `request` or `answer`. It is
+/// the real one now (#174).
+///
+/// The seam that makes it possible is `launch` taking what to emit rather than
+/// an `AppHandle`: a window is the one thing a test cannot have.
 #[cfg(test)]
 mod against_a_real_agent {
     use super::*;
-    use serde_json::json;
-    use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
-
-    fn agent() -> std::process::Child {
-        let script =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
-        Command::new("node")
-            .arg(script)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("node is required for the protocol test")
-    }
-
-    #[test]
-    fn a_turn_completes_with_the_rail_readable_and_the_question_answered() {
-        let mut child = agent();
-        let mut stdin = child.stdin.take().unwrap();
-        let mut out = BufReader::new(child.stdout.take().unwrap());
-
-        let mut say = |line: String| {
-            stdin.write_all(line.as_bytes()).unwrap();
-            stdin.flush().unwrap();
-        };
-        let mut hear = || {
-            let mut line = String::new();
-            out.read_line(&mut line).unwrap();
-            serde_json::from_str::<Value>(&line).unwrap()
-        };
-
-        say(frame(1, "initialize", json!({ "protocolVersion": 1 })));
-        assert_eq!(hear()["result"]["protocolVersion"], 1);
-
-        // The rail, in the shape the schema defines.
-        say(frame(
-            2,
-            "session/new",
-            json!({ "cwd": "/tmp", "mcpServers": [ {
-                "name": "workroom", "type": "http", "url": "http://127.0.0.1:3000/api/rail/meetings",
-                "headers": [ { "name": "Authorization", "value": "Bearer tok" } ] } ] }),
-        ));
-        let session = hear()["result"]["sessionId"].as_str().unwrap().to_string();
-
-        say(frame(
-            3,
-            "session/prompt",
-            json!({ "sessionId": session,
-            "prompt": [ { "type": "text", "text": "[ask] do the thing" } ] }),
-        ));
-
-        let mut heard = Vec::new();
-        loop {
-            let msg = hear();
-            // The agent asks; nothing happens until we answer.
-            if msg["method"] == "session/request_permission" {
-                let id = msg["id"].as_u64().unwrap();
-                let options = msg["params"]["options"].as_array().unwrap().clone();
-                assert_eq!(options[0]["optionId"], "yes");
-                say(format!(
-                    "{}\n",
-                    json!({ "jsonrpc": "2.0", "id": id,
-                            "result": { "outcome": { "outcome": "selected", "optionId": "yes" } } })
-                ));
-                continue;
-            }
-            if msg["method"] == "session/update" {
-                heard.push(
-                    msg["params"]["update"]["content"]["text"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                );
-                continue;
-            }
-            if msg["id"] == 3 {
-                assert_eq!(msg["result"]["stopReason"], "end_turn", "the turn ended");
-                break;
-            }
-        }
-
-        let said = heard.join(" ");
-        assert!(
-            said.contains(r#""name":"Authorization""#),
-            "the agent must be able to read the rail's header: {said}"
-        );
-        assert!(
-            said.contains(r#""optionId":"yes""#),
-            "the answer must reach the agent, or the turn never ends: {said}"
-        );
-
-        // Reaped, not merely killed: a test that leaves a zombie behind is a
-        // test that leaves something behind on somebody's machine.
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-}
-
-/// What happens to the people waiting when the process on the other end goes
-/// away (#174).
-///
-/// Through `launch` and `request` against the scripted agent, because that is
-/// where the defect lives: a crash nobody notices reads as a turn that says
-/// "working" for ten idle minutes, and nothing assembled by hand in this file
-/// can see it. The seam these need is `launch` taking what to emit rather than
-/// an `AppHandle` — a window is the one thing a test cannot have.
-#[cfg(test)]
-mod when_the_agent_dies {
-    use super::*;
-    use std::sync::atomic::AtomicBool;
 
     /// Everything the interface would have been told, recorded instead — and,
     /// for each event, whether the people waiting had already been let go when
@@ -988,13 +885,13 @@ mod when_the_agent_dies {
     /// the order cannot be read from here.
     type Heard = Vec<(String, Value, Option<bool>)>;
 
-    struct Watcher {
+    pub(super) struct Watcher {
         heard: Arc<std::sync::Mutex<Heard>>,
         waiting: Arc<std::sync::Mutex<Option<Pending>>>,
     }
 
     impl Watcher {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             Watcher {
                 heard: Arc::new(std::sync::Mutex::new(Vec::new())),
                 waiting: Arc::new(std::sync::Mutex::new(None)),
@@ -1002,7 +899,7 @@ mod when_the_agent_dies {
         }
 
         /// What an agent is launched with, in place of a window.
-        fn emit(&self) -> impl Fn(&str, Value) + Send + 'static {
+        pub(super) fn emit(&self) -> impl Fn(&str, Value) + Send + 'static {
             let heard = self.heard.clone();
             let waiting = self.waiting.clone();
             move |event: &str, payload: Value| {
@@ -1019,11 +916,11 @@ mod when_the_agent_dies {
         }
 
         /// The map of people waiting, once the agent that owns it exists.
-        fn watching(&self, pending: Pending) {
+        pub(super) fn watching(&self, pending: Pending) {
             *self.waiting.lock().unwrap() = Some(pending);
         }
 
-        fn saw(&self, event: &str) -> bool {
+        pub(super) fn saw(&self, event: &str) -> bool {
             self.heard
                 .lock()
                 .unwrap()
@@ -1032,7 +929,7 @@ mod when_the_agent_dies {
         }
 
         /// The one event of this kind, and what the map looked like as it went.
-        fn only(&self, event: &str) -> (Value, Option<bool>) {
+        pub(super) fn only(&self, event: &str) -> (Value, Option<bool>) {
             let heard = self.heard.lock().unwrap();
             let mut found = heard.iter().filter(|(e, _, _)| e == event);
             let (_, payload, drained) = found
@@ -1044,12 +941,26 @@ mod when_the_agent_dies {
             );
             (payload.clone(), *drained)
         }
+
+        /// Everything the agent said on the way, as the interface would show it.
+        pub(super) fn said(&self) -> String {
+            self.heard
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(event, _, _)| event == "acp://notify")
+                .filter_map(|(_, msg, _)| {
+                    msg.pointer("/params/update/content/text")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
     }
 
-    /// The scripted agent, launched the way the application launches one. A
-    /// second implementation of the protocol over a real pipe: both defects in
-    /// #68 were invisible from the inside and obvious from here.
-    async fn launched(watcher: &Watcher, name: &str) -> Arc<Agent> {
+    /// The scripted agent, launched the way the application launches one.
+    pub(super) async fn launched(watcher: &Watcher, name: &str) -> Arc<Agent> {
         let script =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
         Agent::launch(
@@ -1062,9 +973,12 @@ mod when_the_agent_dies {
         .expect("node and the scripted agent are required to speak the protocol")
     }
 
-    async fn session_on(agent: &Arc<Agent>) -> String {
+    pub(super) async fn session_on(agent: &Arc<Agent>, mcp_servers: Value) -> String {
         agent
-            .request("session/new", json!({ "cwd": "/tmp", "mcpServers": [] }))
+            .request(
+                "session/new",
+                json!({ "cwd": "/tmp", "mcpServers": mcp_servers }),
+            )
             .await
             .expect("the scripted agent opens a session")["sessionId"]
             .as_str()
@@ -1073,9 +987,10 @@ mod when_the_agent_dies {
     }
 
     /// "[ask]" is the one thing the scripted agent does not answer on its own:
-    /// it asks for permission and waits. Nobody answers it here, so the turn
-    /// stays in flight — which is the state a crash has to interrupt.
-    fn a_turn_that_waits(session: &str) -> Value {
+    /// it asks for permission and waits. Until somebody answers, the turn is in
+    /// flight — which is what a completed turn needs and what a crash needs to
+    /// interrupt.
+    pub(super) fn a_turn_that_waits(session: &str) -> Value {
         json!({
             "sessionId": session,
             "prompt": [ { "type": "text", "text": "[ask] do the thing" } ]
@@ -1084,7 +999,7 @@ mod when_the_agent_dies {
 
     /// Waits for something to become true rather than for a duration somebody
     /// guessed, and gives up rather than hanging the suite.
-    async fn until(what: &str, mut ready: impl FnMut() -> bool) {
+    pub(super) async fn until(what: &str, mut ready: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             if ready() {
@@ -1096,11 +1011,99 @@ mod when_the_agent_dies {
     }
 
     #[tokio::test]
+    async fn a_turn_completes_with_the_rail_readable_and_the_question_answered() {
+        let watcher = Watcher::new();
+        let agent = launched(&watcher, "claude").await;
+        watcher.watching(agent.pending.clone());
+
+        assert!(
+            mounts_http_mcp(&agent.handshake().await),
+            "what the agent said about itself is kept, or the rail is mounted on hope"
+        );
+
+        // The rail, in the shape the schema defines.
+        let session = session_on(
+            &agent,
+            json!([ { "name": "workroom", "type": "http",
+                      "url": "http://127.0.0.1:3000/api/rail/meetings",
+                      "headers": [ { "name": "Authorization", "value": "Bearer tok" } ] } ]),
+        )
+        .await;
+
+        let turn = tokio::spawn({
+            let (agent, session) = (agent.clone(), session.clone());
+            async move {
+                agent
+                    .request("session/prompt", a_turn_that_waits(&session))
+                    .await
+            }
+        });
+
+        // The agent asks, and nothing happens until a person answers — through
+        // this client, which is the half of #68 a hand-rolled one cannot see.
+        until("the agent must ask before it can be answered", || {
+            watcher.saw("acp://ask")
+        })
+        .await;
+        let (asked, _) = watcher.only("acp://ask");
+        assert_eq!(asked["request"]["params"]["options"][0]["optionId"], "yes");
+        agent
+            .answer(
+                &asked["id"],
+                json!({ "outcome": { "outcome": "selected", "optionId": "yes" } }),
+            )
+            .await
+            .expect("the answer must be written");
+
+        let done = tokio::time::timeout(Duration::from_secs(10), turn)
+            .await
+            .expect("an answered question ends the turn")
+            .unwrap()
+            .expect("a turn the agent finished is an answer, not an error");
+        assert_eq!(done["stopReason"], "end_turn", "the turn ended");
+
+        let said = watcher.said();
+        assert!(
+            said.contains(r#""name":"Authorization""#),
+            "the agent must be able to read the rail's header: {said}"
+        );
+        assert!(
+            said.contains(r#""optionId":"yes""#),
+            "the answer must reach the agent, or the turn never ends: {said}"
+        );
+        assert!(
+            agent.pending.lock().await.is_empty(),
+            "an answered request is unfiled by the reader that answered it"
+        );
+        assert!(
+            !watcher.saw("acp://closed"),
+            "an agent that is still reading has not closed — a reader that let go of the living \
+             would end every turn the moment it started"
+        );
+
+        agent.shutdown().await;
+    }
+}
+
+/// What happens to the people waiting when the process on the other end goes
+/// away (#174).
+///
+/// Through `launch` and `request` against the scripted agent, because that is
+/// where the defect lives: a crash nobody notices reads as a turn that says
+/// "working" for ten idle minutes, and nothing assembled by hand in this file
+/// can see it.
+#[cfg(test)]
+mod when_the_agent_dies {
+    use super::against_a_real_agent::{a_turn_that_waits, launched, session_on, until, Watcher};
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[tokio::test]
     async fn a_turn_waiting_on_an_agent_that_died_is_told_the_agent_closed() {
         let watcher = Watcher::new();
         let agent = launched(&watcher, "claude").await;
         watcher.watching(agent.pending.clone());
-        let session = session_on(&agent).await;
+        let session = session_on(&agent, json!([])).await;
 
         let started = Instant::now();
         let turn = tokio::spawn({
@@ -1150,111 +1153,11 @@ mod when_the_agent_dies {
             closed["name"], "claude",
             "which agent stopped, or a person running several has nothing to act on"
         );
-        assert_ne!(
-            drained,
-            Some(false),
-            "the turns were let go before the interface was told the agent stopped — the other \
-             order shows a room a stopped agent with a turn still spinning in it"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_turn_the_agent_finishes_still_comes_back() {
-        // The drain must be the end of the loop and nothing else: a reader that
-        // let go of the living would end every turn the moment it started.
-        let watcher = Watcher::new();
-        let agent = launched(&watcher, "claude").await;
-        watcher.watching(agent.pending.clone());
-        let session = session_on(&agent).await;
-
-        let done = agent
-            .request(
-                "session/prompt",
-                json!({ "sessionId": session,
-                        "prompt": [ { "type": "text", "text": "do the thing" } ] }),
-            )
-            .await
-            .expect("a turn the agent finishes is an answer, not an error");
-
-        assert_eq!(done["stopReason"], "end_turn");
-        assert!(
-            watcher.saw("acp://notify"),
-            "what the agent said on the way reaches the interface"
-        );
-        assert!(
-            !watcher.saw("acp://closed"),
-            "an agent that is still reading has not closed"
-        );
-        assert!(
-            agent.pending.lock().await.is_empty(),
-            "an answered request is unfiled by the reader that answered it"
-        );
-
-        agent.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn an_agent_whose_process_died_is_not_listed_as_running() {
-        let running: AgentState = Registry::default();
-        let gone = Watcher::new();
-        let still_there = Watcher::new();
-        let claude = launched(&gone, "claude").await;
-        let opencode = launched(&still_there, "opencode").await;
-        running.insert("claude", claude.clone()).await;
-        running.insert("opencode", opencode.clone()).await;
-
-        claude.shutdown().await;
-
-        // Asked the way the agents panel asks, until it settles: what a person
-        // sees is the list, not the event that produced it.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut listed = running.names_still_running().await;
-        while listed != vec!["opencode"] && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            listed = running.names_still_running().await;
-        }
-
         assert_eq!(
-            listed,
-            vec!["opencode"],
-            "a process that is gone is not an agent to hand a turn to"
-        );
-        assert!(
-            running.get("claude").await.is_none(),
-            "and it is forgotten rather than hidden — starting it again is a fresh process"
-        );
-        assert!(
-            running.get("opencode").await.is_some(),
-            "the agents that are still running are left alone"
-        );
-
-        opencode.shutdown().await;
-    }
-
-    #[test]
-    fn the_names_a_person_is_shown_are_the_pruned_ones() {
-        // `agent_list` takes a Tauri `State`, which exists only inside a
-        // running application, so what is pinned from here is the wiring rather
-        // than the call. A registry that knows how to forget the dead and a
-        // command that still asks for every name it holds leaves the panel
-        // offering a process that is gone, with every other spec here green.
-        let lib = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
-        )
-        .unwrap();
-        let from = lib
-            .find("async fn agent_list")
-            .expect("the command the agents panel calls");
-        let body = &lib[from..];
-        let body = &body[..body.find("\n}").expect("a command has a body")];
-
-        assert!(
-            body.contains("names_still_running"),
-            "agent_list must ask for the agents still running: {body}"
-        );
-        assert!(
-            !body.contains(".names()"),
-            "and not for every name the registry still holds: {body}"
+            drained,
+            Some(true),
+            "empty the map, drop its lock, then say the agent closed. Told in the other order, a \
+             room shows a stopped agent with a turn still spinning in it"
         );
     }
 
@@ -1263,9 +1166,17 @@ mod when_the_agent_dies {
         let watcher = Watcher::new();
         let agent = launched(&watcher, "claude").await;
         watcher.watching(agent.pending.clone());
-        // The process is gone before the frame is written: the pipe has nobody
-        // on the other end of it, and the write is where that is found out.
         agent.shutdown().await;
+
+        // The reader has run out of stdout and finished before anything is
+        // asked — so a slot left behind can only be the one this request filed
+        // and did not take back. Racing it against the drain would let the
+        // reader tidy up on the writer's behalf, and pass either way.
+        until(
+            "the reader must have exited before anything is asked",
+            || watcher.saw("acp://closed"),
+        )
+        .await;
 
         let error = agent
             .request("session/prompt", json!({ "sessionId": "ses_1" }))
@@ -1313,16 +1224,26 @@ mod when_the_agent_dies {
         }
     }
 
+    /// What the caller is told, or a failure inside two seconds. Without the
+    /// bound, deadlines left reading the constants hang the suite for ten
+    /// minutes before the assertion below gets its turn.
+    async fn asked_and_given_up_on(agent: &Agent) -> String {
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            agent.request("session/prompt", json!({ "sessionId": "s1" })),
+        )
+        .await
+        .expect("the deadline this agent was given is the one that fires")
+        .expect_err("silence past the deadline is not an answer")
+    }
+
     #[tokio::test]
     async fn a_turn_that_hears_nothing_is_given_up_on_at_its_idle_deadline() {
         let idle = Duration::from_millis(50);
         let agent = agent_with(idle, Duration::from_secs(3600)).await;
         let started = Instant::now();
 
-        let error = agent
-            .request("session/prompt", json!({ "sessionId": "s1" }))
-            .await
-            .expect_err("silence past the deadline is not an answer");
+        let error = asked_and_given_up_on(&agent).await;
 
         assert!(error.contains("said nothing for"), "{error}");
         assert!(
@@ -1331,8 +1252,8 @@ mod when_the_agent_dies {
         );
         assert!(
             (idle..Duration::from_secs(1)).contains(&started.elapsed()),
-            "the deadline this agent was given is the one that fired — not earlier, and not the \
-             ten minutes and five-second tick compiled in ({:?})",
+            "not earlier than the deadline this agent was given, and not on the ten minutes and \
+             five-second tick compiled in ({:?})",
             started.elapsed()
         );
         assert!(
@@ -1350,12 +1271,13 @@ mod when_the_agent_dies {
         let agent = agent_with(Duration::from_secs(3600), hard).await;
         let started = Instant::now();
 
-        let error = agent
-            .request("session/prompt", json!({ "sessionId": "s1" }))
-            .await
-            .expect_err("a turn past its wall clock is given up on");
+        let error = asked_and_given_up_on(&agent).await;
 
         assert!(error.contains("has been at it for"), "{error}");
+        assert!(
+            error.contains("Its session is still open"),
+            "the same sentence a person is given when a turn goes quiet: {error}"
+        );
         assert!(
             (hard..Duration::from_secs(1)).contains(&started.elapsed()),
             "the wall clock this agent was given is the one that fired ({:?})",

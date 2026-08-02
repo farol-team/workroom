@@ -850,3 +850,72 @@ mod capabilities {
         );
     }
 }
+
+/// What the agents panel is told, asked the way it asks (#174).
+///
+/// `agent_list` takes a Tauri `State`, so it is driven here on the mock
+/// runtime: a helper that prunes and a command that still asks for every name
+/// the registry holds is green everywhere except in front of a person.
+#[cfg(test)]
+mod the_agents_panel {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    async fn launched(name: &str) -> Arc<Agent> {
+        let script =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
+        Agent::launch(
+            name,
+            "node",
+            &[script.to_string_lossy().into_owned()],
+            // Nothing is listening in a test; what these agents emit is
+            // asserted where the bridge is, not here.
+            |_event: &str, _payload: Value| {},
+        )
+        .await
+        .expect("node and the scripted agent are required to speak the protocol")
+    }
+
+    #[tokio::test]
+    async fn an_agent_whose_process_died_is_not_offered_as_running() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("the mock runtime stands in for a window");
+        app.manage(AgentState::default());
+        let state = || app.state::<AgentState>();
+
+        let claude = launched("claude").await;
+        let opencode = launched("opencode").await;
+        state().insert("claude", claude.clone()).await;
+        state().insert("opencode", opencode.clone()).await;
+        assert_eq!(
+            agent_list(state()).await.unwrap(),
+            vec!["claude", "opencode"],
+            "both are running, and both are offered"
+        );
+
+        claude.shutdown().await;
+
+        // Asked until it settles, because the process dying and this side
+        // noticing are two different moments.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut listed = agent_list(state()).await.unwrap();
+        while listed != vec!["opencode"] && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            listed = agent_list(state()).await.unwrap();
+        }
+
+        assert_eq!(
+            listed,
+            vec!["opencode"],
+            "a process that is gone is not an agent to hand a turn to"
+        );
+        assert!(
+            state().get("claude").await.is_none(),
+            "and it is forgotten rather than hidden — pressing Start is a fresh process, not a \
+             second one nobody can address"
+        );
+
+        opencode.shutdown().await;
+    }
+}

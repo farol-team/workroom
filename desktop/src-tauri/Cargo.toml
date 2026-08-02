@@ -35,3 +35,9 @@ base64 = "0.22"
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros"] }
 
+
+[dev-dependencies]
+# The mock runtime, so a command that takes `State` can be called by a test
+# rather than only by a running window. Dev-only: resolver 2 keeps the feature
+# out of the application build.
+tauri = { version = "2", features = ["test"] }
