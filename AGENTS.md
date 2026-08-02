@@ -136,7 +136,8 @@ Sign in as `alice@farol.run`; development sign-in creates the account on the
 spot. The OpenViking context database is opt-in:
 `docker compose --profile memory up -d openviking` (needs `ov.conf` — see
 `ov.conf.example` and `docs/RUNNING.md`). Without it the memory store is
-PostgreSQL and nothing external is required.
+PostgreSQL and nothing external is required. RUNNING.md also documents a
+no-credential path through a local Ollama.
 
 ## How this repository is developed
 
