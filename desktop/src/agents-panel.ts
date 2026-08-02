@@ -95,10 +95,14 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
   /// The one press, wherever it was pressed. The surface that drew the button
   /// is redrawn at once — busy is a thing you have to see immediately — and
   /// again when the work ends.
+  ///
+  /// Nobody awaits a press, so this is the last place a refusal from the bridge
+  /// can be caught. Without it a stop the machine would not do is a button that
+  /// did nothing and said nothing.
   function press(card: OnboardingCard, command: string | null, refresh: () => void) {
     const done = command ? install(card.name) : toggle(card.name);
     refresh();
-    done.finally(refresh);
+    done.catch((err) => deps.onTrouble(String(err))).finally(refresh);
   }
 
   function agentCard(card: OnboardingCard, refresh: () => void): HTMLElement {
