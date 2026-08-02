@@ -370,6 +370,34 @@ pub fn repo_info(dir: &Path) -> RepoInfo {
     }
 }
 
+/// What a folder is, before anybody touches it (#204): whether it is there,
+/// whether it holds anything, and which repository it is when it is one.
+/// Provisioning reads this to decide — clone, leave alone, or warn — and the
+/// whole point of asking first is that a folder holding somebody's work is
+/// never written to.
+#[derive(serde::Serialize)]
+pub struct FolderState {
+    pub exists: bool,
+    /// Missing counts as empty: both are a place a clone may land.
+    pub empty: bool,
+    pub remote: Option<String>,
+}
+
+/// Read the three facts off a directory. Nothing here creates or modifies —
+/// deciding what to do with the answer is the caller's.
+pub fn folder_state(dir: &Path) -> FolderState {
+    let exists = dir.exists();
+    let empty = fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(true);
+    let remote = git_answer(dir, &["remote", "get-url", "origin"]);
+    FolderState {
+        exists,
+        empty,
+        remote,
+    }
+}
+
 /// The room's repository, cloned into the folder the room works in (#203).
 ///
 /// A non-empty directory is refused rather than merged into: cloning into
@@ -415,6 +443,90 @@ pub fn clone_repository(url: &str, dir: &Path) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod folder_state_tests {
+    //! What provisioning has to know before it touches anything (#204): is
+    //! the folder there, does it hold something, and which repository is it.
+
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-state-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_folder_that_was_never_made_is_not_there_and_holds_nothing() {
+        let dir = temp("missing");
+
+        let state = folder_state(&dir);
+
+        assert!(!state.exists);
+        assert!(
+            state.empty,
+            "nothing there is nothing in the way of a clone"
+        );
+        assert!(state.remote.is_none());
+    }
+
+    #[test]
+    fn an_empty_folder_is_a_place_a_clone_may_land() {
+        let dir = temp("empty");
+        fs::create_dir_all(&dir).unwrap();
+
+        let state = folder_state(&dir);
+
+        assert!(state.exists);
+        assert!(state.empty);
+        assert!(state.remote.is_none());
+    }
+
+    #[test]
+    fn a_repository_says_which_one_it_is() {
+        let dir = temp("repo");
+        fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        run(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.test/acme/widgets.git",
+        ]);
+
+        let state = folder_state(&dir);
+
+        assert!(state.exists);
+        assert!(!state.empty, ".git is already something held");
+        assert_eq!(
+            state.remote.as_deref(),
+            Some("https://example.test/acme/widgets.git")
+        );
+    }
+
+    #[test]
+    fn a_folder_of_somebodys_work_is_not_empty_and_is_no_repository() {
+        // The mismatch case: something is here, and it is not the room's
+        // repository — so provisioning must not touch it.
+        let dir = temp("theirs");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.md"), "somebody's work").unwrap();
+
+        let state = folder_state(&dir);
+
+        assert!(state.exists);
+        assert!(!state.empty);
+        assert!(state.remote.is_none());
+    }
 }
 
 #[cfg(test)]
