@@ -1178,6 +1178,27 @@ describe("what the room says when something goes wrong", () => {
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 
+  test("a turn that fails after the message landed leaves the composer empty", async () => {
+    // The other side of the line, and the reason the restore belongs to the
+    // post rather than to the whole turn: everything after `api.post` happens
+    // with the sentence already in the room. Putting it back would invite the
+    // person to press Send on a message the channel already has, and they
+    // would — the composer refilling itself reads as "that did not go".
+    const { server } = await openTheClient({
+      server: aServer({ startRun: vi.fn(async () => { throw new Error("500 the run never started"); }) }),
+    });
+    el<HTMLInputElement>("input").value = "@claude what did we agree?";
+
+    submit("composer");
+    await settle();
+
+    expect(server.post).toHaveBeenCalledWith("meetings", "what did we agree?");
+    expect(server.startRun).toHaveBeenCalled();
+    expect(el<HTMLInputElement>("input").value).toBe("");
+    expect(notices()).toContain("the run never started");
+    expect(blockingDialog).not.toHaveBeenCalled();
+  });
+
   test("a reply that does not go through keeps it too", async () => {
     // A reply is a send. The panel clears its box the same way the room does,
     // so it loses the same sentence, and fixing one of the two is fixing half
@@ -1224,6 +1245,24 @@ describe("what the room says when something goes wrong", () => {
       },
       attempted: (edges) => edges.bridge.start,
       said: "claude exited 1",
+    },
+    {
+      what: "an install the bridge never ran",
+      // The other way an install fails: not npm saying no, but nothing on this
+      // machine answering at all. It arrives as a rejection rather than a
+      // result, at a different call site, and reads the same to the person.
+      edges: () => ({ bridge: aBridge({
+        definitions: () => [ { name: "codex", command: "codex-acp", args: [] } ],
+        isRunning: () => false,
+        stateOf: () => "missing",
+        install: vi.fn(async () => { throw new Error("no answer from this machine"); }),
+      }) }),
+      drive: async () => {
+        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        await settle();
+      },
+      attempted: (edges) => edges.bridge.install,
+      said: "no answer from this machine",
     },
     {
       what: "a skill the room did not accept",
@@ -1429,13 +1468,26 @@ describe("the start-up says which part of it failed", () => {
   /// what `boot().catch(…)` says today: sign-in refused, a room that will not
   /// load and a bridge that is not answering are three different mornings, and
   /// only the person can act on the difference.
-  const STAGE = { signIn: /signing in/i, channels: /channel/i, bridge: /bridge/i };
+  ///
+  /// Each stage is its own phrase rather than its product noun. "Channel" is
+  /// in half the strings this client can say — a bridge message that mentions
+  /// which channel's agents are missing names the bridge perfectly well, and
+  /// an assertion that forbids the word would be pinning prose instead of the
+  /// distinction.
+  const STAGE = {
+    signIn: /signing in/i,
+    channels: /(did not|could not) load/i,
+    bridge: /bridge/i,
+  };
 
   test("a sign-in that is refused names signing in, and nothing else", async () => {
-    await openTheClient({
+    const { server } = await openTheClient({
       server: aServer({ signIn: vi.fn(async () => { throw new Error("401 no account here"); }) }),
     });
 
+    // The other two stages pin how far the boot got by what is on screen;
+    // this one is the first thing that happens, so it says so directly.
+    expect(server.signIn).toHaveBeenCalled();
     expect(notices()).toMatch(STAGE.signIn);
     expect(notices()).not.toMatch(STAGE.channels);
     expect(notices()).not.toMatch(STAGE.bridge);
@@ -1514,6 +1566,23 @@ describe("a turn that fails at the end", () => {
     expect(server.finishRun).toHaveBeenCalledWith(7, "succeeded");
     expect(notices()).toMatch(/reply/i);
     expect(notices()).toContain("500 not written");
+    expect(blockingDialog).not.toHaveBeenCalled();
+  });
+
+  test("a status this client could not record is not the agent's error either", async () => {
+    // `agentSay` is not the only call in that try. Closing the run is in there
+    // too, and a fix that special-cases the reply alone leaves the same
+    // mis-attribution one step further down: the agent answered, the room has
+    // the answer, and the record would still say the agent errored because
+    // this client could not mark the run finished.
+    const { server } = await openTheClient({
+      server: aServer({ finishRun: vi.fn(async () => { throw new Error("500 status not recorded"); }) }),
+    });
+
+    await ask();
+
+    expect(saidByTheAgent(server)).toContain("here you go");
+    expect(saidByTheAgent(server).some((body) => /agent error/i.test(body))).toBe(false);
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
