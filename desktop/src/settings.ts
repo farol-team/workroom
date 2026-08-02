@@ -16,12 +16,6 @@ export function load(): AgentDef[] {
   }
 }
 
-export function save(defs: AgentDef[]): AgentDef[] {
-  const clean = normalizeAgents(defs);
-  localStorage.setItem(KEY, JSON.stringify(clean));
-  return clean;
-}
-
 /// Which folder a channel works in, when somebody chose one.
 ///
 /// Local, and deliberately so: one person keeps the repository in
