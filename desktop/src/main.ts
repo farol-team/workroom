@@ -460,14 +460,15 @@ async function open(slug: string) {
 }
 
 /// The cable replays nothing, so a socket that was away came back to a room that
-/// moved without it (#180). Asking the channel again is the whole of catching up:
-/// what is already held is left alone, and only what is newer than the newest
-/// message on hand is added — the same path a live message takes.
+/// moved without it (#180). What it missed is `api.caughtUp`'s to work out; all
+/// this adds is that the answer is only for the room still on screen — the room
+/// can be left while the request is in flight, and pouring another channel's
+/// messages into this one is worse than staying behind.
 async function catchUp(slug: string) {
   if (current?.slug !== slug) return;
-  const full = await api.channel(slug);
-  const newest = held.reduce((max, m) => Math.max(max, m.id), 0);
-  full.messages.filter((m) => m.id > newest).forEach(addMessage);
+  const missed = await api.caughtUp(slug, held);
+  if (current?.slug !== slug) return;
+  missed.forEach(addMessage);
 }
 
 // ---------- the turn ----------

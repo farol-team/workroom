@@ -147,6 +147,22 @@ export class Api {
     return this.call<Channel & { messages: Message[] }>(`/channels/${slug}`);
   }
 
+  /// What a room said while nobody was listening (#180). The cable replays
+  /// nothing, so the only way back is to ask the channel again and keep what is
+  /// past the newest message already on hand.
+  ///
+  /// The mark is read here, before the request, and that ordering is the whole
+  /// point of the method existing. Read after, a message arriving on the live
+  /// socket during the round trip becomes the mark, everything the outage ate is
+  /// filtered out as already seen, and the room stays short with nothing to say
+  /// it did. Passing `held` in rather than a number is what makes the ordering
+  /// impossible to get wrong from the outside.
+  async caughtUp(slug: string, held: { id: number }[]): Promise<Message[]> {
+    const newest = held.reduce((max, m) => Math.max(max, m.id), 0);
+    const { messages } = await this.channel(slug);
+    return messages.filter((m) => m.id > newest);
+  }
+
   /// What the room knows, ready to prepend to an agent turn.
   context(slug: string) {
     return this.call<{
