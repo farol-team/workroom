@@ -7,6 +7,12 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
       provider: "openid_connect", uid: "okta|0001",
       info: { email: "dana@farol.run", name: "Dana Ruiz" }
     )
+    # Dana is new here, and new people are admitted by invitation (#227). The
+    # sign-in mechanics these tests pin — tokens, redirects, subjects — are the
+    # same whichever way somebody got in, and must not depend on whether the
+    # database around them happens to be empty (CI seeds it; local runs may not).
+    Invitation.create!(workspace: in_a_workspace, invited_by: user(name: "Inviter"),
+                       email: "dana@farol.run", role: "member")
   end
 
   teardown do
@@ -158,7 +164,9 @@ class SignUpAdmissionTest < ActionDispatch::IntegrationTest
 
   test "an empty workspace takes its first person as its owner" do
     # There is nobody yet to do the inviting, and a workspace nobody can enter
-    # stays empty forever.
+    # stays empty forever. Emptied by hand, because a seeded database (CI) is
+    # not empty and this rule is about the fresh-deploy case.
+    WorkspaceMembership.delete_all
     get "/auth/openid_connect/callback"
 
     assert_response :success
@@ -185,8 +193,9 @@ class SignUpAdmissionTest < ActionDispatch::IntegrationTest
   end
 
   test "a member signs in as before, whoever has joined since" do
-    get "/auth/openid_connect/callback"
-    sasha = User.find_by!(email: "sasha@newco.example")
+    sasha = User.create!(email: "sasha@newco.example", name: "Sasha Ito",
+                         provider: "openid_connect", uid: "google|555")
+    WorkspaceMembership.create!(user: sasha, workspace: in_a_workspace)
     user(name: "Alice")
 
     assert_no_difference -> { WorkspaceMembership.count } do
