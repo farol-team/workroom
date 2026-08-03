@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
 import indexHtml from "../index.html?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, mirrorEntryOf, MIRROR_README, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, mirrorEntryOf, MIRROR_README, introductionAsk, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -390,6 +390,18 @@ describe("the journal as files in the mirror", () => {
 
   test("the README carries the spike's sentence word for word", () => {
     expect(MIRROR_README).toContain("edits here do not survive — write to the channel instead");
+  });
+});
+
+describe("bringing work that predates the channel into the room", () => {
+  test("the introduction is an addressed turn that asks for conclusions, not files", () => {
+    const ask = introductionAsk();
+    // An ordinary turn: parseAddress must route it to an agent, the rail is
+    // named as the way in, and the one failure mode the card warns about —
+    // a directory dump — is forbidden in so many words (#235).
+    expect(parseAddress(ask).addressed).toBe(true);
+    expect(ask).toContain("workroom://memory/remember");
+    expect(ask).toContain("never file listings");
   });
 });
 
