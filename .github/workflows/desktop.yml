@@ -5,12 +5,26 @@ name: desktop
 on:
   push:
     branches: [main]
+    # The release path: a desktop-v* tag is what cuts signed bundles and the
+    # updater manifest. Without this line the `bundle` condition below could
+    # never be true (#172).
+    tags: ['desktop-v*']
   pull_request:
   # Full cross-platform bundles are expensive; build them on demand and on tags.
+  # On demand still means against a tag: the release must not be cut against a
+  # branch name.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing desktop-v* tag to cut the release against"
+        required: true
+        type: string
 
 jobs:
   changes:
+    # A tag has no base to diff against, and the release does not depend on
+    # this filter; ci runs happened when the tagged commit reached main.
+    if: "!startsWith(github.ref, 'refs/tags/')"
     runs-on: ubuntu-latest
     outputs:
       desktop: ${{ steps.filter.outputs.desktop }}
@@ -155,8 +169,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: WorkRoom ${{ github.ref_name }}
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          releaseName: WorkRoom ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           releaseDraft: false
           # The manifest the client checks. Without it the bundles exist and
           # nobody is told they do.
