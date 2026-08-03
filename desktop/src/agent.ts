@@ -299,7 +299,7 @@ export class Agents {
 
   /// The agent's own record, when it keeps one. Null means this agent has no
   /// exporter — not an error.
-  exportSession(name: string, sessionId: string) {
+  private exportSession(name: string, sessionId: string) {
     const command = this.defs.find((d) => d.name === name)?.command;
     return invoke<string | null>("agent_export_session", { sessionId, command });
   }
