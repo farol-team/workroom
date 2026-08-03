@@ -19,6 +19,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
 const agents = new Agents(settings.load());
+// When a session ends its transcript is kept, automatically — a record of what
+// already happened in the room, not a reach into somebody's folder (#124).
+agents.attachTranscript = async (runId, name, body) => { await api.attachArtifact(runId, name, body); };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let channels: Channel[] = [];
@@ -51,8 +54,6 @@ const timeline = createTimeline({
   attach: async (runId, path, body, contentType) => {
     await api.attachBytes(runId, path, body, contentType);
   },
-  exportSession: (name, sessionId) => agents.exportSession(name, sessionId),
-  attachTranscript: async (runId, name, body) => { await api.attachArtifact(runId, name, body); },
   repositoryUrl: () => current?.repository_url ?? null,
   copyText: (text) => navigator.clipboard.writeText(text),
   openUrl: (url) => openUrl(url),
@@ -434,6 +435,8 @@ async function send(text: string) {
                                             api.rail(current.slug), store);
   const run = await api.startRun(current.slug, posted.id, name, sessionId,
                                  agents.modelFor(name, current.slug));
+  // The anchor the session's transcript will be attached to when it ends (#124).
+  agents.noteRun(sessionId, run.id);
   activeRuns += 1;
   panel.renderOptions();
 
@@ -477,7 +480,6 @@ async function send(text: string) {
                         [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
     await api.finishRun(run.id, "succeeded");
-    timeline.offerTranscript(run.id, name, sessionId);
     await timeline.offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});

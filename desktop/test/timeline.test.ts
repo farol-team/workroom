@@ -46,8 +46,6 @@ function deps(over: Partial<TimelineDeps> = {}): TimelineDeps {
     produced: vi.fn(async () => ({ files: [], pre_existing: 0 })),
     readFile: vi.fn(async () => ""),
     attach: vi.fn(async () => {}),
-    exportSession: vi.fn(async () => null),
-    attachTranscript: vi.fn(async () => {}),
     ...over,
   };
 }
