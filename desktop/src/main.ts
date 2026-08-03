@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, introductionAsk, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -912,6 +912,15 @@ $("folder").addEventListener("click", async (e) => {
 
 /// The room's name is the other door into the same settings.
 $("channel-name").addEventListener("click", () => channelSettings.open());
+
+/// The introduction is an ordinary turn (#235): the ask is posted in the open
+/// under this person's name, so the room sees who brought the work in and the
+/// bill lands where every turn's does.
+$("cs-introduce").addEventListener("click", async () => {
+  if (!current) return;
+  $<HTMLDialogElement>("channel-settings").close();
+  await send(introductionAsk()).catch((err) => say(`The introduction was not sent. ${String(err)}`));
+});
 
 $("thread-close").addEventListener("click", () => timeline.closeThread());
 
