@@ -22,11 +22,11 @@ mod workspace;
 
 use std::sync::Arc;
 
-use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState};
+use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState, Deadlines};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
@@ -46,7 +46,14 @@ async fn agent_start(
     let args = args.unwrap_or_default();
 
     let command = resolve(&app, &command);
-    let agent = Agent::launch(app, &name, &command, &args).await?;
+    // The bridge takes what to emit rather than the handle itself, so its tests
+    // can launch a real process without a window. This closure is the window.
+    let agent = Agent::launch(&name, &command, &args, Deadlines::default(), {
+        move |event: &str, payload: Value| {
+            let _ = app.emit(event, payload);
+        }
+    })
+    .await?;
     // Starting again under the same name is a restart. The process it replaces
     // is shut down here, or it lingers unaddressable with the user's session open.
     if let Some(previous) = state.insert(&name, agent).await {
@@ -579,10 +586,23 @@ async fn agent_cancel(
     running(&state, name).await?.cancel(&session_id).await
 }
 
-/// Which of this person's agents are running.
+/// Which of this person's agents are running — asked of the processes, not of
+/// the bookkeeping. An agent whose reader has run out of stdout is a process
+/// that is gone, and it is forgotten here rather than hidden: pressing Start
+/// again is a fresh process, not a second one nobody can address (#174).
 #[tauri::command]
 async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String> {
-    Ok(state.names().await)
+    let mut names = Vec::new();
+    for name in state.names().await {
+        match state.get(&name).await {
+            Some(agent) if agent.alive() => names.push(name),
+            Some(_) => {
+                state.take(&name).await;
+            }
+            None => {}
+        }
+    }
+    Ok(names)
 }
 
 /// The rail is the only way what a room knows reaches an agent. An agent that
@@ -1317,5 +1337,86 @@ mod capabilities {
             granted, expected,
             "a permission changed. Add it to GRANTED with a reason, or take it out of the capability file"
         );
+    }
+}
+
+/// What the agents panel is told, asked the way it asks (#174).
+///
+/// `agent_list` takes a Tauri `State`, so it is driven here on the mock
+/// runtime: a helper that prunes and a command that still asks for every name
+/// the registry holds is green everywhere except in front of a person.
+#[cfg(test)]
+mod the_agents_panel {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    async fn launched(name: &str) -> Arc<Agent> {
+        let script =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
+        Agent::launch(
+            name,
+            "node",
+            &[script.to_string_lossy().into_owned()],
+            // The clocks a person's agent is really given: nothing here waits
+            // on one, and a panel measured against a test's clock is a panel
+            // nobody has seen.
+            acp::Deadlines::default(),
+            // Nothing is listening in a test either; what these agents emit is
+            // asserted where the bridge is, not here.
+            |_event: &str, _payload: Value| {},
+        )
+        .await
+        .expect("node and the scripted agent are required to speak the protocol")
+    }
+
+    #[tokio::test]
+    async fn an_agent_whose_process_died_is_not_offered_as_running() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("the mock runtime stands in for a window");
+        app.manage(AgentState::default());
+        let state = || app.state::<AgentState>();
+
+        let claude = launched("claude").await;
+        let opencode = launched("opencode").await;
+        state().insert("claude", claude.clone()).await;
+        state().insert("opencode", opencode.clone()).await;
+        assert_eq!(
+            agent_list(state()).await.unwrap(),
+            vec!["claude", "opencode"],
+            "both are running, and both are offered"
+        );
+
+        // The process dies from outside — a crash, not this client's own stop —
+        // so the only thing that can tell the panel is the reader noticing.
+        let pid = claude.pid().await.expect("a live agent has a pid");
+        let killed = tokio::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .await
+            .expect("kill must be runnable");
+        assert!(killed.success(), "the process must be there to die");
+
+        // Asked until it settles, because the process dying and this side
+        // noticing are two different moments.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut listed = agent_list(state()).await.unwrap();
+        while listed != vec!["opencode"] && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            listed = agent_list(state()).await.unwrap();
+        }
+
+        assert_eq!(
+            listed,
+            vec!["opencode"],
+            "a process that is gone is not an agent to hand a turn to"
+        );
+        assert!(
+            state().get("claude").await.is_none(),
+            "and it is forgotten rather than hidden — pressing Start is a fresh process, not a \
+             second one nobody can address"
+        );
+
+        opencode.shutdown().await;
     }
 }
