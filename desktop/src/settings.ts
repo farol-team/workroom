@@ -16,6 +16,25 @@ export function load(): AgentDef[] {
   }
 }
 
+/// The list as this person wrote it, before normalizeAgents has its say — what
+/// the editor edits (#231). The baseline three are not in here unless somebody
+/// changed one, which is exactly the difference between their entry and ours.
+export function loadDefined(): AgentDef[] {
+  try {
+    const raw = localStorage.getItem(KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/// Persist the person's list and answer with what the application now runs —
+/// normalized, baseline appended, one default resolved.
+export function saveAgents(defs: AgentDef[]): AgentDef[] {
+  try { localStorage.setItem(KEY, JSON.stringify(defs)); } catch { /* the session keeps the defs it was handed */ }
+  return normalizeAgents(defs);
+}
+
 /// Which folder a channel works in, when somebody chose one.
 ///
 /// Local, and deliberately so: one person keeps the repository in
