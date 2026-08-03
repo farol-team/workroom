@@ -69,11 +69,100 @@ fn resolve(app: &AppHandle, command: &str) -> String {
 fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
     candidates(
         command,
-        directories(
-            app.path().app_data_dir().ok(),
-            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
-        ),
+        directories(app.path().app_data_dir().ok(), user_path().clone()),
     )
+}
+
+/// How long the person's shell has to answer. An rc file that blocks — a
+/// network drive that is not there, a prompt nobody will answer — must not
+/// become an application that does not start.
+const SHELL_ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The directories this application looks in, and runs an install with.
+///
+/// Not the ones this process was handed. An application opened from the Dock or
+/// Finder inherits the system's own short PATH, and no profile is read for it —
+/// while Node arrives on people's machines through nvm and Homebrew, which are
+/// on neither. Under `pnpm tauri dev` the terminal's environment is the app's
+/// environment and none of this shows, which is exactly the shape of bug #120
+/// named: behaving one way where it is written and another where it is used.
+///
+/// Asked once. A machine does not change its shell configuration under a
+/// running window, and asking on every probe would pay a shell start-up for
+/// each row of the panel.
+fn user_path() -> &'static Vec<std::path::PathBuf> {
+    static PATH: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let given: Vec<std::path::PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        match asked_of_the_persons_shell() {
+            Some(said) => merged_path(given, &said),
+            None => given,
+        }
+    })
+}
+
+/// What the person's own shell says their PATH is.
+///
+/// Login **and** interactive: Homebrew writes itself into the file only a login
+/// shell reads and nvm into the one only an interactive shell reads, so asking
+/// for either alone answers on half the machines.
+///
+/// `None` for anything that is not an answer — no shell to ask, a shell that
+/// failed, a shell still thinking. Windows is `None` by design: `cmd /C` is
+/// started with the person's own environment already.
+fn asked_of_the_persons_shell() -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let shell = std::env::var("SHELL").ok()?;
+
+    let (said, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let answer = std::process::Command::new(&shell)
+            .args(["-lic", "printf %s \"$PATH\""])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+        let _ = said.send(answer);
+    });
+
+    // A shell that has not answered by now is one this application stops
+    // waiting for. The child is left to finish on its own and its answer is
+    // dropped — the alternative is a window that never opens.
+    heard.recv_timeout(SHELL_ANSWERS_WITHIN).ok().flatten()
+}
+
+/// What the shell said, folded into what this process already had.
+///
+/// The last line, because an rc file greets people and warns them about flags
+/// before anything is printed on purpose. Absolute directories only, because a
+/// shell that failed prints its error and fish prints its PATH space-separated
+/// — neither is a set of directories, and the pieces would sit in front of
+/// every lookup this application makes.
+fn merged_path(given: Vec<std::path::PathBuf>, said: &str) -> Vec<std::path::PathBuf> {
+    let answer = said
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .unwrap_or_default();
+
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = given.iter().cloned().collect();
+    let mut merged = given;
+    for dir in std::env::split_paths(answer) {
+        if dir.is_absolute() && seen.insert(dir.clone()) {
+            merged.push(dir);
+        }
+    }
+    merged
+}
+
+/// Those directories as a child process is given them. A list that cannot be
+/// joined — a directory with a separator in its name — leaves the child with
+/// what this process has, which is what it had before any of this.
+fn path_env(dirs: &[std::path::PathBuf]) -> std::ffi::OsString {
+    std::env::join_paths(dirs).unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
 }
 
 /// The directories a bare command is looked for in, in the order this
@@ -183,6 +272,12 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
         shell.args(["-c", &command]);
         shell
     };
+
+    // `sh -c` reads no profile, and a packaged application was handed no
+    // useful PATH to begin with — so `npm` is not found on a machine where it
+    // answers in a terminal. The person's own directories are what this runs
+    // with (#240).
+    shell.env("PATH", path_env(user_path()));
 
     let out = shell
         .output()
@@ -635,6 +730,11 @@ async fn agent_export_session(
 
     let out = tokio::process::Command::new(&command)
         .args(["export", &session_id])
+        // Named rather than resolved: this command has no app handle to derive
+        // the prefix from. The person's own directories are the difference
+        // between an exporter that is found and a feature that reads as absent
+        // in a packaged build (#240).
+        .env("PATH", path_env(user_path()))
         .output()
         .await
         .map_err(|e| format!("cannot run `{command} export`: {e}"))?;
@@ -694,6 +794,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(AgentState::default());
             app.manage(Workspaces::default());
+            // Asked now and off the thread that opens the window, so the first
+            // panel does not pay a shell start-up and a shell that never
+            // answers costs nobody a window (#240).
+            std::thread::spawn(|| {
+                let _ = user_path();
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
