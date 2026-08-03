@@ -212,6 +212,13 @@
         </div>
         <p id="cs-error" class="muted"></p>
 
+        <!-- The journal as files inside this folder (#220): one-way,
+             read-only in contract, opt in per channel on this machine —
+             grep, Spotlight and git log over what the room knows, offline. -->
+        <label class="vis">
+          <input type="checkbox" id="cs-mirror" />
+          Mirror the room's journal into <code>.workroom/</code> here
+        </label>
         <!-- Work that predates the channel has a way in (#235): a distillate,
              through an ordinary turn — asked in the open, attributed, at the
              asker's expense. Files stay where they are; spike #45 declined

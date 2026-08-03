@@ -27,6 +27,49 @@ class Api::V1::RecordsControllerTest < ActionDispatch::IntegrationTest
     Artifact.find(response.parsed_body["id"])
   end
 
+  test "the journal lists in order, with each entry's payload read back (#220)" do
+    @channel.messages.create!(author: @alice, body: "hello")
+    upload
+    RecordStore::Append.call(channel: @channel, kind: "memory", subject: nil,
+                             payload: { "action" => "written", "title" => "Cadence" })
+
+    get api_v1_channel_records_listing_path(@channel.slug), headers: auth(@alice)
+
+    assert_response :success
+    rows = response.parsed_body
+    assert_equal rows.map { |r| r["seq"] }, rows.map { |r| r["seq"] }.sort,
+                 "a journal is read in order"
+    memory = rows.find { |r| r["kind"] == "memory" }
+    assert_equal "Cadence", memory.dig("payload", "title"),
+                 "the payload travels in the row — a mirror needs no second request per entry"
+    assert_equal 64, memory["entry_hash"].length
+  end
+
+  test "the listing reads from `after`, the way a mirror keeps its place" do
+    upload
+    RecordStore::Append.call(channel: @channel, kind: "memory", subject: nil,
+                             payload: { "title" => "Later" })
+    all = nil
+    get api_v1_channel_records_listing_path(@channel.slug), headers: auth(@alice)
+    all = response.parsed_body
+
+    get api_v1_channel_records_listing_path(@channel.slug),
+        params: { after: all.first["seq"] }, headers: auth(@alice)
+
+    assert_equal all.drop(1).map { |r| r["seq"] }, response.parsed_body.map { |r| r["seq"] }
+  end
+
+  test "another room's journal is not listable from here" do
+    elsewhere = channel(name: "Private")
+    RecordStore::Append.call(channel: elsewhere, kind: "memory", subject: nil,
+                             payload: { "title" => "Not yours" })
+
+    get api_v1_channel_records_listing_path(@channel.slug), headers: auth(@alice)
+
+    assert_response :success
+    assert_empty response.parsed_body.select { |r| r.dig("payload", "title") == "Not yours" }
+  end
+
   test "what was uploaded to a room is handed back byte for byte" do
     artifact = upload
 

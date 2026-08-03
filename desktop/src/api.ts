@@ -24,7 +24,7 @@ export interface Channel {
   memory?: string;
 }
 
-import type { Cost, RoomTemplate, TurnOutcome } from "./rules";
+import type { Cost, JournalRow, RoomTemplate, TurnOutcome } from "./rules";
 
 /// The whole of what this client uses a WebSocket for. Naming it is what lets a
 /// test hand `live()` a socket of its own without impersonating a browser.
@@ -262,6 +262,26 @@ export class Api {
     return this.call<Array<{ id: number; name: string; kind: string | null;
                              sha256: string | null; created_at: string }>>(
       `/channels/${slug}/artifacts`);
+  }
+
+  /// The room's journal, listed in order with each entry's payload (#220) —
+  /// what the .workroom/ mirror reads. `after` is the mirror keeping its place.
+  records(slug: string, after = 0) {
+    return this.call<JournalRow[]>(`/channels/${slug}/records?after=${after}`);
+  }
+
+  /// One artifact's bytes by digest, base64 for the bridge to write — work
+  /// product is not always text. The digest is not the permission; the row in
+  /// this channel is, which is why the slug is in the path.
+  async recordBytes(slug: string, sha256: string): Promise<string> {
+    const res = await fetch(`${this.base}/api/v1/channels/${slug}/record/${sha256}`, {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let raw = "";
+    for (const b of bytes) raw += String.fromCharCode(b);
+    return btoa(raw);
   }
 
   attachArtifact(runId: number, name: string, content: string, kind = "transcript") {

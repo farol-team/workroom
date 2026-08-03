@@ -57,6 +57,27 @@ export function bind(slug: string, folder: string | null): Bindings {
   return all;
 }
 
+const MIRRORS = "workroom.mirrors";
+
+/// Which channels mirror their journal into their folder (#220). Per machine,
+/// like the binding: the mirror is files on this disk, and a colleague's disk
+/// is their own to spend.
+export function mirrorOn(slug: string): boolean {
+  try {
+    return Boolean(JSON.parse(localStorage.getItem(MIRRORS) ?? "{}")[slug]);
+  } catch {
+    return false;
+  }
+}
+
+export function setMirror(slug: string, on: boolean): void {
+  let all: Record<string, boolean>;
+  try { all = JSON.parse(localStorage.getItem(MIRRORS) ?? "{}"); } catch { all = {}; }
+  if (on) all[slug] = true;
+  else delete all[slug];
+  localStorage.setItem(MIRRORS, JSON.stringify(all));
+}
+
 const PICKED = "workroom.picked";
 
 /// The agent this person addresses by default. Kept across windows because a

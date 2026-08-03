@@ -1938,3 +1938,123 @@ mod review_dialog_tests {
         assert!(!log.status.success(), "no commit was made");
     }
 }
+
+/// One file of the room's mirror, as the client rendered it (#220).
+#[derive(serde::Deserialize)]
+pub struct MirrorFile {
+    pub path: String,
+    pub body: String,
+    #[serde(default)]
+    pub base64: bool,
+}
+
+/// The sentence spike #45 requires, word for word.
+const MIRROR_README: &str =
+    "This is a snapshot of the room; edits here do not survive — write to the channel instead.\n";
+
+/// Write the room's mirror under `<dir>/.workroom/` (#220). One-way and only
+/// inside the mirror, whatever a row says its name is: a path that steps out —
+/// `..`, an absolute component, a prefix — is refused whole, because a mirror
+/// that can write one file outside itself is not a mirror.
+pub fn write_mirror(dir: &Path, files: &[MirrorFile]) -> Result<usize, String> {
+    use base64::Engine as _;
+
+    let root = dir.join(".workroom");
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    fs::write(root.join("README.md"), MIRROR_README).map_err(|e| e.to_string())?;
+
+    let mut written = 0;
+    for file in files {
+        let rel = Path::new(&file.path);
+        if rel
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(format!(
+                "refusing a path that leaves the mirror: {}",
+                file.path
+            ));
+        }
+        let target = root.join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let bytes = if file.base64 {
+            base64::engine::general_purpose::STANDARD
+                .decode(file.body.as_bytes())
+                .map_err(|e| e.to_string())?
+        } else {
+            file.body.clone().into_bytes()
+        };
+        fs::write(&target, bytes).map_err(|e| e.to_string())?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    //! The journal as files inside the channel's folder (#220): written where
+    //! it belongs, refused where it does not, and saying what it is.
+
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-mirror-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn entry(path: &str) -> MirrorFile {
+        MirrorFile {
+            path: path.into(),
+            body: "---\nseq: 1\n---\n\n# Cadence\n".into(),
+            base64: false,
+        }
+    }
+
+    #[test]
+    fn the_mirror_lands_under_workroom_and_says_what_it_is() {
+        let dir = temp("plain");
+
+        let written = write_mirror(&dir, &[entry("journal/00001-memory.md")]).unwrap();
+
+        assert_eq!(written, 1);
+        let readme = fs::read_to_string(dir.join(".workroom/README.md")).unwrap();
+        assert!(
+            readme.contains("edits here do not survive"),
+            "the spike's sentence, or the mirror invites edits it will discard"
+        );
+        assert!(dir.join(".workroom/journal/00001-memory.md").exists());
+    }
+
+    #[test]
+    fn a_path_that_leaves_the_mirror_is_refused_whole() {
+        let dir = temp("escape");
+
+        let err = write_mirror(&dir, &[entry("../outside.md")]).unwrap_err();
+
+        assert!(err.contains("leaves the mirror"), "{err}");
+        assert!(!dir.join("outside.md").exists());
+        assert!(!dir.parent().unwrap().join("outside.md").exists());
+    }
+
+    #[test]
+    fn artifact_bytes_travel_base64_and_land_as_bytes() {
+        use base64::Engine as _;
+        let dir = temp("bytes");
+        let file = MirrorFile {
+            path: "artifacts/chart.png".into(),
+            body: base64::engine::general_purpose::STANDARD.encode([0x89, 0x50, 0x4e, 0x47]),
+            base64: true,
+        };
+
+        write_mirror(&dir, &[file]).unwrap();
+
+        assert_eq!(
+            fs::read(dir.join(".workroom/artifacts/chart.png")).unwrap(),
+            vec![0x89, 0x50, 0x4e, 0x47]
+        );
+    }
+}

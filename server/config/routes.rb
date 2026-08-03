@@ -67,6 +67,8 @@ Rails.application.routes.draw do
     # in the url because a digest is not a permission — it names the same file
     # wherever it was stored.
     get "channels/:channel_slug/record/:sha256", to: "records#show", as: :channel_record
+    # The journal as a listing (#220) — what a .workroom/ mirror reads.
+    get "channels/:channel_slug/records", to: "records#index", as: :channel_records_listing
     post "runs/:id/messages", to: "runs#message", as: :run_messages
   end
     end
