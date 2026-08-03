@@ -9,11 +9,30 @@ export const ADDRESS = /^\s*@agent\b[:,]?\s*/i;
 
 /// A person's agent: a command to run, under a name they choose. Never a
 /// credential — the agent authenticates itself on this machine (Article P2).
+///
+/// Two agents that fill a CRM and answer customers are not two names for one
+/// thing (#232): a definition may also say what its agent is told and which
+/// model it starts on. Both optional — a bare name-and-command stays exactly
+/// what it always was.
 export interface AgentDef {
   name: string;
   command: string;
   args: string[];
   default?: boolean;
+  /// What this agent is for, said at the top of every turn. Through the
+  /// prompt's context, never a vendor flag — every ACP agent takes a prompt,
+  /// and an instruction that only works where a CLI has
+  /// --append-system-prompt is an agent that behaves differently per vendor.
+  instruction?: string;
+  /// The model the agent starts on. Applied once, at a session's birth, so the
+  /// per-channel override the session options offer survives every later turn.
+  model?: string;
+}
+
+/// The persona line a turn opens with, when the definition carries one (#232).
+export function instructionOf(def?: AgentDef): string | null {
+  const text = def?.instruction?.trim();
+  return text ? `You are @${def!.name}. ${text}` : null;
 }
 
 /// What a name may be, and therefore what `@` can reach.
@@ -71,7 +90,12 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
     if (!name || !command || !AGENT_NAME.test(name)) continue;
     if (seen.has(name.toLowerCase())) continue;
     seen.add(name.toLowerCase());
-    clean.push({ name, command, args: d.args ?? [], ...(d.default ? { default: true } : {}) });
+    const instruction = d.instruction?.trim();
+    const model = d.model?.trim();
+    clean.push({ name, command, args: d.args ?? [],
+                 ...(instruction ? { instruction } : {}),
+                 ...(model ? { model } : {}),
+                 ...(d.default ? { default: true } : {}) });
   }
 
   // Appended, never imposed: a person running opencode from a checkout keeps

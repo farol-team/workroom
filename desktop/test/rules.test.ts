@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
 import indexHtml from "../index.html?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -365,6 +365,36 @@ describe("which agent the controls act on", () => {
   test("a choice that outlived its definition is not a choice", () => {
     expect(activeAgent(three, "kimi")).toBe("claude");
     expect(activeAgent([], "claude")).toBeUndefined();
+  });
+});
+
+describe("a definition says how, not only what it is called", () => {
+  test("the persona line opens with the address the room knows", () => {
+    expect(instructionOf({ name: "crm", command: "opencode", args: [],
+                           instruction: "Keep the CRM current." }))
+      .toBe("You are @crm. Keep the CRM current.");
+  });
+
+  test("no instruction is no line — not an empty preamble", () => {
+    expect(instructionOf({ name: "crm", command: "opencode", args: [] })).toBeNull();
+    expect(instructionOf({ name: "crm", command: "opencode", args: [], instruction: "  " }))
+      .toBeNull();
+    expect(instructionOf(undefined)).toBeNull();
+  });
+
+  test("normalizeAgents carries instruction and model, and drops the empty ones", () => {
+    const [ crm ] = normalizeAgents([
+      { name: "crm", command: "opencode", args: [],
+        instruction: " Keep it current. ", model: "anthropic/claude-sonnet-5" },
+    ]);
+    expect(crm.instruction).toBe("Keep it current.");
+    expect(crm.model).toBe("anthropic/claude-sonnet-5");
+
+    const [ bare ] = normalizeAgents([
+      { name: "bare", command: "x", args: [], instruction: "  ", model: "" },
+    ]);
+    expect("instruction" in bare).toBe(false);
+    expect("model" in bare).toBe(false);
   });
 });
 
@@ -1180,6 +1210,7 @@ function aServer(over: Record<string, unknown> = {}) {
     live: vi.fn(() => ({ close: vi.fn() })),
     members: ok([]), workspaceMembers: ok([]), memory: ok([]), skills: ok([]),
     invitations: ok([]), channelTemplates: ok([]), artifacts: ok([]),
+    agentDefinitions: ok([]), shareAgentDefinition: ok(undefined),
     remember: ok({ uri: "mem://meetings/1", title: "t", trust: "human" }),
     post: ok(said),
     context: ok({ context: null, memory_uri: "mem://meetings", boundary: "Stay here.", store: null }),

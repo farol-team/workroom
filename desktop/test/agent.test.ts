@@ -150,3 +150,47 @@ describe("keeping the transcript when a session ends", () => {
     expect(kept).toHaveLength(0);
   });
 });
+
+describe("a definition's model is a session's starting point", () => {
+  const crm = { name: "crm", command: "opencode", args: [] as string[],
+                model: "anthropic/claude-sonnet-5" };
+
+  test("a new session is set onto the definition's model, once", async () => {
+    const agents = new Agents();
+    agents.use([ crm ]);
+    agents.markRunning("crm");
+    answering = (cmd) => (cmd === "agent_new_session" ? { sessionId: "ses_m" } : {});
+
+    await agents.sessionFor("crm", "meetings", "/work/meetings");
+
+    const set = invoked.filter((i) => i.cmd === "agent_set_config");
+    expect(set).toHaveLength(1);
+    expect(set[0].args).toMatchObject({ configId: "model", value: "anthropic/claude-sonnet-5" });
+  });
+
+  test("a resumed session keeps what its person chose — the model is never re-applied", async () => {
+    localStorage.setItem("workroom.sessions", JSON.stringify({ "crm/meetings": "ses_old" }));
+    const agents = new Agents();
+    agents.use([ crm ]);
+    agents.markRunning("crm");
+    answering = (cmd) => (cmd === "agent_load_session" ? {} : {});
+
+    await agents.sessionFor("crm", "meetings", "/work/meetings");
+
+    expect(invoked.map((i) => i.cmd)).toContain("agent_load_session");
+    expect(invoked.map((i) => i.cmd)).not.toContain("agent_set_config");
+  });
+
+  test("an agent whose model option the vendor refuses still opens its session", async () => {
+    const agents = new Agents();
+    agents.use([ crm ]);
+    agents.markRunning("crm");
+    answering = (cmd) => {
+      if (cmd === "agent_new_session") return { sessionId: "ses_m" };
+      if (cmd === "agent_set_config") throw new Error("no such option");
+      return {};
+    };
+
+    await expect(agents.sessionFor("crm", "meetings", "/work/meetings")).resolves.toBe("ses_m");
+  });
+});

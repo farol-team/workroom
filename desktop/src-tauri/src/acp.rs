@@ -1066,6 +1066,18 @@ mod against_a_real_agent {
         .expect("node and the scripted agent are required to speak the protocol")
     }
 
+    /// Node's first start on a cold machine can outlive the tight clocks some
+    /// tests inject, and a handshake lost to a cold page cache is not the
+    /// property under test (#269) — on a loaded CI runner it read as "said
+    /// nothing for 0 seconds" before the scripted agent had said its first
+    /// word. One throwaway launch on the forgiving defaults warms node and the
+    /// script; the measured launch after it starts in milliseconds. Its own
+    /// watcher, so the warm-up's events land in nobody's assertions.
+    pub(super) async fn warmed() {
+        let watcher = Watcher::new();
+        launched(&watcher, "warm").await.shutdown().await;
+    }
+
     pub(super) async fn session_on(agent: &Arc<Agent>, mcp_servers: Value) -> String {
         agent
             .request(
@@ -1194,7 +1206,8 @@ mod against_a_real_agent {
 #[cfg(test)]
 mod when_the_agent_dies {
     use super::against_a_real_agent::{
-        a_turn_that_waits, launched, launched_with, permission_granted, session_on, until, Watcher,
+        a_turn_that_waits, launched, launched_with, permission_granted, session_on, until, warmed,
+        Watcher,
     };
     use super::*;
 
@@ -1356,6 +1369,7 @@ mod when_the_agent_dies {
         // request and stamps no clock, so what keeps the long turn alive is the
         // reader hearing the agent, which is the only thing that ever will in
         // front of a person.
+        warmed().await;
         let watcher = Watcher::new();
         let agent =
             launched_with(&watcher, "claude", clocks(IDLE, Duration::from_secs(3600))).await;
@@ -1425,6 +1439,7 @@ mod when_the_agent_dies {
 
     #[tokio::test]
     async fn a_turn_that_hears_nothing_is_given_up_on_at_its_idle_deadline() {
+        warmed().await;
         let watcher = Watcher::new();
         let agent =
             launched_with(&watcher, "claude", clocks(IDLE, Duration::from_secs(3600))).await;
@@ -1465,6 +1480,7 @@ mod when_the_agent_dies {
         // An agent can be talkative and stuck at the same time, so the idle
         // limit is given all the room in the world here and the wall clock
         // none: whichever fires, it is not the idle one.
+        warmed().await;
         let watcher = Watcher::new();
         let agent =
             launched_with(&watcher, "claude", clocks(Duration::from_secs(3600), IDLE)).await;

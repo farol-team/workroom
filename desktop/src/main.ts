@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, memoryToggleLabel, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -76,6 +76,10 @@ const panel = createAgentsPanel({
   },
   onTrouble: (message) => { say(message); },
   currentChannel: () => current,
+  shareDefinition: async (def) => {
+    await api.shareAgentDefinition({ name: def.name, command: def.command, args: def.args,
+                                     instruction: def.instruction, model: def.model });
+  },
 });
 
 /// The room's setting and this machine's folder choice, in one dialog (#203).
@@ -500,8 +504,10 @@ async function turn(name: string, postedId: number, body: string) {
     // The offer at the end of this turn is measured from here: what was
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
+    // The persona first: what this agent is, before what this room is (#232).
+    const persona = instructionOf(agents.definitions().find((d) => d.name === name));
     outcome = await agents.prompt(name, sessionId, withClosing(body),
-                        [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
+                        [ persona, boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
   } catch (err) {
     // The agent's own failure, recorded as the run's — the one case where
     // "Agent error" in the room is the truth.
@@ -1069,6 +1075,18 @@ async function boot() {
   // that does not answer costs the toolbar, never the room above it.
   try {
     agents.use(settings.load());
+    // The personas the team agreed on, merged under this person's own (#233):
+    // local wins on a name, the way the baseline three are appended, never
+    // imposed — and a workspace that answers nothing changes nothing.
+    api.agentDefinitions()
+      .then((shared) => {
+        agents.use(normalizeAgents([ ...settings.loadDefined(), ...shared.map((d) => ({
+          name: d.name, command: d.command, args: d.args ?? [],
+          instruction: d.instruction ?? undefined, model: d.model ?? undefined,
+        })) ]));
+        panel.render();
+      })
+      .catch(() => {});
     for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
     prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
     panel.render();

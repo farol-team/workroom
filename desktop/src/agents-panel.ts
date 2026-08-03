@@ -25,6 +25,9 @@ export interface AgentsPanelDeps {
   /// The room on screen, when there is one — session options are per channel,
   /// because a cheap model here and an expensive one there is the point.
   currentChannel?: () => Channel | null;
+  /// Hand a definition to the workspace (#233). The server refuses anybody who
+  /// is not an admin, and the refusal arrives through onTrouble like any other.
+  shareDefinition?: (def: AgentDef) => Promise<void>;
 }
 
 export interface AgentsPanel {
@@ -316,6 +319,8 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
     $<HTMLInputElement>("agent-editor-name").value = original?.name ?? "";
     $<HTMLInputElement>("agent-editor-command").value = original?.command ?? "";
     $<HTMLInputElement>("agent-editor-args").value = (original?.args ?? []).join(" ");
+    $<HTMLTextAreaElement>("agent-editor-instruction").value = original?.instruction ?? "";
+    $<HTMLInputElement>("agent-editor-model").value = original?.model ?? "";
     $<HTMLInputElement>("agent-editor-default").checked = Boolean(original?.default);
 
     // Said out loud because it is already true and invisible: the baseline
@@ -334,17 +339,44 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
       dialog.close("removed");
     };
 
-    dialog.addEventListener("close", () => {
-      if (dialog.returnValue !== "save") return;
+    /// The fields as they stand, or null while they do not make a definition.
+    const drafted = (): AgentDef | null => {
       const name = $<HTMLInputElement>("agent-editor-name").value.trim();
       const command = $<HTMLInputElement>("agent-editor-command").value.trim();
-      if (!name || !command) return;
-
-      const def: AgentDef = {
+      if (!name || !command) return null;
+      return {
         name, command,
         args: splitArgs($<HTMLInputElement>("agent-editor-args").value),
+        ...((v => v ? { instruction: v } : {})($<HTMLTextAreaElement>("agent-editor-instruction").value.trim())),
+        ...((v => v ? { model: v } : {})($<HTMLInputElement>("agent-editor-model").value.trim())),
         ...($<HTMLInputElement>("agent-editor-default").checked ? { default: true } : {}),
       };
+    };
+
+    const share = $<HTMLButtonElement>("agent-editor-share");
+    share.hidden = !deps.shareDefinition;
+    share.onclick = async () => {
+      const def = drafted();
+      if (!def || !deps.shareDefinition) return;
+      share.disabled = true;
+      try {
+        // Saved locally too — sharing something other than what you run would
+        // hand colleagues a persona nobody has exercised.
+        apply(settings.saveAgents(upsertDefinition(settings.loadDefined(), def)));
+        await deps.shareDefinition(def);
+        dialog.close("shared");
+      } catch (err) {
+        deps.onTrouble(`The workspace did not take @${def.name}. ${String(err)}`);
+      } finally {
+        share.disabled = false;
+      }
+    };
+
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue !== "save") return;
+      const def = drafted();
+      if (!def) return;
+      const { name } = def;
       // A rename is a removal and an addition — the old name would otherwise
       // stay behind as a second agent nobody meant to keep.
       let defs = settings.loadDefined();
