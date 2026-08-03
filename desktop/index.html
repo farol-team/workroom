@@ -84,6 +84,14 @@
       <aside id="memory" hidden>
         <header><strong>Memory</strong><span id="memory-uri" class="muted"></span></header>
         <div id="memory-list"></div>
+        <!-- A colleague who knows something true about the room can put it
+             there (#162) — the same shape as skills, one panel down. What a
+             person states is marked ● human, the way the list already reads. -->
+        <form id="memory-form">
+          <input id="memory-title" placeholder="Acme reports monthly" />
+          <textarea id="memory-detail" rows="3" placeholder="Decided on the June call; weekly rollups were noise."></textarea>
+          <button class="ghost" type="submit">Add to what the room knows</button>
+        </form>
         <header class="sub"><strong>In this room</strong></header>
         <div id="members"></div>
         <header class="sub"><strong>How work is done here</strong></header>

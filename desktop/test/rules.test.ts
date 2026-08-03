@@ -484,6 +484,15 @@ describe("the turn carries the question", () => {
   });
 });
 
+describe("a person can add to what the room knows", () => {
+  test("the memory form writes through api.remember", () => {
+    // A source-level guard, like the send() one above and for the same reason:
+    // the form needs a window. A lost call site is exactly how this endpoint
+    // spent months as the one route with no caller (#162).
+    expect(mainSource).toMatch(/api\.remember\(\s*current\.slug/);
+  });
+});
+
 describe("what is happening in the room", () => {
   test("a colleague's agent working is one signal, whatever produced it", () => {
     // The pain this product exists for is not knowing what is going on. A
