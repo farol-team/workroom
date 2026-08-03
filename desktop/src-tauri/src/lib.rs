@@ -1434,3 +1434,179 @@ mod the_agents_panel {
         opencode.shutdown().await;
     }
 }
+
+#[cfg(test)]
+mod the_path_logic_is_its_own_module {
+    //! The PATH-resolution subsystem lives in `src/path.rs`, and this file
+    //! keeps only its command surface (#279).
+    //!
+    //! Read off the source, the way `what_the_commands_delegate` already
+    //! reads it: a module boundary is not behaviour a test can call — the
+    //! behaviour is pinned by the suites that travel with the functions —
+    //! and the source is the only place the boundary is written down. Every
+    //! needle is assembled at run time, because this module lives in one of
+    //! the files it scans: written out literally, the names below would read
+    //! as the very definitions the tests say must be gone.
+
+    /// The functions of the subsystem, every one of them.
+    const FUNCTIONS: &[&str] = &[
+        "user_path",
+        "asked_of_the_persons_shell",
+        "merged_path",
+        "path_env",
+        "directories",
+        "candidates",
+        "found",
+        "located",
+    ];
+
+    /// Its one constant: how long the person's shell has to answer.
+    const TIMEOUT_NAME: &str = "SHELL_ANSWERS_WITHIN";
+
+    /// The suites that pin the subsystem's behaviour, and every spec in
+    /// them. A move that loses one loses the reason some branch is shaped
+    /// the way it is.
+    const SUITES: &[&str] = &["resolution", "the_path_a_person_has"];
+    const SPECS: &[&str] = &[
+        "our_own_prefix_is_looked_in_before_the_path_and_is_the_only_one_we_add",
+        "an_agent_in_our_own_prefix_is_found_though_it_is_not_on_path",
+        "the_default_adapter_is_found_the_same_way_as_any_other",
+        "an_agent_the_person_already_has_is_theirs_and_not_ours",
+        "a_command_nobody_has_is_left_as_it_was_typed",
+        "a_command_given_as_a_path_is_that_path_and_nothing_else",
+        "a_failed_install_is_reported_with_the_end_of_what_it_said",
+        "what_an_install_said_is_not_cut_through_a_character",
+        "what_this_process_was_given_keeps_its_place_and_the_shell_only_adds",
+        "a_directory_this_process_already_had_is_not_added_twice",
+        "a_shell_that_said_nothing_leaves_the_path_exactly_as_it_was",
+        "the_answer_is_the_last_line_because_a_profile_prints_its_own",
+        "what_a_shell_says_is_only_believed_when_it_looks_like_a_path",
+        "an_install_runs_with_the_path_the_person_has",
+    ];
+
+    fn source(file: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join(file);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("src/{file} should be part of this crate: {error}"))
+    }
+
+    /// The commentary taken out — a name mentioned in a doc comment is not
+    /// a definition that stayed behind.
+    fn code(file: &str) -> String {
+        source(file)
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn a_fn(name: &str) -> String {
+        format!("fn {name}(")
+    }
+
+    #[test]
+    fn the_subsystem_lives_in_a_module_of_its_own() {
+        let module = code("path.rs");
+
+        for name in FUNCTIONS {
+            assert!(
+                module.contains(&a_fn(name)),
+                "`{name}` has not moved into src/path.rs"
+            );
+        }
+        assert!(
+            module.contains(&format!("const {TIMEOUT_NAME}")),
+            "`{TIMEOUT_NAME}` has not moved into src/path.rs"
+        );
+        assert!(
+            code("lib.rs").contains(&format!("mod {};", "path")),
+            "lib.rs does not declare the module, so nothing in it is compiled"
+        );
+    }
+
+    #[test]
+    fn nothing_of_it_stayed_behind() {
+        let lib = code("lib.rs");
+
+        for name in FUNCTIONS {
+            assert!(
+                !lib.contains(&a_fn(name)),
+                "`{name}` is still defined in lib.rs — a move that copies leaves two of them to \
+                 drift apart"
+            );
+        }
+        assert!(
+            !lib.contains(&format!("const {TIMEOUT_NAME}")),
+            "`{TIMEOUT_NAME}` is still defined in lib.rs"
+        );
+    }
+
+    #[test]
+    fn the_specs_travel_with_the_functions_they_pin() {
+        let module = code("path.rs");
+        let lib = code("lib.rs");
+
+        for suite in SUITES {
+            assert!(
+                module.contains(&format!("mod {suite}")),
+                "`{suite}` did not move with what it pins"
+            );
+            assert!(
+                !lib.contains(&format!("mod {suite}")),
+                "`{suite}` is still in lib.rs"
+            );
+        }
+        for spec in SPECS {
+            assert!(
+                module.contains(&a_fn(spec)),
+                "the move lost `{spec}` — none are rewritten, none deleted"
+            );
+        }
+    }
+
+    #[test]
+    fn the_handle_stays_at_the_door() {
+        // `tauri` here has no `test` feature, so there is no mock app: a
+        // function that takes the handle is one no spec can reach. The two
+        // wrappers keep the handle in this file, and the module they call
+        // into never sees it.
+        let lib = code("lib.rs");
+        assert!(
+            lib.contains(&a_fn("resolve")),
+            "`resolve` should stay in lib.rs as the thin wrapper over the module"
+        );
+        assert!(
+            lib.contains(&a_fn("places")),
+            "`places` should stay in lib.rs as the thin wrapper over the module"
+        );
+
+        let module = code("path.rs");
+        assert!(
+            !module.contains("AppHandle"),
+            "path.rs takes an `AppHandle`, which makes it exactly as unreachable for a spec as \
+             the file it left"
+        );
+        assert!(
+            !module.contains(&format!("{}::", "tauri")),
+            "path.rs consumes std only — anything of tauri's belongs in lib.rs"
+        );
+    }
+
+    #[test]
+    fn the_reasoning_moved_with_the_code() {
+        // Raw source, comments included, because the reasoning IS the
+        // comments: why our own prefix is looked in first (#120) and why the
+        // person's shell is asked for their PATH (#240).
+        let module = source("path.rs");
+        assert!(
+            module.contains("#120"),
+            "the #120 reasoning did not move with the code it explains"
+        );
+        assert!(
+            module.contains("#240"),
+            "the #240 reasoning did not move with the code it explains"
+        );
+    }
+}
