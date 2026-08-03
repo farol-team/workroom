@@ -877,6 +877,101 @@ mod resolution {
     }
 }
 
+/// The PATH a person has, which is not the one this process was handed (#240).
+///
+/// An application opened from the Dock or Finder inherits the system's own
+/// short PATH and no profile is read for it. Node arrives on people's machines
+/// through nvm and Homebrew, neither of which is on that PATH, so the press
+/// that installs an agent answers `npm: not found` on a machine where `npm`
+/// answers perfectly well in a terminal.
+///
+/// The shell is asked once and can only add: what this process was given keeps
+/// its place, because a machine whose shell cannot be asked has to behave as it
+/// does today rather than worse.
+#[cfg(test)]
+mod the_path_a_person_has {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn dirs(raw: &[&str]) -> Vec<PathBuf> {
+        raw.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn what_this_process_was_given_keeps_its_place_and_the_shell_only_adds() {
+        let merged = merged_path(
+            dirs(&["/usr/bin", "/bin"]),
+            "/opt/homebrew/bin:/usr/bin:/bin:/Users/alice/.nvm/versions/node/v22/bin",
+        );
+
+        assert_eq!(
+            merged,
+            dirs(&[
+                "/usr/bin",
+                "/bin",
+                "/opt/homebrew/bin",
+                "/Users/alice/.nvm/versions/node/v22/bin",
+            ])
+        );
+    }
+
+    #[test]
+    fn a_directory_this_process_already_had_is_not_added_twice() {
+        // The lists overlap almost entirely — the system directories are in
+        // both. A PATH that repeats them is longer to walk and reads as though
+        // something went wrong.
+        let merged = merged_path(dirs(&["/usr/bin"]), "/usr/bin:/usr/bin:/opt/homebrew/bin");
+
+        assert_eq!(merged, dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+    }
+
+    #[test]
+    fn a_shell_that_said_nothing_leaves_the_path_exactly_as_it_was() {
+        // A shell that is not there, one that timed out, one that printed a
+        // blank line: three ways of answering nothing, and none of them is a
+        // reason to change where this application looks.
+        let given = dirs(&["/usr/bin", "/bin"]);
+
+        assert_eq!(merged_path(given.clone(), ""), given);
+        assert_eq!(merged_path(given.clone(), "  \n \n"), given);
+    }
+
+    #[test]
+    fn the_answer_is_the_last_line_because_a_profile_prints_its_own() {
+        // Somebody's rc file greets them, or warns about a deprecated flag.
+        // Taking the first line takes the greeting and loses the PATH.
+        let merged = merged_path(
+            dirs(&["/usr/bin"]),
+            "Welcome back, Alice\nnvm: using node v22\n/opt/homebrew/bin:/usr/bin\n",
+        );
+
+        assert_eq!(merged, dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+    }
+
+    #[test]
+    fn what_a_shell_says_is_only_believed_when_it_looks_like_a_path() {
+        // fish keeps PATH as a list and prints it space-separated; a shell that
+        // fails prints its own error. Neither is a set of directories, and
+        // adding the pieces would put nonsense in front of every lookup.
+        let given = dirs(&["/usr/bin"]);
+
+        assert_eq!(
+            merged_path(given.clone(), "command not found: printf"),
+            given
+        );
+    }
+
+    #[test]
+    fn an_install_runs_with_the_path_the_person_has() {
+        // The one that matters. `npm` is found by the shell this application
+        // starts, so the directories have to be in that shell's environment —
+        // the same list the probe walks, in the same order.
+        let joined = path_env(&dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+
+        assert_eq!(joined.to_string_lossy(), "/usr/bin:/opt/homebrew/bin");
+    }
+}
+
 #[cfg(test)]
 mod what_the_commands_delegate {
     //! Where the two workspace commands keep their behaviour, which is not in
