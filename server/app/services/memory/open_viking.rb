@@ -97,6 +97,11 @@ module Memory
         entry.score = hit["score"]
         entry
       end
+    rescue Error
+      # The one reader that raised instead: a search against a store that was
+      # away took the room down while the listing beside it answered (#146).
+      # `available?` keeps the difference between this and nothing found.
+      []
     end
 
     # --- writing -------------------------------------------------------------

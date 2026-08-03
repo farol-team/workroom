@@ -63,6 +63,19 @@ class Api::V1::MemoryControllerTest < ActionDispatch::IntegrationTest
     assert_empty response.parsed_body
   end
 
+  # The other branch of the same door: `?q=` routes to `search`, which was the
+  # one reader that raised where every listing beside it answered (#146).
+  test "a search against a store that cannot be reached is a listing, not a 500" do
+    with_store(Memory::OpenViking.new(base_url: "http://does-not-resolve.invalid",
+                                      api_key: "unused")) do
+      get api_v1_channel_memory_path(@channel.slug), params: { q: "cadence" },
+          headers: auth(@alice)
+    end
+
+    assert_response :success
+    assert_empty response.parsed_body
+  end
+
   test "what a person records is what the room lists" do
     post api_v1_channel_memory_path(@channel.slug),
          params: { title: "Monthly rollups", detail: "First Tuesday." }.to_json,
