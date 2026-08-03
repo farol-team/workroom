@@ -18,7 +18,7 @@ The commands that drive this live in `.claude/commands/` (`/flow-run`, `/flow-ch
 |---|---|
 | `kit-intact` | `.claude/` no longer matches the revision in `.claude/KIT_REVISION` |
 | `branch-has-card` | the branch does not name a card, or the card does not exist |
-| `pr-carries-evidence` | the pull request body has no `## Gates` section |
+| `pr-carries-evidence` | the pull request body has neither a `## Gates` section (the convention here) nor a `## Test plan` section (what the flow's workers write) |
 
 `kit-intact` also runs `bin/kit-verify --selftest` on every build, because a check that cannot go red says nothing.
 
