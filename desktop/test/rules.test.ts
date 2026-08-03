@@ -6,6 +6,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
 import indexHtml from "../index.html?raw";
+import apiSource from "../src/api.ts?raw";
+import acpTurnSource from "../../bin/acp-turn?raw";
 import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, mirrorEntryOf, MIRROR_README, introductionAsk, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
@@ -1963,5 +1965,20 @@ describe("naming a branch on GitHub (#206)", () => {
     expect(githubTreeUrl(null, "main")).toBeNull();
     expect(githubTreeUrl("https://gitlab.example.test/acme/widgets", "main")).toBeNull();
     expect(githubTreeUrl("/home/alice/src/widgets", "main")).toBeNull();
+  });
+});
+
+describe("two clients, one run record", () => {
+  test("acp-turn and the client name the run's fields the same way", () => {
+    // A source-level guard, like the send() one, across the repository seam:
+    // bin/acp-turn and this client both write the run record, and nothing else
+    // ties their vocabularies together — the last two drifts (#228, #97) were
+    // found by archaeology. The client's half lives in api.ts (reportUsage,
+    // finishRun); main.ts only reads back what presence broadcasts.
+    for (const field of [ "context_used", "context_size", "cost", "cost_currency", "stop_reason" ]) {
+      const asKey = new RegExp(`\\b${field}:`);
+      expect(acpTurnSource, `bin/acp-turn stopped naming ${field}`).toMatch(asKey);
+      expect(apiSource, `the client stopped naming ${field}`).toMatch(asKey);
+    }
   });
 });

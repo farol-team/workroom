@@ -859,7 +859,7 @@ export function transcriptOf(sessionId: string, at: string, updates: Update[]): 
 
 /// Occupancy is worth showing once it stops being noise. A run at nine percent
 /// tells nobody anything; a run at eighty is why this exists.
-export const OCCUPANCY_THRESHOLD = 0.6;
+const OCCUPANCY_THRESHOLD = 0.6;
 
 export function occupancyLabel(used: number, size: number): string | null {
   if (!size) return null;
