@@ -16,6 +16,12 @@ export interface Channel {
   /// a meetings channel is not a codebase.
   repository_url?: string | null;
   message_count: number;
+  /// How much the room knows, counted by the store when the room was opened.
+  /// Only `channels#show` carries it, and not when the store was away — an
+  /// absent number is the store being unreachable, not a zero (#161, #146).
+  memory_count?: number;
+  /// Which of the two an absent count means: "ok" or "unavailable".
+  memory?: string;
 }
 
 import type { RoomTemplate } from "./rules";

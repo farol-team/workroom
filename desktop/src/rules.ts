@@ -623,6 +623,14 @@ export function threadSummary(replies: Threaded[]): string | null {
 }
 
 /// A conversation is read a day at a time.
+/// The toggle answers its own question before it is pressed (#161): the count
+/// the server already paid one store call for at the moment the room opened.
+/// A zero is a room that knows nothing and says so; an absent count is the
+/// store being away, and inventing a number for it is the lie #146 closed.
+export function memoryToggleLabel(count?: number): string {
+  return count === undefined ? "What the room knows" : `What the room knows (${count})`;
+}
+
 export function dayLabel(at: string, today = new Date()): string {
   const day = at.slice(0, 10);
   const shift = (n: number) => new Date(today.getTime() + n * 86_400_000).toISOString().slice(0, 10);
