@@ -30,6 +30,12 @@ Rails.application.routes.draw do
     # An invitation is how somebody reaches a room they are not in, so it is
     # redeemed from outside the room it lets them into.
     resources :invitations, only: %i[index create]
+
+    # The workspace's agent personas (#233): descriptions only, never a
+    # credential. Deleted by name, because the name is the identity.
+    resources :agent_definitions, only: %i[index create]
+    delete "agent_definitions/:name", to: "agent_definitions#destroy",
+           constraints: { name: %r{[^/]+} }, as: :agent_definition
     post "invitations/:code/accept", to: "invitations#accept", as: :accept_invitation
 
     get "channel-templates", to: "channels#templates", as: :channel_templates
