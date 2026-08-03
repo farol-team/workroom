@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // and node's globals have no types here — nothing else in this window-shaped
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, transcriptOf, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, transcriptOf, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -511,6 +511,15 @@ describe("the turn carries the question", () => {
   });
 });
 
+describe("a person can add to what the room knows", () => {
+  test("the memory form writes through api.remember", () => {
+    // A source-level guard, like the send() one above and for the same reason:
+    // the form needs a window. A lost call site is exactly how this endpoint
+    // spent months as the one route with no caller (#162).
+    expect(mainSource).toMatch(/api\.remember\(\s*current\.slug/);
+  });
+});
+
 describe("what is happening in the room", () => {
   test("a colleague's agent working is one signal, whatever produced it", () => {
     // The pain this product exists for is not knowing what is going on. A
@@ -574,6 +583,21 @@ describe("a day at a time", () => {
     expect(timeLabel("2026-07-31T09:05:00Z")).toBe("09:05");
     expect(timeLabel("2026-07-31T23:59:59.573+03:00")).toBe("23:59");
     expect(timeLabel("not a timestamp")).toBe("");
+  });
+});
+
+describe("what the room knows, counted", () => {
+  test("the toggle answers its own question before it is pressed", () => {
+    // The server pays one store call per open for this number (#161); a count
+    // that reaches no pixel is that call wasted.
+    expect(memoryToggleLabel(12)).toBe("What the room knows (12)");
+  });
+
+  test("a room that knows nothing says zero, a store that is away says nothing", () => {
+    // An absent count is the store being unreachable (#146); rendering it as 0
+    // would be the room claiming to know nothing — the lie that card closed.
+    expect(memoryToggleLabel(0)).toBe("What the room knows (0)");
+    expect(memoryToggleLabel(undefined)).toBe("What the room knows");
   });
 });
 

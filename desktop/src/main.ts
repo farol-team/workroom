@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -348,6 +348,8 @@ async function open(slug: string) {
   renderChannels();
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
+  // The count the server paid one store call for at this exact moment (#161).
+  $("memory-toggle").textContent = memoryToggleLabel(full.memory_count);
   renderBinding();
   // Before the timeline draws, not after: what it draws counts itself as seen
   // through `onShown`, and setting the count afterwards would throw that away.
@@ -872,6 +874,19 @@ $("signin-provider").addEventListener("click", async () => {
     button.disabled = false;
     button.textContent = "Sign in with your organisation";
   }
+});
+
+$("memory-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $<HTMLInputElement>("memory-title").value.trim();
+  const detail = $<HTMLTextAreaElement>("memory-detail").value.trim();
+  if (!current || !title || !detail) return;
+  try {
+    await api.remember(current.slug, title, detail);
+    $<HTMLInputElement>("memory-title").value = "";
+    $<HTMLTextAreaElement>("memory-detail").value = "";
+    renderMemory();
+  } catch (err) { alert(String(err)); }
 });
 
 $("skill-form").addEventListener("submit", async (e) => {

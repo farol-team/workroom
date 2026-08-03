@@ -16,6 +16,12 @@ export interface Channel {
   /// a meetings channel is not a codebase.
   repository_url?: string | null;
   message_count: number;
+  /// How much the room knows, counted by the store when the room was opened.
+  /// Only `channels#show` carries it, and not when the store was away — an
+  /// absent number is the store being unreachable, not a zero (#161, #146).
+  memory_count?: number;
+  /// Which of the two an absent count means: "ok" or "unavailable".
+  memory?: string;
 }
 
 import type { RoomTemplate } from "./rules";
@@ -189,6 +195,16 @@ export class Api {
   writeSkill(slug: string, title: string, body: string) {
     return this.call(`/channels/${slug}/skills`, {
       method: "POST", body: JSON.stringify({ title, body }),
+    });
+  }
+
+  /// A person deliberately recording something the room should know (#162).
+  /// The server defaults this endpoint's trust to "human" and journals the
+  /// write; an agent never comes this way — it writes through the rail, which
+  /// stamps the run it came from.
+  remember(slug: string, title: string, detail: string) {
+    return this.call<{ uri: string; title: string; trust: string }>(`/channels/${slug}/memory`, {
+      method: "POST", body: JSON.stringify({ title, detail }),
     });
   }
 
