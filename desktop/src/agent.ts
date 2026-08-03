@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
 import { stateOf as stateOfCommand, type AgentState } from "./agents/catalog";
 export type { Update };
 
@@ -22,7 +22,21 @@ export interface InstallResult {
 export class Agents {
   private sessions = new Map<string, string>();        // agent+channel -> ACP session id
   private configs = new Map<string, ConfigOption[]>(); // agent+channel -> its options
+  private dirs = new Map<string, string>();            // agent+channel -> where it works
+  private lastRun = new Map<string, number>();         // ACP session id -> newest run
   private live = new Set<string>();
+
+  /// How a taken transcript leaves this machine — set by the shell, because the
+  /// server client lives there. Unset means transcripts are not kept, which is
+  /// what headless uses of this class get.
+  attachTranscript?: (runId: number, name: string, body: string) => Promise<void>;
+
+  /// The run this session most recently answered. The artifact endpoint is
+  /// run-scoped, and the last run of a session is the truthful anchor for its
+  /// record (#124).
+  noteRun(sessionId: string, runId: number) {
+    this.lastRun.set(sessionId, runId);
+  }
   private remembered: Record<string, string> = (() => {
     try { return JSON.parse(localStorage.getItem("workroom.sessions") ?? "{}"); } catch { return {}; }
   })();
@@ -116,6 +130,10 @@ export class Agents {
     // Closed before the process is killed, or they are not closed at all. A
     // failure here is not a reason to keep an agent somebody asked to stop.
     const closing = name ? this.held(name) : [];
+    // The session's record is final here (#95), so it is taken first — and a
+    // transcript that could not be taken is a console line, never a reason to
+    // keep an agent running that somebody asked to stop (#124).
+    await Promise.allSettled(closing.map(([ key, id ]) => this.keepTranscript(name!, key, id)));
     await Promise.allSettled(closing.map(([ , id ]) => this.closeSession(name!, id)));
 
     await invoke("agent_stop", { name });
@@ -125,6 +143,8 @@ export class Agents {
       this.live.clear();
       this.sessions.clear();
       this.configs.clear();
+      this.dirs.clear();
+      this.lastRun.clear();
     }
   }
 
@@ -137,12 +157,69 @@ export class Agents {
       const id = this.sessions.get(key);
       if (!id) continue;
 
+      // The other moment a session's record is final (#95, #124).
+      await this.keepTranscript(name, key, id);
       await this.closeSession(name, id).catch(() => {});
       this.sessions.delete(key);
       this.configs.delete(key);
+      this.dirs.delete(key);
+      this.lastRun.delete(id);
       forget(this.remembered, name, slug);
     }
     this.persist();
+  }
+
+  /// The session's transcript, attached to its newest run. Two ways to obtain
+  /// one behind one function: the vendor's own `export` where the command
+  /// publishes it, and otherwise a replay through `session/load`, collected
+  /// rather than shown (#124). Never throws — the record is worth taking and
+  /// not worth blocking a stop over.
+  private async keepTranscript(name: string, key: string, sessionId: string): Promise<void> {
+    try {
+      const runId = this.lastRun.get(sessionId);
+      const attach = this.attachTranscript;
+      if (!runId || !attach) return;
+      const body = await this.record(name, key, sessionId);
+      if (!body) return;
+      await attach(runId, transcriptName(sessionId, new Date()), body);
+    } catch (err) {
+      console.error(`transcript for ${sessionId} was not kept: ${String(err)}`);
+    }
+  }
+
+  private async record(name: string, key: string, sessionId: string): Promise<string | null> {
+    const exported = await this.exportSession(name, sessionId).catch(() => null);
+    if (exported) return exported;
+
+    // The protocol's own door: `session/load` replays the history as ordinary
+    // updates. The collector owns the session id while the replay runs (#91),
+    // which is what keeps a record of the room out of the room.
+    const cwd = this.dirs.get(key);
+    if (!cwd) return null;
+    const collector = await this.collect(sessionId);
+    try {
+      await invoke("agent_load_session", { name, sessionId, cwd, mcpServers: [] });
+      const heard = collector.stop();
+      return heard.length ? transcriptOf(sessionId, new Date().toISOString(), heard) : null;
+    } catch {
+      collector.stop();
+      return null;
+    }
+  }
+
+  /// Everything a session says, kept in arrival order instead of shown. It
+  /// registers in the same dispatcher a live turn uses, so a session being
+  /// collected is not a session anybody is prompting.
+  async collect(sessionId: string): Promise<{ stop(): Update[] }> {
+    await this.dispatch();
+    const heard: Update[] = [];
+    this.updating.set(sessionId, (u) => { heard.push(u); });
+    return {
+      stop: () => {
+        this.updating.delete(sessionId);
+        return heard;
+      },
+    };
   }
 
   /// One session per agent per channel — the memory scope and the session scope
@@ -168,6 +245,7 @@ export class Agents {
           "agent_load_session", { name, sessionId: known, cwd, mcpServers });
         this.sessions.set(key, known);
         this.configs.set(key, res?.configOptions ?? []);
+        this.dirs.set(key, cwd);
         return known;
       } catch {
         forget(this.remembered, name, slug);
@@ -179,6 +257,7 @@ export class Agents {
       "agent_new_session", { name, cwd, mcpServers });
     this.sessions.set(key, res.sessionId);
     this.configs.set(key, res.configOptions ?? []);
+    this.dirs.set(key, cwd);
     remember(this.remembered, name, slug, res.sessionId);
     this.persist();
     return res.sessionId;
@@ -317,7 +396,12 @@ export class Agents {
   /// resumption that cannot happen.
   private dropped(name: string) {
     this.live.delete(name);
-    for (const key of keysOf(name, this.sessions.keys())) this.sessions.delete(key);
+    for (const key of keysOf(name, this.sessions.keys())) {
+      const id = this.sessions.get(key);
+      if (id) this.lastRun.delete(id);
+      this.sessions.delete(key);
+    }
     for (const key of keysOf(name, this.configs.keys())) this.configs.delete(key);
+    for (const key of keysOf(name, this.dirs.keys())) this.dirs.delete(key);
   }
 }

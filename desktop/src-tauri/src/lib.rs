@@ -746,7 +746,12 @@ async fn agent_export_session(
     command: Option<String>,
     session_id: String,
 ) -> Result<Option<String>, String> {
-    let command = command.unwrap_or_else(|| "opencode".into());
+    // A missing command is an error, not a guess at somebody else's CLI: the
+    // default here used to be "opencode", which made the bundled adapter's
+    // sessions read as "keeps no transcript" (#124).
+    let Some(command) = command else {
+        return Err("no command to export with — the agent's definition names one".into());
+    };
 
     let out = tokio::process::Command::new(&command)
         .args(["export", &session_id])

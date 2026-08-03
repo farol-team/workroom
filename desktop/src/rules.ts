@@ -757,11 +757,26 @@ export function translateAcp(msg: unknown): Update | null {
   return t ? { kind: "other", label: t } : null;
 }
 
-/// What an attached transcript is called. Named after the run rather than the
-/// session, because the run is what a colleague was watching.
-export function transcriptName(runId: number, at: Date): string {
+/// What an attached transcript is called. Named after the session, because the
+/// record is the session's: one document when it ends, not one growing copy
+/// per turn (#124).
+export function transcriptName(sessionId: string, at: Date): string {
   const stamp = at.toISOString().slice(0, 16).replace("T", " ").replace(":", "");
-  return `run-${runId} transcript ${stamp}.json`;
+  return `session ${sessionId} transcript ${stamp}.json`;
+}
+
+/// The session's record as this client rendered it — said in the document
+/// itself, because it is assembled from the updates the dispatcher received,
+/// not read from the agent's own storage. The entries speak the vocabulary the
+/// room already shows (`text`, `thought`, `tool`, `plan`, `usage`); `config`
+/// is a session option changing, which is nobody's transcript.
+export function transcriptOf(sessionId: string, at: string, updates: Update[]): string {
+  return JSON.stringify({
+    session: sessionId,
+    at,
+    rendered_by: "workroom-desktop",
+    entries: updates.filter((u) => u.kind !== "config"),
+  }, null, 2);
 }
 
 /// Occupancy is worth showing once it stops being noise. A run at nine percent

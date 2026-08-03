@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // and node's globals have no types here — nothing else in this window-shaped
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, transcriptOf, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -232,15 +232,42 @@ describe("acp translation", () => {
 });
 
 describe("transcript naming", () => {
-  test("names the artifact after the run a colleague was watching", () => {
-    const name = transcriptName(42, new Date("2026-07-31T09:05:00Z"));
-    expect(name).toMatch(/^run-42 transcript /);
+  test("names the artifact after the session whose record it is", () => {
+    const name = transcriptName("ses_42", new Date("2026-07-31T09:05:00Z"));
+    expect(name).toMatch(/^session ses_42 transcript /);
     expect(name.endsWith(".json")).toBe(true);
   });
 
-  test("two runs never collide", () => {
+  test("stable for one session and instant, and two sessions never collide", () => {
     const at = new Date("2026-07-31T09:05:00Z");
-    expect(transcriptName(1, at)).not.toEqual(transcriptName(2, at));
+    expect(transcriptName("ses_1", at)).toEqual(transcriptName("ses_1", at));
+    expect(transcriptName("ses_1", at)).not.toEqual(transcriptName("ses_2", at));
+  });
+});
+
+describe("the transcript this client renders", () => {
+  test("carries the entries in arrival order, in the room's own vocabulary", () => {
+    const body = JSON.parse(transcriptOf("ses_9", "2026-08-03T12:00:00Z", [
+      { kind: "tool", label: "read a file" },
+      { kind: "text", text: "done" },
+    ]));
+
+    expect(body.session).toBe("ses_9");
+    expect(body.at).toBe("2026-08-03T12:00:00Z");
+    expect(body.rendered_by).toBe("workroom-desktop");
+    expect(body.entries).toEqual([
+      { kind: "tool", label: "read a file" },
+      { kind: "text", text: "done" },
+    ]);
+  });
+
+  test("a session option changing is nobody's transcript", () => {
+    const body = JSON.parse(transcriptOf("ses_9", "2026-08-03T12:00:00Z", [
+      { kind: "config", options: [] },
+      { kind: "text", text: "hello" },
+    ]));
+
+    expect(body.entries).toEqual([ { kind: "text", text: "hello" } ]);
   });
 });
 
