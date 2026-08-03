@@ -1082,6 +1082,8 @@ function aBridge(over: Record<string, unknown> = {}) {
     onClosed: vi.fn(async () => {}),
     start: vi.fn(async () => {}), stop: vi.fn(async () => {}),
     workspace: vi.fn(async () => "/tmp/work"),
+    turnStart: vi.fn(async () => {}),
+    read: vi.fn(async () => ""),
     sessionFor: vi.fn(async () => "s1"),
     setConfig: vi.fn(async () => []),
     onAsk: vi.fn(async () => () => {}),
@@ -1526,13 +1528,20 @@ describe("what the room says when something goes wrong", () => {
     expect(bridge.install).toHaveBeenCalledTimes(2);
   });
 
-  test("a code the server would not take is a notice, and the code survives it", async () => {
+  test("a code the server would not take is cleared on the press, and put back", async () => {
     // A code arrives out of band — from a message, a call, a piece of paper —
     // and is typed once. Losing it to a failed redemption costs the person the
     // invitation rather than the attempt, so what survives is the way back in:
-    // the code is still in the field, and sending it again is one press.
+    // the code returns to the field, and sending it again is one press.
+    //
+    // The sequence, not the end state, is what is pinned — through a join the
+    // server has not answered yet. The field empties on the press (the same
+    // optimistic clear every send here makes) and refills only because the
+    // refusal put the code back: an implementation that never clears fails the
+    // first half, and one that clears without restoring fails the second.
+    const inFlight = heldOpen();
     const { server } = await openTheClient({ server: aServer({
-      acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
+      acceptInvitation: vi.fn(() => inFlight.promise),
     }) });
     el("workspace-join").click();
     await settle();
@@ -1542,8 +1551,13 @@ describe("what the room says when something goes wrong", () => {
     await settle();
 
     expect(server.acceptInvitation).toHaveBeenCalledWith("abc-123");
-    expect(notices()).toContain("that code is spent");
+    expect(el<HTMLInputElement>("join-code").value).toBe("");
+
+    inFlight.refuse(new Error("410 that code is spent"));
+    await settle();
+
     expect(el<HTMLInputElement>("join-code").value).toBe("abc-123");
+    expect(notices()).toContain("that code is spent");
     expect(blockingDialog).not.toHaveBeenCalled();
   });
 });
