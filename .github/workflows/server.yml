@@ -22,6 +22,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
     steps:
       - uses: actions/checkout@v4
+      - run: exit 1 # scratch: prove the aggregates go red when changes fails
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         with:
