@@ -1,3 +1,11 @@
+# Memory::Local's storage — one backend's table, not the system's memory.
+# Everything reads it through Memory::Store.current (Article S1), and when a
+# workspace runs an OpenViking context database instead, these rows are inert:
+# a number read straight off the table there is not stale, it is structurally
+# zero and stays zero, which is what the ambiguity cost once (#99). The table
+# stays in Workspace::Boundary::ROOMS all the same — row-level security is
+# per-table, not per-backend, and the boundary must hold whichever store
+# answers.
 class MemoryEntry < ApplicationRecord
   include BelongsToWorkspace
   workspace_through :channel
