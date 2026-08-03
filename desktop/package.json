@@ -13,7 +13,6 @@
     "bench:turn": "node bench/turn.mjs"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.64.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
@@ -21,6 +20,7 @@
     "@tauri-apps/plugin-updater": "^2"
   },
   "devDependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.64.0",
     "@tauri-apps/cli": "^2",
     "happy-dom": "^20.0.0",
     "typescript": "~7.0.2",

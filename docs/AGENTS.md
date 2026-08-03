@@ -28,18 +28,29 @@ different design.
 
 ## Which agents
 
-The Claude adapter **ships with the application** — pinned, integrity-checked by
-the lockfile, and resolved from the bundle rather than fetched when somebody
-opens a channel (#120). A person who has configured nothing has an agent that is
-certainly there.
+**The application carries no agent.** It carries a list of the ones this project
+supports and where each is published, and installs one on a press, into a prefix
+it owns (#120). Nothing is fetched when somebody opens a channel — an install is
+a thing a person does, once, with the command on screen before it runs.
 
-Any other agent that speaks ACP works by naming its command in the definitions
-file, which is what that file is for. Two are known to work:
+| Agent | Package | Command | Notes |
+|---|---|---|---|
+| **Claude** | `@agentclientprotocol/claude-agent-acp` | `claude-agent-acp` | First-party. What `@agent` means when nobody has said otherwise. |
+| **Codex** | `@agentclientprotocol/codex-acp` | `codex-acp` | First-party. Not `@zed-industries/codex-acp`, which is the older adapter. |
+| **opencode** | `opencode-ai` | `opencode acp` | First-party ACP server, MIT, released continuously. Ships free models. |
 
-| Agent | How | Notes |
-|---|---|---|
-| **opencode** | `opencode acp` | First-party ACP server, MIT, released continuously. The default. |
-| **Claude Code** | `@zed-industries/claude-code-acp` | Community-maintained adapter |
+Pinned in `desktop/src/agents/catalog.ts` and asserted by value in
+`desktop/test/catalog.test.ts`. Any other agent that speaks ACP works by naming
+its command in the definitions file, which is what that file is for.
+
+**The panel reports what the machine has, never what the catalog hoped for.**
+Each row's state comes from one question — is this command in our prefix, or on
+your PATH — asked of every agent alike, the default included. An agent that is
+not there reads `missing` and is offered an install; there is no agent this
+client can call ready without having found it.
+
+Somebody who already has one of these keeps their own: their command wins, and
+they are not offered an install for something they installed themselves.
 
 The handshake reports `mcpCapabilities`, which is how the capability rail reaches the agent —
 the client passes the rail's MCP configuration when it opens a session. It also reports

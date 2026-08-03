@@ -22,17 +22,20 @@ yourself, set `DATABASE_URL` and `bin/prototype` will use it instead of Docker.
 The client starts an agent for you, and it runs on your machine under **your**
 credentials — that is the point of the design, not a limitation of the prototype.
 
-```bash
-npm i -g opencode-ai
-```
+The agents panel lists the ones this project supports and says which of them
+this machine actually has. Press **Install** beside one you do not, and it is
+fetched into a prefix WorkRoom owns — your own node installation is not touched,
+and nothing is downloaded until you press it. Nothing rides along in the
+application, so a fresh install starts with three agents listed and none of them
+present. See [AGENTS.md](AGENTS.md#which-agents) for the list.
 
 **You do not need a credential to try this.** opencode ships free models, and one
 of them is the default below. `opencode auth login` is for using your own
 subscription, which is what the design is actually for — but nothing here is
 gated behind it.
 
-Then press **Start agent**. Any agent that speaks ACP works; pass a different
-command to `agent_start`.
+Then press **Start agent**. Any agent that speaks ACP works; naming its command
+in the definitions file is all it takes.
 
 ## Looking at it, without opening it
 

@@ -28,8 +28,9 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const PREFIX = "/Users/alice/Library/Application Support/workroom/npm";
 const INSTALL = `npm install -g --prefix "${PREFIX}" @agentclientprotocol/codex-acp`;
 
-/// Two agents this person has written down: the one that ships, and one that
-/// would have to be fetched.
+/// Two agents this person has written down. Nothing rides along in the
+/// application (#120), so which of them is ready is a fact about the machine
+/// and nothing else — `bridge` below is where that fact is stated.
 const DEFS: AgentDef[] = [
   { name: "claude", command: "claude-agent-acp", args: [] },
   { name: "codex", command: "codex-acp", args: [] },
@@ -45,11 +46,15 @@ type Call = { command: string; args: Record<string, unknown> };
 type Answer = (args: Record<string, unknown>) => unknown;
 
 /// The Rust side, answering as the machine would. `where` is what the probe
-/// finds, which is the whole of what "ready" means for an agent that does not
-/// ship here.
+/// finds, which is the whole of what "ready" means — no agent is ready by
+/// being carried, so a test that wants one ready says where it is.
+///
+/// Claude is seeded because most of these tests are about what the panel does
+/// with an agent that is there, not about how it got there; the ones that care
+/// clear it.
 function bridge(over: Record<string, Answer> = {}) {
   const calls: Call[] = [];
-  const where = new Map<string, string>();
+  const where = new Map<string, string>([ [ "claude-agent-acp", "/usr/local/bin/claude-agent-acp" ] ]);
   const answers: Record<string, Answer> = {
     agent_probe: ({ commands }) =>
       (commands as string[]).map((c) => where.get(c) ?? null),
@@ -113,9 +118,10 @@ beforeEach(() => {
 });
 
 describe("the first-run setup", () => {
-  test("the first step is what the machine has, with each card's one action", () => {
+  test("the first step is what the machine has, with each card's one action", async () => {
     bridge();
     const { agents, panel } = panelWith();
+    await panel.refresh();
     showOnboarding(hooks(agents, panel));
 
     expect($("onboarding").hidden).toBe(false);
@@ -130,6 +136,7 @@ describe("the first-run setup", () => {
   test("a card's action is the panel's action", async () => {
     const rust = bridge();
     const { agents, panel } = panelWith();
+    await panel.refresh();
     showOnboarding(hooks(agents, panel));
 
     const [ claude, codex ] = cards();
@@ -140,10 +147,11 @@ describe("the first-run setup", () => {
       expect(rust.of("agent_install")[0].args).toEqual({ command: INSTALL }));
   });
 
-  test("the second step is the default, and finishing hands the choice over", () => {
+  test("the second step is the default, and finishing hands the choice over", async () => {
     bridge();
     const { agents, panel } = panelWith();
     const h = hooks(agents, panel);
+    await panel.refresh();
     showOnboarding(h);
 
     $("ob-next").click();   // Continue
@@ -184,7 +192,7 @@ describe("the agents panel, acting", () => {
   test("starting one starts the command this person wrote down", async () => {
     const rust = bridge();
     const { agents, panel, openSession } = panelWith();
-    panel.render();
+    await panel.refresh();
 
     await panel.start("claude");
 
@@ -216,7 +224,7 @@ describe("the agents panel, acting", () => {
   test("toggling stops what is running and starts what is not", async () => {
     const rust = bridge();
     const { agents, panel } = panelWith();
-    panel.render();
+    await panel.refresh();
 
     await panel.toggle("claude");
     expect(rust.of("agent_start")).toHaveLength(1);
@@ -232,7 +240,7 @@ describe("the agents panel, acting", () => {
   test("an agent that will not start says why, and is not called running", async () => {
     bridge({ agent_start: () => { throw new Error("spawn ENOENT"); } });
     const { agents, panel, onTrouble } = panelWith();
-    panel.render();
+    await panel.refresh();
 
     await panel.toggle("claude");
 
@@ -245,7 +253,7 @@ describe("the agents panel, acting", () => {
   test("installing runs exactly the command that was shown, then asks again", async () => {
     const rust = bridge();
     const { panel } = panelWith();
-    panel.render();
+    await panel.refresh();
     expect(document.querySelector("#agents code")?.textContent).toBe(INSTALL);
 
     // What it did is the machine's to say, not the exit code's — so the panel
@@ -285,20 +293,25 @@ describe("the agents panel, acting", () => {
     bridge({ agent_stop: () => { throw new Error("no such process"); } });
     const { panel, onTrouble } = panelWith();
     await panel.start("claude");
-    panel.render();
+    await panel.refresh();
 
     actionIn(rows()[0]).click();   // Stop
 
     await vi.waitFor(() => expect(onTrouble.mock.calls[0][0]).toContain("no such process"));
   });
 
-  test("the one that ships is never offered an install", () => {
-    bridge();
+  // Nothing is ready by being carried, so this is the only thing that keeps an
+  // install off a row: the machine already has that command. An agent nobody
+  // installed through us — somebody's own build, on their PATH — is offered a
+  // fetch it does not need if this stops holding.
+  test("an agent the machine already has is never offered an install", async () => {
+    const rust = bridge();
+    rust.where.set("codex-acp", "/opt/homebrew/bin/codex-acp");
     const { panel } = panelWith();
-    panel.render();
+    await panel.refresh();
 
-    expect(document.querySelectorAll("#agents code")).toHaveLength(1);
-    expect(actionIn(rows()[0]).textContent).toBe("Start");
+    expect(document.querySelectorAll("#agents code")).toHaveLength(0);
+    expect(rows().map((el) => actionIn(el).textContent)).toEqual([ "Start", "Start" ]);
   });
 });
 
@@ -323,10 +336,10 @@ describe("the setup and the agents panel, one answer", () => {
     cards().forEach((el, i) => expect(el).toBe(drawn[i]));
   });
 
-  test("the panel and the setup say the same thing about the same agent", () => {
+  test("the panel and the setup say the same thing about the same agent", async () => {
     bridge();
     const { agents, panel } = panelWith();
-    panel.render();
+    await panel.refresh();
     showOnboarding(hooks(agents, panel));
 
     expect(rows().map(saysIn)).toEqual([ "ready", "missing" ]);
@@ -340,6 +353,7 @@ describe("the setup and the agents panel, one answer", () => {
   test("an agent that is running is running in both", async () => {
     bridge();
     const { agents, panel } = panelWith();
+    await panel.refresh();
     await panel.start("claude");
     showOnboarding(hooks(agents, panel));
 

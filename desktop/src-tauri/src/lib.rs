@@ -31,8 +31,8 @@ use tauri_plugin_opener::OpenerExt;
 use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
-/// Defaults to the adapter that ships with this application; any other ACP
-/// agent works by passing a different command.
+/// Defaults to the adapter `@agent` means when nobody has said otherwise; any
+/// other ACP agent works by passing a different command.
 #[tauri::command]
 async fn agent_start(
     app: AppHandle,
@@ -57,10 +57,10 @@ async fn agent_start(
 
 /// Where an agent named by a bare command actually is.
 ///
-/// The adapter ships with the application, so `npx` never runs: a package
-/// resolved from the registry at the moment somebody opens a channel is one
-/// that can change between two turns, and the name this project used to name
-/// was deprecated besides (#120).
+/// Nothing is ever fetched here: an agent arrives by `agent_install`, on a
+/// press, before any of this runs. A package resolved from the registry at the
+/// moment somebody opens a channel is one that can change between two turns —
+/// which is why `npx` appears nowhere in this application (#120).
 fn resolve(app: &AppHandle, command: &str) -> String {
     located(command, &places(app, command))
 }
@@ -70,12 +70,6 @@ fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
     candidates(
         command,
         directories(
-            app.path()
-                .resolve("agents/bin", tauri::path::BaseDirectory::Resource)
-                .ok(),
-            std::env::current_dir()
-                .ok()
-                .map(|dir| dir.join("../node_modules/.bin")),
             app.path().app_data_dir().ok(),
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
         ),
@@ -83,23 +77,22 @@ fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
 }
 
 /// The directories a bare command is looked for in, in the order this
-/// application trusts them: the bundle, then beside the source under
-/// `pnpm tauri dev`, then the prefix `agent_install` fetches into — which is
+/// application trusts them: the prefix `agent_install` fetches into — which is
 /// `npm/bin` under the app data directory, because that is where
-/// `npm install --prefix` leaves what it installed — and last whatever is on
+/// `npm install --prefix` leaves what it installed — and then whatever is on
 /// the person's own PATH. Somebody naming an agent they already have means
 /// that one, and this must not take it away from them.
+///
+/// Two, and the same two under `pnpm tauri dev` as in a shipped build. A
+/// directory that exists only on one of those is a client that behaves one way
+/// where it is written and another way where it is used.
 fn directories(
-    bundle: Option<std::path::PathBuf>,
-    beside: Option<std::path::PathBuf>,
     app_data: Option<std::path::PathBuf>,
     on_path: Vec<std::path::PathBuf>,
 ) -> Vec<std::path::PathBuf> {
-    let ours = app_data.map(|dir| dir.join("npm").join("bin"));
-
-    [bundle, beside, ours]
+    app_data
+        .map(|dir| dir.join("npm").join("bin"))
         .into_iter()
-        .flatten()
         .chain(on_path)
         .collect()
 }
@@ -765,36 +758,21 @@ mod resolution {
         data.join("npm").join("bin")
     }
 
-    /// A machine, as this side is given one: what the bundle holds, what sits
-    /// beside the source, the app data directory, and the person's own PATH.
-    /// Everything below goes through the same chain the running application
-    /// builds — a test that hands `found` a list it ordered itself asserts only
-    /// that the list it wrote is in the order it wrote it.
-    fn chain(
-        command: &str,
-        bundle: Option<&Path>,
-        data: Option<&Path>,
-        on_path: Vec<PathBuf>,
-    ) -> Vec<PathBuf> {
-        candidates(
-            command,
-            directories(
-                bundle.map(Path::to_path_buf),
-                None,
-                data.map(Path::to_path_buf),
-                on_path,
-            ),
-        )
+    /// A machine, as this side is given one: the app data directory and the
+    /// person's own PATH. Everything below goes through the same chain the
+    /// running application builds — a test that hands `found` a list it ordered
+    /// itself asserts only that the list it wrote is in the order it wrote it.
+    fn chain(command: &str, data: Option<&Path>, on_path: Vec<PathBuf>) -> Vec<PathBuf> {
+        candidates(command, directories(data.map(Path::to_path_buf), on_path))
     }
 
     #[test]
-    fn our_own_prefix_is_looked_in_after_the_bundle_and_before_the_path() {
-        // The one directory this card adds, pinned by where it is and where it
-        // sits. `npm install --prefix P` puts its binaries in `P/bin`, so
-        // anything else here is a directory nothing will ever be found in.
+    fn our_own_prefix_is_looked_in_before_the_path_and_is_the_only_one_we_add() {
+        // Pinned by where it is and where it sits. `npm install --prefix P` puts
+        // its binaries in `P/bin`, so anything else here is a directory nothing
+        // will ever be found in — and there is no third place, because this
+        // application no longer carries an agent of its own (#120).
         let dirs = directories(
-            Some(PathBuf::from("/bundle/agents/bin")),
-            None,
             Some(PathBuf::from("/data")),
             vec![PathBuf::from("/usr/local/bin")],
         );
@@ -802,31 +780,9 @@ mod resolution {
         assert_eq!(
             dirs,
             vec![
-                PathBuf::from("/bundle/agents/bin"),
                 PathBuf::from("/data/npm/bin"),
                 PathBuf::from("/usr/local/bin"),
             ]
-        );
-    }
-
-    #[test]
-    fn the_adapter_in_the_bundle_wins_over_one_somebody_installed() {
-        // It ships with this application and is the version this client was
-        // tested against. An install into our own prefix is a fallback, not a
-        // replacement for what came in the bundle.
-        let bundle = temp("bundle");
-        let data = temp("data");
-        let shipped = binary(&bundle, "claude-agent-acp");
-        binary(&installed_in(&data), "claude-agent-acp");
-
-        assert_eq!(
-            found(&chain(
-                "claude-agent-acp",
-                Some(&bundle),
-                Some(&data),
-                vec![]
-            )),
-            Some(shipped.to_string_lossy().into_owned())
         );
     }
 
@@ -835,18 +791,29 @@ mod resolution {
         // What `agent_install` fetches goes into a directory this application
         // owns and nothing else on the machine knows about. Not looking there
         // means an agent somebody just installed still reads as missing.
-        let bundle = temp("empty-bundle");
         let data = temp("own-data");
         let elsewhere = temp("their-path");
         let installed = binary(&installed_in(&data), "opencode");
 
         assert_eq!(
-            found(&chain(
-                "opencode",
-                Some(&bundle),
-                Some(&data),
-                vec![elsewhere]
-            )),
+            found(&chain("opencode", Some(&data), vec![elsewhere])),
+            Some(installed.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn the_default_adapter_is_found_the_same_way_as_any_other() {
+        // Nothing about `claude-agent-acp` is special to this side: it is not
+        // carried, not looked for anywhere the others are not, and reads as
+        // missing until somebody installs it.
+        let data = temp("default-adapter");
+        let empty = temp("nothing-here");
+
+        assert_eq!(found(&chain("claude-agent-acp", Some(&data), vec![])), None);
+
+        let installed = binary(&installed_in(&data), "claude-agent-acp");
+        assert_eq!(
+            found(&chain("claude-agent-acp", Some(&data), vec![empty])),
             Some(installed.to_string_lossy().into_owned())
         );
     }
@@ -860,7 +827,7 @@ mod resolution {
         let already = binary(&theirs, "opencode");
 
         assert_eq!(
-            found(&chain("opencode", None, Some(&data), vec![theirs])),
+            found(&chain("opencode", Some(&data), vec![theirs])),
             Some(already.to_string_lossy().into_owned())
         );
     }
@@ -871,7 +838,7 @@ mod resolution {
         // must not take that away from them by answering for it.
         let data = temp("nothing-installed");
         let nowhere = temp("nowhere");
-        let looked = chain("kimi-acp", None, Some(&data), vec![nowhere]);
+        let looked = chain("kimi-acp", Some(&data), vec![nowhere]);
 
         assert_eq!(found(&looked), None);
         assert_eq!(located("kimi-acp", &looked), "kimi-acp");
