@@ -8,7 +8,8 @@ class Workspace
   # whoever built the database and however they built it.
   module Boundary
     ROOMS = %w[channels memberships messages memory_entries artifacts
-               agent_sessions agent_runs run_steps activities channel_records].freeze
+               agent_sessions agent_runs run_steps activities channel_records
+               agent_definitions].freeze
 
     # Read from the transaction rather than the session: DATABASE_URL points at
     # the pooler, where session state does not survive between statements, so a

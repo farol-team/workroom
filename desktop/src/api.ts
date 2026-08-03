@@ -127,6 +127,22 @@ export class Api {
       "/invitations", { method: "POST", body: JSON.stringify({ email, role }) });
   }
 
+  /// The personas the team agreed on (#233): descriptions only — a name, a
+  /// runtime, an instruction, a model. Never a credential; the process, the
+  /// key and the bill stay on each member's machine (Article P2).
+  agentDefinitions() {
+    return this.call<Array<{ name: string; command: string; args: string[];
+                             instruction: string | null; model: string | null }>>(
+      "/agent_definitions");
+  }
+
+  /// Sharing is an admin's act, like inviting, and an upsert by name: sharing
+  /// @crm again corrects @crm rather than making a second one.
+  shareAgentDefinition(def: { name: string; command: string; args: string[];
+                              instruction?: string; model?: string }) {
+    return this.call("/agent_definitions", { method: "POST", body: JSON.stringify(def) });
+  }
+
   /// Redeeming is how somebody reaches a room they did not make. It answers
   /// with that room's token, and nothing else does.
   acceptInvitation(code: string) {

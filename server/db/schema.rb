@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_200001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_03_210001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -55,6 +55,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_200001) do
     t.index ["created_at"], name: "index_activities_on_created_at"
     t.index ["subject_type", "subject_id"], name: "index_activities_on_subject"
     t.index ["workspace_id"], name: "index_activities_on_workspace_id"
+  end
+
+  create_table "agent_definitions", force: :cascade do |t|
+    t.jsonb "args", default: [], null: false
+    t.string "command", null: false
+    t.datetime "created_at", null: false
+    t.text "instruction"
+    t.string "model"
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["workspace_id", "name"], name: "index_agent_definitions_on_workspace_id_and_name", unique: true
   end
 
   create_table "agent_runs", force: :cascade do |t|
@@ -275,6 +287,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_200001) do
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "workspaces"
+  add_foreign_key "agent_definitions", "workspaces"
   add_foreign_key "agent_runs", "agent_sessions"
   add_foreign_key "agent_runs", "agent_sessions", column: ["agent_session_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "agent_runs", "messages", column: "trigger_message_id"
