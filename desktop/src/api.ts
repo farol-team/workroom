@@ -100,7 +100,8 @@ export class Api {
 
   /// A channel in the room this token names. `template` fills one in from the
   /// shapes the server offers; without it the three fields are the channel.
-  createChannel(body: { slug?: string; name?: string; purpose?: string; template?: string }) {
+  createChannel(body: { slug?: string; name?: string; purpose?: string; template?: string;
+                        visibility?: string }) {
     return this.call<Channel>("/channels", { method: "POST", body: JSON.stringify(body) });
   }
 
