@@ -58,6 +58,16 @@ export interface Timeline {
 export const escape = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
+/// Where a failed press says why. The room's notice strip once somebody wires
+/// it (`reportTrouble`), and silence until then — never a native dialog: a
+/// modal that stops the window is not how an application somebody keeps open
+/// all day reports that one request failed (#181).
+let trouble: (message: string) => void = () => {};
+
+export function reportTrouble(to: (message: string) => void) {
+  trouble = to;
+}
+
 /// A button for something that can fail. While it runs it says so and cannot be
 /// pressed again; if it fails it says why and can be pressed again. Every offer
 /// and every notice wanted the same six lines, and each wrote its own.
@@ -73,7 +83,7 @@ export function ghostButton(label: string, busy: string, work: () => Promise<voi
     } catch (err) {
       button.disabled = false;
       button.textContent = label;
-      alert(String(err));
+      trouble(String(err));
     }
   };
   return button;
@@ -302,7 +312,7 @@ export function createTimeline(deps: TimelineDeps): Timeline {
         el.textContent = `${asked.title} — ${optionId ?? "not answered"}`;
       } catch (err) {
         el.querySelectorAll("button").forEach((b) => (b.disabled = false));
-        alert(String(err));
+        trouble(String(err));
       }
     };
 
