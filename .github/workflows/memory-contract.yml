@@ -22,7 +22,7 @@ permissions:
 jobs:
   live-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     services:
       postgres:
@@ -124,6 +124,10 @@ jobs:
         env:
           OPENVIKING_URL: http://127.0.0.1:1933
           OPENVIKING_API_KEY: ${{ steps.account.outputs.key }}
+          # qwen3:4b on a two-core runner summarizes in minutes, not seconds.
+          # The second dispatch proved every retrieval failure was this and
+          # nothing else: 118 runs, and every miss a poll that gave up first.
+          OPENVIKING_PATIENCE: "420"
         run: bin/rails test test/services/memory/
 
       - name: Drop the run's account

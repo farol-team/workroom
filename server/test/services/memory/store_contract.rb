@@ -16,7 +16,10 @@ module Memory
     # retrieves by substring does not. The contract requires that a written
     # entry becomes findable — not that it is findable in the same millisecond.
     # A synchronous store satisfies this on the first attempt.
-    def retrieving(seconds: 90)
+    # The window is the environment's to widen (#123): a local model on a CI
+    # runner indexes in minutes what a hosted embedder does in seconds, and
+    # the contract is about becoming findable, not about anybody's hardware.
+    def retrieving(seconds: (ENV["OPENVIKING_PATIENCE"] || 90).to_i)
       deadline = Time.current + seconds
       loop do
         result = yield
