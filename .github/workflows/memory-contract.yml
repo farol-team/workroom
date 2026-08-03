@@ -37,7 +37,6 @@ jobs:
     env:
       RAILS_ENV: test
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
-      OPENVIKING_URL: http://127.0.0.1:1933
 
     defaults:
       run:
@@ -118,8 +117,12 @@ jobs:
       - name: Boundary
         run: bin/rails db:boundary
 
+      # Both variables on this step and only this step: with OPENVIKING_URL in
+      # the job's env, db:prepare booted against the store with no key and the
+      # seed died on a 401 before the contract ever ran (first dispatch).
       - name: The contract, against the store production actually uses
         env:
+          OPENVIKING_URL: http://127.0.0.1:1933
           OPENVIKING_API_KEY: ${{ steps.account.outputs.key }}
         run: bin/rails test test/services/memory/
 
