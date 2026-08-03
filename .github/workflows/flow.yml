@@ -11,10 +11,16 @@ on:
   push:
     branches: [main]
 
+# Read-only by default; the one job that reads issues says so itself. See
+# CONTRIBUTING.md for the pinning rule.
+permissions:
+  contents: read
+
 jobs:
   kit-intact:
     name: the workflow kit is the revision it says it is
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: kit matches .claude/KIT_REVISION
@@ -28,6 +34,9 @@ jobs:
     name: the change belongs to a card
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: read
     steps:
       - name: the branch names the card it implements
         env:
@@ -53,6 +62,7 @@ jobs:
     name: the pull request shows its gates
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: the body reports what was run
         env:

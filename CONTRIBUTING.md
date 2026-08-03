@@ -22,6 +22,8 @@ The commands that drive this live in `.claude/commands/` (`/flow-run`, `/flow-ch
 
 `kit-intact` also runs `bin/kit-verify --selftest` on every build, because a check that cannot go red says nothing.
 
+The workflows hold themselves to the standard they check: every third-party action is pinned to a full commit SHA with the tag in a trailing comment (a mutable tag is repointable by its owner, and one of these jobs holds the desktop signing key); first-party `actions/*` stay on major tags. Every workflow declares `permissions:` read-only at the top with per-job widening, and every job carries a `timeout-minutes`.
+
 ## The workflow kit
 
 `.claude/{commands,prompts,hooks,bin,providers}` are **owned upstream**. To update them:
