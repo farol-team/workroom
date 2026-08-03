@@ -1,7 +1,7 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
-import { createTimeline, escape, ghostButton } from "./timeline";
+import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
 import { createProvision, type FolderState } from "./provision";
@@ -74,7 +74,7 @@ const panel = createAgentsPanel({
       ?? await agents.workspace(rooms.current!, current.slug);
     await agents.sessionFor(name, current.slug, dir, api.rail(current.slug));
   },
-  onTrouble: (message) => alert(message),
+  onTrouble: (message) => { say(message); },
   currentChannel: () => current,
 });
 
@@ -413,16 +413,35 @@ async function send(text: string) {
   // Default is the room. An agent joins only when its owner calls it, and
   // `@agent` calls whichever one is default.
   const { addressed, agent: named, body } = parseAddress(text, agents.definitions());
+  // The one await whose failure leaves the composer with something to give
+  // back: past this line the message is the room's, and it is deliberately
+  // the only rejection allowed out of this function.
   const posted = await api.post(current.slug, body);
   if (!addressed) return;
 
   const name = named ?? defaultAgent(agents.definitions());
   if (!name) return;
   if (!agents.isRunning(name)) {
-    alert(`${name} is not running. Press Start agent first.`);
+    // The message is already in the room; only the agent's part is missing.
+    // Which agent, because "your agent" is three rows in a panel — and the way
+    // out is a press, not a description of one.
+    say(`${name} is not running.`, "Start agent", () => panel.start(name));
     return;
   }
 
+  try {
+    await turn(name, posted.id, body);
+  } catch (err) {
+    // The message landed; what would not begin is the turn around it. Nothing
+    // to put back in the composer — resurfacing a sentence the channel already
+    // has would invite sending it twice.
+    say(`${name} could not take the turn. ${String(err)}`);
+  }
+}
+
+/// One agent's turn on one posted message, from session to record.
+async function turn(name: string, postedId: number, body: string) {
+  if (!current) return;
   // What the room knows, plus what was just said in it — both belong to the
   // channel, so a colleague's message is context even though only the owner
   // may give the instruction.
@@ -435,7 +454,7 @@ async function send(text: string) {
     ?? await agents.workspace(rooms.current!, current.slug);
   const sessionId = await agents.sessionFor(name, current.slug, workspace,
                                             api.rail(current.slug), store);
-  const run = await api.startRun(current.slug, posted.id, name, sessionId,
+  const run = await api.startRun(current.slug, postedId, name, sessionId,
                                  agents.modelFor(name, current.slug));
   // The anchor the session's transcript will be attached to when it ends (#124).
   agents.noteRun(sessionId, run.id);
@@ -474,18 +493,19 @@ async function send(text: string) {
     await agents.cancel(name, sessionId);
   });
 
+  let theAgentFailed = false;
+  // The run's own summary, recorded with its end (#97).
+  let outcome: TurnOutcome | undefined;
   try {
     // The offer at the end of this turn is measured from here: what was
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
-    const outcome = await agents.prompt(name, sessionId, withClosing(body),
+    outcome = await agents.prompt(name, sessionId, withClosing(body),
                         [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
-    if (reply.trim()) await api.agentSay(run.id, reply.trim());
-    // The run's own summary travels with its end (#97): a turn that stopped at
-    // max_tokens is a different record from one that finished.
-    await api.finishRun(run.id, "succeeded", outcome);
-    await timeline.offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
+    // The agent's own failure, recorded as the run's — the one case where
+    // "Agent error" in the room is the truth.
+    theAgentFailed = true;
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
     await api.finishRun(run.id, "failed").catch(() => {});
   } finally {
@@ -496,6 +516,25 @@ async function send(text: string) {
     // The turn's end is the third moment: whatever the person wrote while it
     // ran is now visible to the gate (#207).
     if (current) humanGate.check(current);
+  }
+  if (theAgentFailed) return;
+
+  // The agent answered; everything from here is this client's own work, and
+  // its failures are reported as ours. Writing them into the room as the
+  // agent's would attribute our failure to somebody else's run — the one
+  // thing the record must not do (Article D3).
+  try {
+    if (reply.trim()) await api.agentSay(run.id, reply.trim());
+  } catch (err) {
+    say(`${name} answered, but the reply could not be posted to the room. ${String(err)}`);
+  }
+  try {
+    await api.finishRun(run.id, "succeeded", outcome);
+    await timeline.offerProduced(run.id, workspace).catch(() => {});
+  } catch (err) {
+    // Not the agent's, and not nobody's: a run whose end was never recorded
+    // reads as still going to everybody looking at the room.
+    say(`The run finished, but recording that did not go through. ${String(err)}`);
   }
 }
 
@@ -522,16 +561,27 @@ $("summon").addEventListener("click", () => {
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $<HTMLInputElement>("input");
-  const text = input.value.trim();
+  const typed = input.value;
+  const text = typed.trim();
   if (!text) return;
   // A run is work on the folder, and unreviewed work there pauses it (#207).
   // Refused does not mean discarded: the message stays typed, the reason is
   // said, and a plain message to the room was never the gate's concern.
   if (humanGate.refuse(parseAddress(text, agents.definitions()).addressed)) return;
+  // Cleared on the press, not on the answer: a composer that empties only
+  // once the server replies lags the room on every message anybody sends.
   input.value = "";
   $("gate-refused").textContent = "";
   refreshDestination();
-  await send(text).catch((err) => alert(String(err)));
+  try {
+    await send(text);
+  } catch (err) {
+    // The room never got it, so the composer keeps it — losing the sentence
+    // teaches people to copy every message before pressing Send.
+    input.value = typed;
+    refreshDestination();
+    say(`That message did not reach the room. ${String(err)}`);
+  }
   offerToAdd(text).catch(() => {});
 });
 
@@ -725,16 +775,23 @@ $("workspace-join").addEventListener("click", async () => {
   field.value = "";
   dialog.showModal();
   await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
-  if (dialog.returnValue !== "go" || !field.value.trim()) return;
+  const code = field.value.trim();
+  if (dialog.returnValue !== "go" || !code) return;
 
+  // Cleared on the way out — the optimistic path every send here takes — and
+  // put back if the server says no: the code arrived out of band and was typed
+  // once, so losing it to a failed redemption costs the invitation, not the
+  // attempt.
+  field.value = "";
   try {
-    const joined = await api.acceptInvitation(field.value.trim());
+    const joined = await api.acceptInvitation(code);
     // Redeeming is the third and last place a token for another room arrives.
     rooms = settings.saveWorkspaces(enterRoom(rooms, joined.workspace.slug, joined.token));
     await enterWorkspace(joined.workspace.slug);
     say(`You are in ${joined.workspace.name}.`);
   } catch (err) {
-    alert(String(err));
+    field.value = code;
+    say(`That code did not get you in. ${String(err)}`);
   }
 });
 
@@ -772,7 +829,7 @@ $("workspace-new").addEventListener("click", async () => {
     await enterWorkspace(made.slug);
     say(`${made.name} is yours. It opened with general, random and meetings.`);
   } catch (err) {
-    alert(String(err));
+    say(`The workspace was not made. ${String(err)}`);
   }
 });
 
@@ -789,7 +846,7 @@ $("channel-new").addEventListener("click", async () => {
     await loadChannels();
     await open(made.slug);
   } catch (err) {
-    alert(String(err));
+    say(`The channel was not made. ${String(err)}`);
   }
 });
 
@@ -859,13 +916,18 @@ $("thread-close").addEventListener("click", () => timeline.closeThread());
 $("thread-composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $<HTMLInputElement>("thread-input");
-  const text = input.value.trim();
+  const typed = input.value;
+  const text = typed.trim();
   const root = timeline.openThread();
   if (!current || !text || root === null) return;
   input.value = "";
   try {
     await api.post(current.slug, text, root);
-  } catch (err) { alert(String(err)); }
+  } catch (err) {
+    // A reply is a send: the same optimistic clear, the same restore.
+    input.value = typed;
+    say(`That reply did not reach the room. ${String(err)}`);
+  }
 });
 
 let signedInThroughBrowser = false;
@@ -883,7 +945,10 @@ $("signin-provider").addEventListener("click", async () => {
     signedInThroughBrowser = true;
     $<HTMLDialogElement>("signin").close();
   } catch (err) {
-    alert(String(err));
+    // Behind the modal, and said anyway: the strip is what this person reads
+    // the moment the sign-in closes, and the way back is the button they just
+    // pressed — signing in again is one press.
+    say(`Signing in through your browser did not work — ${String(err)} Try signing in again.`);
   } finally {
     button.disabled = false;
     button.textContent = "Sign in with your organisation";
@@ -900,7 +965,9 @@ $("memory-form").addEventListener("submit", async (e) => {
     $<HTMLInputElement>("memory-title").value = "";
     $<HTMLTextAreaElement>("memory-detail").value = "";
     renderMemory();
-  } catch (err) { alert(String(err)); }
+  } catch (err) {
+    say(`The room did not take that. ${String(err)}`);
+  }
 });
 
 $("skill-form").addEventListener("submit", async (e) => {
@@ -913,7 +980,9 @@ $("skill-form").addEventListener("submit", async (e) => {
     $<HTMLInputElement>("skill-title").value = "";
     $<HTMLTextAreaElement>("skill-body").value = "";
     renderSkills();
-  } catch (err) { alert(String(err)); }
+  } catch (err) {
+    say(`The skill was not saved. ${String(err)}`);
+  }
 });
 
 /// Told, never done for them. An agent workspace that replaces its own binary
@@ -952,6 +1021,13 @@ function say(text: string, action?: string, run?: () => Promise<void>): () => vo
   return () => el.remove();
 }
 
+// A press that fails anywhere in the timeline — an offer's action, a
+// permission's answer — is said here too.
+reportTrouble((message) => { say(message); });
+
+/// Three stages, three messages. Sign-in refused, a room that will not load
+/// and a bridge that is not answering are three different mornings, and the
+/// one catch this replaced called all of them "cannot reach the server".
 async function boot() {
   const dialog = $<HTMLDialogElement>("signin");
   const how = await api.methods().catch(() => ({ development: true, provider: false, version: undefined }));
@@ -962,11 +1038,16 @@ async function boot() {
   dialog.showModal();
   await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
 
-  const { user } = signedInThroughBrowser
-    ? await api.whoAmI()
-    : await api.signIn($<HTMLInputElement>("email").value.trim());
-  const myName = user.name;
-  $("who").textContent = myName;
+  let user;
+  try {
+    ({ user } = signedInThroughBrowser
+      ? await api.whoAmI()
+      : await api.signIn($<HTMLInputElement>("email").value.trim()));
+  } catch (err) {
+    say(`Signing in did not work. ${String(err)}`);
+    return;
+  }
+  $("who").textContent = user.name;
 
   // Signing in is where a token for a room arrives. The other place is making
   // one; there is deliberately no third, because a token fetched for another
@@ -977,39 +1058,46 @@ async function boot() {
 
   // The room first. It is the product, and everything below is a detail of the
   // toolbar that can arrive late without anybody minding.
-  await loadChannels();
+  try {
+    await loadChannels();
+  } catch (err) {
+    say(`The channels could not be loaded. ${String(err)}`);
+  }
 
   // Agents already running from an earlier window of this session stay
-  // addressable — the registry is the process's, not this view's. If the bridge
-  // does not answer, the panel is briefly wrong, which is better than a room
-  // that never appeared.
-  agents.use(settings.load());
-  for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
-  prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
-  panel.render();
-  // What each of them is on this machine, said once the room is up. Until it
-  // answers a row reads as missing, which is what it was before this existed.
-  // The first run asks which agent this person has — after the probe answers,
-  // so the cards open with what the machine actually said, and only once;
-  // after that the panel carries it and setup is re-opened from there.
-  panel.refresh().catch(() => {}).then(() => {
-    if (!settings.isOnboarded()) openOnboarding();
-  });
-
-  // An agent that stopped says so once, with whatever it said on the way down.
-  // Restarting is offered, never done: the process runs under this person's own
-  // credentials and respawning it unasked is not ours to decide.
-  await agents.onClosed(({ name, diagnostics }) => {
+  // addressable — the registry is the process's, not this view's. A bridge
+  // that does not answer costs the toolbar, never the room above it.
+  try {
+    agents.use(settings.load());
+    for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
+    prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
     panel.render();
-    const who = name ?? "The agent";
-    const why = diagnostics.length ? ` It said: ${diagnostics.slice(-3).join(" ")}` : "";
-    if (name) say(`${who} stopped.${why}`, "Start agent", () => panel.start(name));
-    else say(`${who} stopped.${why}`);
-  });
+    // What each of them is on this machine, said once the room is up. Until it
+    // answers a row reads as missing, which is what it was before this existed.
+    // The first run asks which agent this person has — after the probe answers,
+    // so the cards open with what the machine actually said, and only once;
+    // after that the panel carries it and setup is re-opened from there.
+    panel.refresh().catch(() => {}).then(() => {
+      if (!settings.isOnboarded()) openOnboarding();
+    });
+
+    // An agent that stopped says so once, with whatever it said on the way down.
+    // Restarting is offered, never done: the process runs under this person's own
+    // credentials and respawning it unasked is not ours to decide.
+    await agents.onClosed(({ name, diagnostics }) => {
+      panel.render();
+      const who = name ?? "The agent";
+      const why = diagnostics.length ? ` It said: ${diagnostics.slice(-3).join(" ")}` : "";
+      if (name) say(`${who} stopped.${why}`, "Start agent", () => panel.start(name));
+      else say(`${who} stopped.${why}`);
+    });
+  } catch (err) {
+    say(`Your agents are out of reach — the bridge did not answer. ${String(err)}`);
+  }
 
   const version = await getVersion().catch(() => "");
   noticeDrift(version, how.version);
   offerUpdate().catch(() => {});
 }
 
-boot().catch((e) => alert(`Cannot reach the server.\n\n${String(e)}`));
+boot().catch((e) => say(`Cannot reach the server. ${String(e)}`));

@@ -1,0 +1,6 @@
+.gitignore
+desktop/src/main.ts
+desktop/src/styles.css
+desktop/test/rules.test.ts
+desktop/package.json
+desktop/pnpm-lock.yaml
