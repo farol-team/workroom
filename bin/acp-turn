@@ -141,9 +141,13 @@ onUpdate(async (update) => {
   }
   if (update.sessionUpdate === "usage_update") {
     recorded.usage = true;
+    // Cost is { amount, currency } in the protocol; older agents send a bare
+    // number, which is an amount with no currency — never "USD" (#97).
+    const cost = typeof update.cost === "number" ? { amount: update.cost } : update.cost;
     await api(`/runs/${run.id}`, { method: "PATCH",
       body: JSON.stringify({ status: "running", context_used: update.used,
-                             context_size: update.size, cost: update.cost }) }).catch(() => {});
+                             context_size: update.size,
+                             cost: cost?.amount, cost_currency: cost?.currency }) }).catch(() => {});
   }
   if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
     // Named by what it is, or not recorded — an id is not a name. Same rule as
@@ -167,7 +171,8 @@ try {
     await api(`/runs/${run.id}/messages`, { method: "POST",
       body: JSON.stringify({ body: answer.trim() }) });
   }
-  await api(`/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ status: "succeeded" }) });
+  await api(`/runs/${run.id}`, { method: "PATCH",
+    body: JSON.stringify({ status: "succeeded", stop_reason: stopReason }) });
 
   // The client offers the transcript and a person accepts it. There is nobody
   // here to click, so this does what they would have done, and says so.

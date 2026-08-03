@@ -46,6 +46,35 @@ class Api::V1::RunsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2, AgentSession.last.agent_runs.count, "both turns belong to the one session"
   end
 
+  test "a run keeps every metric the agent gives, and invents none" do
+    # Reporting, never billing (#97). The currency travels as the agent said it;
+    # a field the agent never reported stays nil rather than becoming a zero.
+    message = @channel.messages.create!(author: @alice, body: "how much?")
+    post api_v1_channel_runs_path(@channel.slug),
+         params: { trigger_message_id: message.id, external_id: "ses_1" }.to_json,
+         headers: auth(@alice).merge(@json)
+    run_id = response.parsed_body["id"]
+
+    patch api_v1_run_path(run_id),
+          params: { status: "running", context_used: 84_000, context_size: 200_000,
+                    cost: 0.42, cost_currency: "EUR" }.to_json,
+          headers: auth(@alice).merge(@json)
+    patch api_v1_run_path(run_id),
+          params: { status: "succeeded", stop_reason: "max_tokens",
+                    total_tokens: 1200, input_tokens: 1000, output_tokens: 200,
+                    cached_read_tokens: 800,
+                    metrics: { "_claude/origin" => "subscription" } }.to_json,
+          headers: auth(@alice).merge(@json)
+
+    run = AgentRun.find(run_id)
+    assert_equal "EUR", run.cost_currency
+    assert_equal "max_tokens", run.stop_reason, "a turn that ran out is not one that finished"
+    assert_equal [ 1200, 1000, 200, 800 ],
+                 run.slice(:total_tokens, :input_tokens, :output_tokens, :cached_read_tokens).values
+    assert_nil run.thought_tokens, "unreported stays unknown, never zero"
+    assert_equal({ "_claude/origin" => "subscription" }, run.metrics)
+  end
+
   test "a full turn records the run, its steps, and an answer attributed to the run" do
     message = @channel.messages.create!(author: @alice, body: "what did we agree?")
 

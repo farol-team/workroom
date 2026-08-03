@@ -965,7 +965,9 @@ $("memory-form").addEventListener("submit", async (e) => {
     $<HTMLInputElement>("memory-title").value = "";
     $<HTMLTextAreaElement>("memory-detail").value = "";
     renderMemory();
-  } catch (err) { alert(String(err)); }
+  } catch (err) {
+    say(`The room did not take that. ${String(err)}`);
+  }
 });
 
 $("skill-form").addEventListener("submit", async (e) => {

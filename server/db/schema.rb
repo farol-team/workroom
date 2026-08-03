@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_120001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_03_200001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -59,15 +59,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_120001) do
 
   create_table "agent_runs", force: :cascade do |t|
     t.bigint "agent_session_id", null: false
+    t.bigint "cached_read_tokens"
+    t.bigint "cached_write_tokens"
     t.integer "context_size"
     t.integer "context_used"
     t.decimal "cost", precision: 12, scale: 6
+    t.string "cost_currency"
     t.datetime "created_at", null: false
     t.datetime "distilled_at"
     t.datetime "ended_at"
+    t.bigint "input_tokens"
+    t.jsonb "metrics"
     t.string "model"
+    t.bigint "output_tokens"
     t.datetime "started_at"
     t.string "status", default: "queued", null: false
+    t.string "stop_reason"
+    t.bigint "thought_tokens"
+    t.bigint "total_tokens"
     t.bigint "trigger_message_id"
     t.datetime "updated_at", null: false
     t.bigint "workspace_id", null: false

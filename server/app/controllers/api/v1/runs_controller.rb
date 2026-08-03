@@ -25,7 +25,12 @@ module Api
 
       def update
         run = find_run
-        run.update!(params.permit(:status, :context_used, :context_size, :cost).to_h.compact)
+        # Every metric the agent gives us, tokens included (#97). `compact`
+        # keeps absent absent — a zero and an unknown are different numbers.
+        run.update!(params.permit(:status, :context_used, :context_size, :cost, :cost_currency,
+                                  :stop_reason, :input_tokens, :output_tokens,
+                                  :cached_read_tokens, :cached_write_tokens,
+                                  :thought_tokens, :total_tokens, metrics: {}).to_h.compact)
         run.update!(ended_at: Time.current) if %w[succeeded failed interrupted].include?(run.status)
         run.agent_session.update!(status: "idle") if run.ended_at
         Broadcast.run(run)

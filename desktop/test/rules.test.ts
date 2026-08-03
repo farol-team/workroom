@@ -199,13 +199,27 @@ describe("acp translation", () => {
     expect(translateAcp(update({ sessionUpdate: "plan", entries: [] }))).toBeNull();
   });
 
-  test("usage becomes usage", () => {
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000, cost: 0.42 })))
-      .toEqual({ kind: "usage", used: 84000, size: 200000, cost: 0.42 });
+  test("usage becomes usage, and cost is the object the protocol sends", () => {
+    // { amount, currency: ISO 4217 } — read as a bare number it was NaN, and
+    // the column stayed empty for every agent that followed the schema (#97).
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000,
+                                 cost: { amount: 0.42, currency: "EUR" } })))
+      .toEqual({ kind: "usage", used: 84000, size: 200000,
+                 cost: { amount: 0.42, currency: "EUR" } });
   });
 
-  test("cost is optional", () => {
+  test("a bare-number cost is an amount with no currency — never USD", () => {
+    // Inventing a currency for an agent that named none is how two rooms'
+    // totals become one wrong number.
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100, cost: 0.42 })))
+      .toEqual({ kind: "usage", used: 10, size: 100, cost: { amount: 0.42 } });
+  });
+
+  test("cost is optional, and a malformed one is no cost", () => {
     expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100 })))
+      .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100,
+                                 cost: { currency: "USD" } })))
       .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
   });
 
@@ -541,6 +555,13 @@ describe("the turn carries the question", () => {
     // so nothing else here can catch the question being quietly dropped. Losing
     // it would be invisible — turns keep working, and the room stops learning.
     expect(mainSource).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
+  });
+
+  test("the turn's own summary reaches the record", () => {
+    // Same guard, same reason (#97): the prompt response was discarded for a
+    // year, and a turn that stopped at max_tokens read as one that finished.
+    expect(mainSource).toMatch(/outcome = await agents\.prompt\(/);
+    expect(mainSource).toMatch(/finishRun\(run\.id, "succeeded", outcome\)/);
   });
 });
 
@@ -1158,7 +1179,8 @@ function aServer(over: Record<string, unknown> = {}) {
     channel: ok({ ...channel, messages: [ said ] }),
     live: vi.fn(() => ({ close: vi.fn() })),
     members: ok([]), workspaceMembers: ok([]), memory: ok([]), skills: ok([]),
-    invitations: ok([]), channelTemplates: ok([]),
+    invitations: ok([]), channelTemplates: ok([]), artifacts: ok([]),
+    remember: ok({ uri: "mem://meetings/1", title: "t", trust: "human" }),
     post: ok(said),
     context: ok({ context: null, memory_uri: "mem://meetings", boundary: "Stay here.", store: null }),
     startRun: ok({ id: 7, agent_session_id: 1 }),
@@ -1187,6 +1209,7 @@ function aBridge(over: Record<string, unknown> = {}) {
     turnStart: vi.fn(async () => {}),
     read: vi.fn(async () => ""),
     sessionFor: vi.fn(async () => "s1"),
+    noteRun: vi.fn(),
     setConfig: vi.fn(async () => []),
     onAsk: vi.fn(async () => () => {}),
     onUpdate: vi.fn(async (_id: string, cb: (u: unknown) => void) => { heard = cb; return () => {}; }),
@@ -1389,7 +1412,7 @@ describe("what the room says when something goes wrong", () => {
       // The row's second button is its one action, which for a ready agent
       // that is not running says Start.
       drive: async () => {
-        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        [ ...document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button") ].pop()!.click();
         await settle();
       },
       attempted: (edges) => edges.bridge.start,
@@ -1404,7 +1427,7 @@ describe("what the room says when something goes wrong", () => {
         stop: vi.fn(async () => { throw new Error("the process would not stop"); }),
       }) }),
       drive: async () => {
-        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        [ ...document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button") ].pop()!.click();
         await settle();
       },
       attempted: (edges) => edges.bridge.stop,
@@ -1422,7 +1445,7 @@ describe("what the room says when something goes wrong", () => {
         install: vi.fn(async () => { throw new Error("no answer from this machine"); }),
       }) }),
       drive: async () => {
-        document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1].click();
+        [ ...document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button") ].pop()!.click();
         await settle();
       },
       attempted: (edges) => edges.bridge.install,
@@ -1614,7 +1637,7 @@ describe("what the room says when something goes wrong", () => {
       install: vi.fn(async () => ({ ok: false, code: 1, stdoutTail: "",
                                     stderrTail: "npm ERR! 404 not found" })),
     }) });
-    const offer = () => document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button")[1];
+    const offer = () => [ ...document.querySelectorAll<HTMLButtonElement>("#agents .agent-row button") ].pop()!;
 
     offer().click();
     await settle();
@@ -1766,7 +1789,9 @@ describe("a turn that fails at the end", () => {
 
     expect(saidByTheAgent(server)).toContain("here you go");
     expect(saidByTheAgent(server).some((body) => /agent error/i.test(body))).toBe(false);
-    expect(server.finishRun).toHaveBeenCalledWith(7, "succeeded");
+    // The third argument is the turn's own summary (#97) — none here, since
+    // the scripted prompt answers without one.
+    expect(server.finishRun).toHaveBeenCalledWith(7, "succeeded", undefined);
     // What the room says about it is the room's wording; that it says anything
     // at all, and says what failed, is not.
     expect(notices()).toContain("500 not written");
