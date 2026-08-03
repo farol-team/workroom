@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -578,8 +578,8 @@ window.addEventListener("focus", () => {
 /// Ask for a name and an address. One dialog, because making a room and making
 /// a channel ask the same two questions.
 function askForOne(
-  title: string, note: string, templates: RoomTemplate[] = [],
-): Promise<{ slug: string; name: string; template?: string } | null> {
+  title: string, note: string, templates: RoomTemplate[] = [], withVisibility = false,
+): Promise<{ slug: string; name: string; template?: string; visibility?: string } | null> {
   const dialog = $<HTMLDialogElement>("make");
   $("make-title").textContent = title;
   $("make-note").textContent = note;
@@ -587,6 +587,15 @@ function askForOne(
   const slug = $<HTMLInputElement>("make-slug");
   name.value = "";
   slug.value = "";
+
+  // Channels have a visibility; workspaces do not. The note follows the
+  // choice, so the dialog says which room it is about to make (#256).
+  const visibility = $<HTMLSelectElement>("make-visibility");
+  $("make-visibility-row").hidden = !withVisibility;
+  visibility.value = "open";
+  visibility.onchange = () => {
+    if (withVisibility) $("make-note").textContent = visibilityNote(visibility.value);
+  };
 
   // The address is derived while it is untouched, and left alone once it is
   // not — somebody who typed one meant it.
@@ -602,8 +611,11 @@ function askForOne(
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => {
       if (dialog.returnValue !== "go") return resolve(null);
-      if (chosen.key) return resolve({ slug: chosen.key, name: name.value, template: chosen.key });
-      resolve(slug.value ? { slug: slug.value, name: name.value } : null);
+      const picked = withVisibility ? { visibility: visibility.value } : {};
+      if (chosen.key) {
+        return resolve({ slug: chosen.key, name: name.value, template: chosen.key, ...picked });
+      }
+      resolve(slug.value ? { slug: slug.value, name: name.value, ...picked } : null);
     }, { once: true });
   });
 }
@@ -764,7 +776,7 @@ $("channel-new").addEventListener("click", async () => {
   // A server too old to offer shapes, or one that cannot be reached for them,
   // still opens the dialog. The templates are the offer, not the feature.
   const templates = await api.channelTemplates().catch(() => []);
-  const asked = await askForOne("New channel", "Everybody in this workspace can find it.", templates);
+  const asked = await askForOne("New channel", visibilityNote("open"), templates, true);
   const body = channelToCreate(asked);
   if (!body) return;
 

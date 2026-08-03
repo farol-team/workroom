@@ -803,10 +803,24 @@ export function templateNote(t: RoomTemplate): string {
 /// its key and nothing else: the name and purpose are the server's, and sending
 /// this client's copy of them would let the two drift apart on the first edit
 /// to `channel_templates.yml`.
+///
+/// Visibility travels only when it is a decision: "open" is the server's own
+/// default, and sending this client's copy of it would be the same drift. The
+/// template path carries it too — `# legal` picked with "private" must not
+/// open an open room (#255, #256).
 export function channelToCreate(
-  asked: { template?: string; slug?: string; name?: string } | null,
-): { template: string } | { slug: string; name: string } | null {
+  asked: { template?: string; slug?: string; name?: string; visibility?: string } | null,
+): { template: string; visibility?: string } | { slug: string; name: string; visibility?: string } | null {
   if (!asked) return null;
-  if (asked.template) return { template: asked.template };
-  return asked.slug ? { slug: asked.slug, name: asked.name ?? asked.slug } : null;
+  const chosen = asked.visibility === "private" ? { visibility: "private" } : {};
+  if (asked.template) return { template: asked.template, ...chosen };
+  return asked.slug ? { slug: asked.slug, name: asked.name ?? asked.slug, ...chosen } : null;
+}
+
+/// The dialog says which room it is about to make (#256) — before the button
+/// is pressed, because after is a surprise.
+export function visibilityNote(visibility: string): string {
+  return visibility === "private"
+    ? "Only people added to this room will see it."
+    : "Everybody in this workspace can find it.";
 }

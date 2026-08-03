@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // and node's globals have no types here — nothing else in this window-shaped
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -1009,6 +1009,25 @@ describe("the shape a room can be added with", () => {
 
   test("an address with no name is still a room", () => {
     expect(channelToCreate({ slug: "pricing" })).toEqual({ slug: "pricing", name: "pricing" });
+  });
+
+  test("private travels on both paths, because a template is a shape, not a verdict", () => {
+    // `# legal` picked with "private" must not open an open room (#255, #256).
+    expect(channelToCreate({ template: "legal", visibility: "private" }))
+      .toEqual({ template: "legal", visibility: "private" });
+    expect(channelToCreate({ slug: "pricing", visibility: "private" }))
+      .toEqual({ slug: "pricing", name: "pricing", visibility: "private" });
+  });
+
+  test("open does not travel — it is the server's default, not this client's copy of it", () => {
+    expect(channelToCreate({ slug: "pricing", visibility: "open" }))
+      .toEqual({ slug: "pricing", name: "pricing" });
+  });
+
+  test("the dialog says which room it is about to make", () => {
+    expect(visibilityNote("private")).toContain("Only people added");
+    expect(visibilityNote("open")).toContain("Everybody in this workspace");
+    expect(visibilityNote("open")).not.toEqual(visibilityNote("private"));
   });
 
   test("a cancelled dialog asks for nothing", () => {
