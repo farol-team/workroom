@@ -68,11 +68,16 @@ fn percent_decode(raw: &str) -> String {
 /// for. It is not a secret and does not pretend to be one: the token itself is
 /// what matters, and it travels to a listener on this machine only.
 pub fn nonce(port: u16) -> String {
+    // The clock alone is not enough: two sign-ins inside one tick of a coarse
+    // clock would share a value. The counter makes uniqueness a property of
+    // this process rather than of the platform's timer resolution.
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{:x}-{:x}-{:x}", now, port, std::process::id())
+    format!("{:x}-{:x}-{:x}-{:x}", now, port, std::process::id(), seq)
 }
 
 /// What the browser is left looking at. Plain, because the person's attention
