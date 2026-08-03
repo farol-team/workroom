@@ -198,6 +198,16 @@ export class Api {
     });
   }
 
+  /// A person deliberately recording something the room should know (#162).
+  /// The server defaults this endpoint's trust to "human" and journals the
+  /// write; an agent never comes this way — it writes through the rail, which
+  /// stamps the run it came from.
+  remember(slug: string, title: string, detail: string) {
+    return this.call<{ uri: string; title: string; trust: string }>(`/channels/${slug}/memory`, {
+      method: "POST", body: JSON.stringify({ title, detail }),
+    });
+  }
+
   /// Who is in the room. A name and a role, nothing that identifies anyone
   /// elsewhere.
   members(slug: string) {

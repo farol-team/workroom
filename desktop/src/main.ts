@@ -874,6 +874,19 @@ $("signin-provider").addEventListener("click", async () => {
   }
 });
 
+$("memory-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $<HTMLInputElement>("memory-title").value.trim();
+  const detail = $<HTMLTextAreaElement>("memory-detail").value.trim();
+  if (!current || !title || !detail) return;
+  try {
+    await api.remember(current.slug, title, detail);
+    $<HTMLInputElement>("memory-title").value = "";
+    $<HTMLTextAreaElement>("memory-detail").value = "";
+    renderMemory();
+  } catch (err) { alert(String(err)); }
+});
+
 $("skill-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = $<HTMLInputElement>("skill-title").value.trim();
