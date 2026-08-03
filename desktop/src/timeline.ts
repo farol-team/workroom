@@ -35,8 +35,14 @@ export interface TimelineDeps {
   openUrl?: (url: string) => Promise<void>;
 }
 
+/// An artifact as the channel's listing serves it — enough to draw the row the
+/// live socket would have drawn (#160).
+export interface ChannelArtifact {
+  id: number; name: string; kind: string | null; created_at: string;
+}
+
 export interface Timeline {
-  open(channel: Channel & { messages: Message[] }): void;
+  open(channel: Channel & { messages: Message[] }, artifacts?: ChannelArtifact[]): void;
   add(m: Message): void;
   /// Everything this channel has said, in the order it was said. The turn reads
   /// it, and so does anything that has to know what the page left out.
@@ -192,7 +198,7 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     $("messages").append(el);
   }
 
-  function open(channel: Channel & { messages: Message[] }) {
+  function open(channel: Channel & { messages: Message[] }, artifacts: ChannelArtifact[] = []) {
     $("messages").innerHTML = "";
     held = [ ...channel.messages ];
     closeThread();
@@ -204,8 +210,16 @@ export function createTimeline(deps: TimelineDeps): Timeline {
       earlier.textContent = `${shown.hidden} earlier messages are not shown`;
       $("messages").append(earlier);
     }
-    if (channel.messages.length) shown.messages.forEach(add);
-    else showIntro(channel);
+    if (channel.messages.length || artifacts.length) {
+      // What was said and what was attached, drawn in the order it happened —
+      // the same order watching the room live would have shown (#160).
+      [ ...shown.messages.map((m) => ({ at: m.created_at, draw: () => add(m) })),
+        ...artifacts.map((a) => ({ at: a.created_at, draw: () => addArtifact(a) })) ]
+        .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+        .forEach((row) => row.draw());
+    } else {
+      showIntro(channel);
+    }
   }
 
   /// The last few turns of the room, as the agent would read them. From the

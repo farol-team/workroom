@@ -223,6 +223,14 @@ export class Api {
     });
   }
 
+  /// Work product belongs to the channel, so reopening the room must not lose
+  /// what was attached while nobody watched (#160). Newest first, as served.
+  artifacts(slug: string) {
+    return this.call<Array<{ id: number; name: string; kind: string | null;
+                             sha256: string | null; created_at: string }>>(
+      `/channels/${slug}/artifacts`);
+  }
+
   attachArtifact(runId: number, name: string, content: string, kind = "transcript") {
     return this.call(`/runs/${runId}/artifacts`, {
       method: "POST", body: JSON.stringify({ name, content, kind }),

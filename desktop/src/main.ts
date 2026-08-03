@@ -336,7 +336,13 @@ function showPresence(run: Presence) {
 }
 
 async function open(slug: string) {
-  const full = await api.channel(slug);
+  // Fetched beside the channel, not after it — and a listing that fails must
+  // not keep the room shut: the artifacts are the record's, the room is not
+  // theirs (#160).
+  const [ full, artifacts ] = await Promise.all([
+    api.channel(slug),
+    api.artifacts(slug).catch(() => []),
+  ]);
   current = full;
   renderChannels();
   $("channel-name").textContent = `# ${full.slug}`;
@@ -345,7 +351,7 @@ async function open(slug: string) {
   // Before the timeline draws, not after: what it draws counts itself as seen
   // through `onShown`, and setting the count afterwards would throw that away.
   seenCount.set(slug, full.messages.length);
-  timeline.open(full);
+  timeline.open(full, artifacts);
 
   // After the room is drawn, and never in its way: provisioning is this
   // machine making the channel's folder ready, not something the room waits
