@@ -11,6 +11,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// What a callback carried.
@@ -68,11 +69,17 @@ fn percent_decode(raw: &str) -> String {
 /// for. It is not a secret and does not pretend to be one: the token itself is
 /// what matters, and it travels to a listener on this machine only.
 pub fn nonce(port: u16) -> String {
+    // The clock cannot tell two sign-ins apart by itself: where its granularity
+    // is coarser than two back-to-back calls, the nanos repeat, and a nonce
+    // that can repeat is not a nonce (#210). The counter is what tells them
+    // apart within this process; the clock, across processes and restarts.
+    static TAKEN: AtomicU64 = AtomicU64::new(0);
+    let seq = TAKEN.fetch_add(1, Ordering::Relaxed);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{:x}-{:x}-{:x}", now, port, std::process::id())
+    format!("{:x}-{:x}-{:x}-{:x}", now, seq, port, std::process::id())
 }
 
 /// What the browser is left looking at. Plain, because the person's attention
