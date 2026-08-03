@@ -74,7 +74,11 @@ class Workspace < ApplicationRecord
 
   # A person's place in a room, made once. Signing in twice is not joining
   # twice, and after #134 a person without a membership cannot reach anything.
-  def self.admit(user)
-    WorkspaceMembership.find_or_create_by!(user:, workspace: default)
+  # A role only where the caller has a reason — the first person into an empty
+  # workspace is its owner (#227); everyone else takes the column's default.
+  def self.admit(user, role: nil)
+    WorkspaceMembership.find_or_create_by!(user:, workspace: default) do |m|
+      m.role = role if role
+    end
   end
 end

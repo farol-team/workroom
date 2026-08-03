@@ -150,6 +150,28 @@ approval queue. A wrong entry is corrected by superseding it.
   sign-in — any address, no proof — is on in development and test and off
   everywhere else; `WORKROOM_DEV_SIGNIN=1` forces it on if you really mean it.
 
+  **Who a provider sign-in lets in.** Signing up is not the same act as signing
+  in (#227): a member signs in; a stranger is admitted only if an open
+  invitation names their address (create one from the People panel, or `POST
+  /api/v1/invitations` with the email); an empty workspace takes its first
+  person as its owner, since there is nobody yet to do the inviting. Everyone
+  else is refused, told so, and told what to do about it. An address the
+  provider marks unverified is refused outright. This is what makes a public
+  issuer safe to point at:
+
+  ```bash
+  export OIDC_ISSUER=https://accounts.google.com
+  ```
+
+  works with a Google Cloud OAuth client of type **Web application** — the
+  redirect lands on this server, not in the desktop app; the app receives its
+  own token on a loopback listener afterwards. Register the redirect URI
+  *exactly* as the server will send it: Google treats `http://localhost` and
+  `http://127.0.0.1` as different strings, and the default in `omniauth.rb` uses
+  `127.0.0.1`. And never delete and re-create that OAuth client: Google's `sub`
+  is per client, every member's stored subject would change, and each of them
+  would then be refused as a stranger arriving with a familiar address.
+
   The client asks the workspace how it lets people in, and offers what is there.
   With a provider configured it opens your own browser, your provider answers,
   and the client ends up holding the same bearer token it would have got the
