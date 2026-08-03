@@ -112,11 +112,11 @@ export class Api {
 
   invitations() {
     return this.call<Array<{ id: number; code: string; email: string | null; role: string;
-                             expires_at: string; invited_by: string }>>("/invitations");
+                             invited_by: string }>>("/invitations");
   }
 
   invite(email?: string, role = "member") {
-    return this.call<{ code: string; email: string | null; role: string; expires_at: string }>(
+    return this.call<{ code: string; email: string | null; role: string }>(
       "/invitations", { method: "POST", body: JSON.stringify({ email, role }) });
   }
 

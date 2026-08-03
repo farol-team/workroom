@@ -36,8 +36,6 @@ module Api
                        role: membership.role, token: membership.api_token }
       rescue Invitation::Spent
         render_error("that invitation has already been used", :gone)
-      rescue Invitation::Expired
-        render_error("that invitation has expired", :gone)
       end
 
       private
@@ -45,7 +43,7 @@ module Api
       # The code is the invitation. Listing carries it because only an admin of
       # this room can list, and they are the person who has to send it.
       def serialize(invitation)
-        invitation.slice(:id, :email, :role, :expires_at)
+        invitation.slice(:id, :email, :role)
                   .merge(code: invitation.code, invited_by: invitation.invited_by.name)
       end
     end
