@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -500,8 +500,10 @@ async function turn(name: string, postedId: number, body: string) {
     // The offer at the end of this turn is measured from here: what was
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
+    // The persona first: what this agent is, before what this room is (#232).
+    const persona = instructionOf(agents.definitions().find((d) => d.name === name));
     outcome = await agents.prompt(name, sessionId, withClosing(body),
-                        [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
+                        [ persona, boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
   } catch (err) {
     // The agent's own failure, recorded as the run's — the one case where
     // "Agent error" in the room is the truth.

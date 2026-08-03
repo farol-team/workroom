@@ -260,6 +260,12 @@ export class Agents {
     this.dirs.set(key, cwd);
     remember(this.remembered, name, slug, res.sessionId);
     this.persist();
+    // The definition's model is the session's starting point (#232): applied
+    // once at birth — never on a resumed session — so the per-channel override
+    // the session options offer survives every later turn. An agent with no
+    // model option simply keeps its own default; that is not a failure.
+    const wanted = this.defs.find((d) => d.name === name)?.model;
+    if (wanted) await this.setConfig(name, slug, "model", wanted).catch(() => {});
     return res.sessionId;
   }
 
