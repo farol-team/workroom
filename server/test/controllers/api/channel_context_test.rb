@@ -31,6 +31,19 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
     assert_includes context_for["boundary"], @channel.memory_uri
   end
 
+  # The boundary is a convention, not a control — so it has to say the
+  # convention. An agent that was never told memory is written through the
+  # rail will write around the journal, and nothing downstream can tell
+  # (#213).
+  test "the boundary states how memory is written and where its lineage lives" do
+    boundary = context_for["boundary"]
+
+    assert_includes boundary, "workroom://memory/remember",
+                    "the write path is named, or an agent writes around the journal"
+    assert_includes boundary, ".meta.json",
+                    "the sidecar convention is documented, or no agent can read an entry's lineage"
+  end
+
   test "a workspace with no account of its own reaches no store" do
     assert_nil context_for["store"],
                "no store is right; somebody else's store is the thing to avoid"

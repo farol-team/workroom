@@ -61,9 +61,15 @@ The workspace coordinates, records, and remembers.
 work touches stay where they are. They are sources; this is the layer that distils them
 into something an agent can act on.
 
-**Not an autonomy play.** The design assumes people stay in the loop. Promotion into shared
-memory is an explicit human act precisely because unattended accumulation is how a
-knowledge base quietly fills with confident mistakes.
+**Not an autonomy play.** The design assumes people stay in the loop — reading the room,
+correcting what is wrong in it. What it does not assume is that they will curate: an agent
+writes to its channel's memory directly, because a knowledge base that has to be approved
+does not get approved. Unattended accumulation is answered by making correction cheap
+instead. Every entry names the run and the person whose agent produced it, a wrong one is
+superseded rather than edited, and an agent meeting memory its work contradicts supersedes
+it — the store converges instead of piling up. The explicit human act is one step further
+out: turning a conclusion into a document the team keeps is a pull request somebody reviews
+and merges.
 
 **Not a chat product.** Conversation is the interface, not the point. The point is that
 work done in a channel leaves the room better informed than it found it.

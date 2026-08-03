@@ -53,4 +53,89 @@ class Api::V1::ChannelsControllerTest < ActionDispatch::IntegrationTest
     assert_response :created
     assert_equal "Nordwind", Channel.find_by!(slug: "nordwind").name
   end
+
+  # What the room's journal holds about the change. The row names the entry by
+  # its hash; what it says lives in the object store under that address.
+  def journal_payload(room, kind: "channel.updated")
+    entry = ChannelRecord.find_by!(channel: room, kind:)
+    JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"]
+  end
+
+  test "a member names the room's repository, and the room remembers who" do
+    room = channel(slug: "widgets")
+    room.memberships.create!(user: @alice, role: "owner")
+
+    patch api_v1_channel_path(room.slug),
+          params: { repository_url: "https://github.com/acme/widgets" }.to_json,
+          headers: auth(@alice).merge(@json)
+
+    assert_response :success
+    assert_equal "https://github.com/acme/widgets", response.parsed_body["repository_url"]
+    assert_equal "https://github.com/acme/widgets", room.reload.repository_url
+
+    assert_equal(
+      { "field" => "repository_url", "from" => nil,
+        "to" => "https://github.com/acme/widgets", "author_id" => @alice.id },
+      journal_payload(room)
+    )
+    assert Activity.exists?(actor: @alice, action: "channel.updated", subject: room)
+  end
+
+  test "a blank address clears the setting rather than storing whitespace" do
+    room = channel(slug: "moved")
+    room.memberships.create!(user: @alice)
+    room.update!(repository_url: "https://github.com/acme/widgets")
+
+    patch api_v1_channel_path(room.slug),
+          params: { repository_url: "   " }.to_json,
+          headers: auth(@alice).merge(@json)
+
+    assert_response :success
+    assert_nil response.parsed_body["repository_url"]
+    assert_nil room.reload.repository_url
+    assert_equal({ "field" => "repository_url", "from" => "https://github.com/acme/widgets",
+                   "to" => nil, "author_id" => @alice.id }, journal_payload(room))
+  end
+
+  test "a setting is not a read: a stranger may not name the room's repository" do
+    room = channel(slug: "vault")
+    room.update!(visibility: "private")
+
+    patch api_v1_channel_path(room.slug),
+          params: { repository_url: "https://github.com/acme/widgets" }.to_json,
+          headers: auth(@alice).merge(@json)
+
+    assert_response :forbidden
+    assert_nil room.reload.repository_url
+    assert_nil ChannelRecord.find_by(channel: room, kind: "channel.updated")
+  end
+
+  test "a patch that changes nothing writes no journal entry" do
+    room = channel(slug: "settled")
+    room.memberships.create!(user: @alice)
+    room.update!(repository_url: "https://github.com/acme/widgets")
+
+    assert_no_difference -> { ChannelRecord.where(channel: room).count } do
+      patch api_v1_channel_path(room.slug),
+            params: { repository_url: "https://github.com/acme/widgets" }.to_json,
+            headers: auth(@alice).merge(@json)
+    end
+    assert_response :success
+  end
+
+  test "the room hears when its repository is named" do
+    room = channel(slug: "loud")
+    room.memberships.create!(user: @alice)
+
+    heard = broadcasts(room) do
+      patch api_v1_channel_path(room.slug),
+            params: { repository_url: "https://github.com/acme/widgets" }.to_json,
+            headers: auth(@alice).merge(@json)
+    end
+
+    assert_response :success
+    note = heard.find { |p| p[:type] == "channel" }
+    assert_not_nil note, "the room was not told its own setting changed"
+    assert_equal "https://github.com/acme/widgets", note.dig(:channel, :repository_url)
+  end
 end

@@ -19,6 +19,10 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     response.parsed_body
   end
 
+  def journal = @channel.channel_records.order(:seq)
+
+  def payload_of(entry) = JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"]
+
   test "the handshake reports the protocol and the server" do
     body = rpc("initialize", { protocolVersion: "2025-06-18" })
 
@@ -52,6 +56,35 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
       .dig("result", "content", 0, "text"))
 
     assert_includes found.map { |c| c["uri"] }, "workroom://memory/remember"
+  end
+
+  test "a channel with a repository is told how to publish into it" do
+    # Promotion is a step, not an effect (#208): the rail says how, and the
+    # how names where. The url is the room's own setting (#203).
+    @channel.update!(repository_url: "https://github.com/acme/widgets")
+
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "publish the decision to the repository" } })
+      .dig("result", "content", 0, "text"))
+    assert_includes found.map { |c| c["uri"] }, "workroom://channel/publish"
+
+    text = rpc("tools/call", { name: "execute_capability",
+      arguments: { uri: "workroom://channel/publish" } })
+      .dig("result", "content", 0, "text")
+    assert_includes text, "https://github.com/acme/widgets"
+    assert_includes text, "agent/", "the branch discipline is #205's, and the text carries it"
+    assert_includes text, "human", "a human merges, never the agent unasked"
+  end
+
+  test "a channel without a repository has nothing to publish into" do
+    found = JSON.parse(rpc("tools/call",
+      { name: "search_capabilities", arguments: { query: "publish the decision to the repository" } })
+      .dig("result", "content", 0, "text"))
+    refute_includes found.map { |c| c["uri"] }, "workroom://channel/publish"
+
+    out = rpc("tools/call", { name: "execute_capability",
+      arguments: { uri: "workroom://channel/publish" } })
+    assert out.dig("result", "isError"), "an instruction for a room without a clone is a capability it does not have"
   end
 
   test "what an agent chose to keep is attributed to the run that kept it" do
@@ -202,9 +235,204 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert_equal(-32_601, body.dig("error", "code"))
   end
 
+  # A write to memory is a thing that happened in the room, so the room's
+  # journal says it happened — with the uri rather than a row id, because the
+  # rail writes to whichever store is configured and only the uri means the same
+  # thing in both.
+  test "what an agent remembers lengthens the room's journal" do
+    run = agent_run(user: @alice, channel: @channel)
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/remember",
+        args: { title: "Pricing objection", detail: "Setup cost, not price." } } })
+    end
+
+    written = MemoryEntry.current.find_by(title: "Pricing objection")
+    entry = journal.last
+    assert_nil entry.subject_id, "the uri is the reference, not a row this store happens to have"
+
+    payload = payload_of(entry)
+    assert_equal "remember", payload["action"]
+    assert_equal written.uri, payload["uri"]
+    assert_equal "Pricing objection", payload["title"]
+    assert_equal "Setup cost, not price.", payload["detail"],
+                 "the journal holds what the agent recorded, not only that it recorded"
+    assert_equal "agent", payload["trust"]
+    assert_equal @alice.id, payload["author_id"], "whose agent wrote it (Article P4)"
+    assert_equal run.id, payload["run_id"], "the turn it came from (Article P4)"
+  end
+
+  test "a remember the rail refused is in no journal" do
+    assert_no_difference -> { @channel.channel_records.count } do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/remember", args: { title: "No detail with it" } } })
+    end
+  end
+
+  # Superseding is the correction mechanism (Article P3), so the record has to
+  # be able to tell a correction from a new claim.
+  test "a supersession is recorded, and says which way it went" do
+    stale = MemoryEntry.last
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/supersede",
+        args: { uri: stale.uri, reason: "contradicted by a later call" } } })
+    end
+
+    payload = payload_of(journal.last)
+    assert_equal "supersede", payload["action"]
+    assert_equal stale.uri, payload["uri"]
+    assert_equal "contradicted by a later call", payload["reason"]
+  end
+
+  test "a supersession that was refused is in no journal" do
+    other = channel(name: "Marketing")
+    theirs = @store.write(other, title: "Campaign brief", detail: "Elsewhere.")
+
+    assert_no_difference -> { ChannelRecord.count } do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/supersede",
+        args: { uri: theirs.uri, reason: "not mine to correct" } } })
+    end
+  end
+
   test "an unknown capability answers with an error" do
     out = rpc("tools/call", { name: "execute_capability", arguments: { uri: "viking://nope" } })
 
     assert out.dig("result", "isError"), "a bad uri is a tool error, not a protocol error"
+  end
+
+  # The rail witnessed the write, so the store learns the journal lineage of
+  # what it now holds: the sidecar is how a reader of the entry finds the
+  # record of it (#213). The wire is the subject, so the adapter is the real
+  # one and only the store behind it is a stub.
+  test "what an agent remembers is annotated with the journal lineage" do
+    run = agent_run(user: @alice, channel: @channel)
+
+    requests = with_recording_store do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/remember",
+        args: { title: "Pricing objection", detail: "Setup cost, not price." } } })
+      assert_response :success
+    end
+
+    record = journal.last
+    sidecar = requests.find { |r| r[:path] == "/api/v1/content/write" &&
+                                  r[:body]["uri"].to_s.end_with?(".meta.json") }
+    refute_nil sidecar, "a write the rail witnessed leaves a lineage sidecar next to the entry"
+    assert_equal "#{@channel.memory_uri}.pricing-objection.meta.json", sidecar[:body]["uri"]
+
+    meta = JSON.parse(sidecar[:body]["content"])
+    assert_equal record.seq, meta["seq"]
+    assert_equal record.entry_hash, meta["entry_hash"]
+    assert_equal "remember", meta["action"]
+    assert_equal payload_of(record)["uri"], meta["uri"]
+    assert_equal "agent", meta["trust"]
+    assert_equal @alice.id, meta["author_id"]
+    assert_equal run.id, meta["run_id"]
+    assert meta["recorded_at"].present?
+  end
+
+  test "a supersession is annotated with the journal lineage too" do
+    stale_uri = "#{@channel.memory_uri}stale.md"
+
+    requests = with_recording_store(existing: [ stale_uri ]) do
+      rpc("tools/call", { name: "execute_capability", arguments: {
+        uri: "workroom://memory/supersede",
+        args: { uri: stale_uri, reason: "contradicted by a later call" } } })
+      assert_response :success
+    end
+
+    record = journal.last
+    sidecar = requests.find { |r| r[:path] == "/api/v1/content/write" &&
+                                  r[:body]["uri"].to_s.end_with?(".meta.json") }
+    refute_nil sidecar, "a correction is journaled, so it carries lineage like any write"
+    assert_equal ".stale.meta.json", sidecar[:body]["uri"].split("/").last
+
+    meta = JSON.parse(sidecar[:body]["content"])
+    assert_equal record.seq, meta["seq"]
+    assert_equal record.entry_hash, meta["entry_hash"]
+    assert_equal "supersede", meta["action"]
+  end
+
+  # The journal is the source of truth and the sidecar only its index, so a
+  # store that refuses the sidecar must not refuse the remember: the entry was
+  # written, the record was appended, and the agent is told so.
+  test "a sidecar the store refused does not turn a remember into an error" do
+    requests = nil
+
+    assert_difference -> { @channel.channel_records.where(kind: "memory").count }, 1 do
+      requests = with_recording_store(fail_sidecar_write: true) do
+        rpc("tools/call", { name: "execute_capability", arguments: {
+          uri: "workroom://memory/remember",
+          args: { title: "Pricing objection", detail: "Setup cost, not price." } } })
+        assert_response :success
+      end
+    end
+
+    sidecar = requests.find { |r| r[:path] == "/api/v1/content/write" &&
+                                  r[:body]["uri"].to_s.end_with?(".meta.json") }
+    refute_nil sidecar, "the sidecar was tried, and its refusal swallowed"
+  end
+
+  private
+
+  # The OpenViking adapter pointed at a server that answers the minimum and
+  # remembers what it was asked. `existing` is the set of uris a read finds —
+  # anything else reads as not there, which is what `write` relies on to keep
+  # a key's first name. The store seam is process-wide, so it is put back
+  # rather than left pointing at a dead server.
+  def with_recording_store(existing: [], fail_sidecar_write: false)
+    requests = []
+    server = TCPServer.new("127.0.0.1", 0)
+    thread = Thread.new do
+      while (socket = server.accept)
+        begin
+          answer_store(socket, requests, existing, fail_sidecar_write)
+        rescue IOError, SystemCallError
+          nil # the client hung up first; the test is not about this socket
+        ensure
+          socket.close
+        end
+      end
+    end
+
+    Memory::Store.current = Memory::OpenViking.new(base_url: "http://127.0.0.1:#{server.addr[1]}",
+                                                   api_key: "unused")
+    yield
+    requests
+  ensure
+    Memory::Store.current = nil
+    thread&.kill
+    server&.close
+  end
+
+  def answer_store(socket, requests, existing, fail_sidecar_write)
+    request_line = socket.gets
+    return unless request_line
+
+    _method, target = request_line.split(" ")
+    headers = {}
+    while (line = socket.gets) && line != "\r\n"
+      key, value = line.chomp.split(": ", 2)
+      headers[key.downcase] = value
+    end
+    body = socket.read(headers["content-length"].to_i) if headers["content-length"]
+
+    uri = URI.parse(target)
+    params = uri.query ? URI.decode_www_form(uri.query).to_h : {}
+    json = body.to_s.empty? ? {} : JSON.parse(body)
+    requests << { path: uri.path, params:, body: json }
+
+    payload = "{}"
+    if uri.path == "/api/v1/content/read" && existing.include?(params["uri"])
+      payload = { result: "---\ntitle: Stale\n---\n\n# Stale\n\nOutdated.\n" }.to_json
+    elsif uri.path == "/api/v1/content/write" && fail_sidecar_write && json["uri"].to_s.end_with?(".meta.json")
+      payload = { status: "error", error: { message: "read-only filesystem" } }.to_json
+    end
+    socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+                 "Content-Length: #{payload.bytesize}\r\nConnection: close\r\n\r\n#{payload}")
   end
 end

@@ -61,9 +61,12 @@ part of what agents are written against. Two things follow, and both are load-be
    forwards to the server, which broadcasts it. The channel shows what is happening now.
 6. The agent may query the capability rail over MCP for skills or deeper context.
 7. The agent's answer becomes a message in the channel, attributed to the run.
-8. Files the agent produced are uploaded to the channel as artifacts.
-9. A background job proposes what is worth remembering. A person approves. Only then does
-   anything reach shared memory.
+8. Files the run produced are **offered** to the channel as artifacts — the turn's own
+   changes, measured from where the folder stood when the turn began (#202). Work product
+   belongs to the channel; what leaves the machine is still the person's press.
+9. The agent distils its own turn and writes what the room should keep to channel memory
+   through the rail (#54). There is no approval step and no queue: provenance is mandatory
+   and a wrong entry is superseded rather than gated. See [MEMORY.md](MEMORY.md).
 
 ## Where state lives
 

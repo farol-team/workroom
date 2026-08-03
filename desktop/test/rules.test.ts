@@ -1,8 +1,12 @@
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+/// <reference types="vite/client" />
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+// One test below reads main.ts as text rather than importing it, and asks vite
+// for it (`?raw`) rather than node's fs: the specs are typechecked now (#222),
+// and node's globals have no types here — nothing else in this window-shaped
+// suite reaches the filesystem.
+import mainSource from "../src/main.ts?raw";
+import indexHtml from "../index.html?raw";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -367,10 +371,10 @@ describe("agent definitions", () => {
     expect(none[0].default).toBe(true);
   });
 
-  test("nothing configured is the agent that ships, and the two it can offer", () => {
-    // The shipped one is default and certainly there (#120). The other two are
-    // named so somebody can see they exist and what state they are in — naming
-    // one installs nothing.
+  test("nothing configured is the three this project supports, claude first", () => {
+    // Claude answers `@agent` because something must, not because it is present
+    // (#120) — all three are installed the same way. They are named so somebody
+    // can see they exist and what state they are in; naming one installs nothing.
     expect(normalizeAgents([])).toEqual([
       { name: "claude", command: "claude-agent-acp", args: [], default: true },
       { name: "codex", command: "codex-acp", args: [] },
@@ -433,6 +437,13 @@ describe("work product", () => {
     expect(worthOffering([{ path: "a.md", bytes: 0 }])).toBe(false);
     expect(worthOffering([{ path: "a.md", bytes: 12 }])).toBe(true);
   });
+
+  test("an empty offer with pre-existing changes says so, quietly", () => {
+    expect(preExistingNotice(0)).toBeNull();
+    expect(preExistingNotice(3)).toBe(
+      "Nothing new this turn (3 pre-existing changes not offered)",
+    );
+  });
 });
 
 describe("distillation", () => {
@@ -465,16 +476,12 @@ describe("distillation", () => {
   });
 });
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 describe("the turn carries the question", () => {
-  test("send() wraps the body before prompting", async () => {
+  test("send() wraps the body before prompting", () => {
     // A source-level guard, and it is one on purpose: `send()` needs a window,
     // so nothing else here can catch the question being quietly dropped. Losing
     // it would be invisible — turns keep working, and the room stops learning.
-    const source = await readFile(resolve(__dirname, "../src/main.ts"), "utf8");
-
-    expect(source).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
+    expect(mainSource).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
   });
 });
 
@@ -503,8 +510,8 @@ describe("what is happening in the room", () => {
     w.observed({ runId: 1, channel: "meetings", who: "Bob", at: 1000 });
     w.observed({ runId: 2, channel: "meetings", who: "Bob", at: 2000 });
 
-    expect(w.inChannel("meetings")).toEqual([{ who: "Bob", since: 1000 }],
-      "since the earliest, so the elapsed time does not reset mid-work");
+    expect(w.inChannel("meetings"), "since the earliest, so the elapsed time does not reset mid-work")
+      .toEqual([{ who: "Bob", since: 1000 }]);
   });
 
   test("one ending run does not silence the other", () => {
@@ -567,9 +574,9 @@ describe("unread", () => {
   test("what arrived since you last looked", () => {
     expect(unreadCount(7, 5)).toBe(2);
     expect(unreadCount(6, 6)).toBe(0);
-    expect(unreadCount(5, undefined)).toBe(0,
-      "a channel you have never opened is not a channel full of unread");
-    expect(unreadCount(3, 5)).toBe(0, "a room cannot owe you a negative number of messages");
+    expect(unreadCount(5, undefined), "a channel you have never opened is not a channel full of unread")
+      .toBe(0);
+    expect(unreadCount(3, 5), "a room cannot owe you a negative number of messages").toBe(0);
   });
 });
 
@@ -595,7 +602,7 @@ describe("threads", () => {
     const all = [ room, asked, answered, replied, alsoReplied ];
 
     expect(threadOf(all, 2).map((m) => m.id)).toEqual([ 2, 3, 4, 5 ]);
-    expect(threadOf(all, 1).map((m) => m.id)).toEqual([ 1 ], "a message nobody answered is a thread of one");
+    expect(threadOf(all, 1).map((m) => m.id), "a message nobody answered is a thread of one").toEqual([ 1 ]);
   });
 
   test("the summary says how many replied, and who", () => {
@@ -623,8 +630,8 @@ describe("who said it", () => {
     const alice = identity({ kind: "user", name: "Alice Ruiz" });
 
     expect(alice.initials).toBe("AR");
-    expect(alice.hue).toBe(identity({ kind: "user", name: "Alice Ruiz" }).hue,
-      "the same person is the same colour every time");
+    expect(alice.hue, "the same person is the same colour every time")
+      .toBe(identity({ kind: "user", name: "Alice Ruiz" }).hue);
     expect(alice.isAgent).toBe(false);
   });
 
@@ -655,7 +662,7 @@ describe("a long history", () => {
 
     const shown = onScreen(messages, 200);
     expect(shown.messages).toHaveLength(200);
-    expect(shown.messages[0].id).toBe(301, "the recent end, not the start");
+    expect(shown.messages[0].id, "the recent end, not the start").toBe(301);
     expect(shown.hidden).toBe(300);
   });
 
@@ -1022,7 +1029,7 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn(async () => null) })
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn(async () => {}) }));
 
-const room = (await readFile(resolve(__dirname, "../index.html"), "utf8"))
+const room = indexHtml
   .replace(/[\s\S]*?<body>/, "").replace(/<\/body>[\s\S]*/, "")
   .replace(/<script[\s\S]*?<\/script>/g, "");
 
@@ -1671,3 +1678,81 @@ describe("a turn that fails at the end", () => {
   });
 });
 
+describe("the standing rules of a git-backed session (#205)", () => {
+  test("the boundary names the real default branch, not a placeholder", () => {
+    const text = gitBoundary("main");
+
+    expect(text).toContain("main");
+    // The rules the card stands on: branches of one's own, never the
+    // mainline, and authorship that stays the person's.
+    expect(text).toContain("agent/");
+    expect(text).toMatch(/never (commit|push)/i);
+    expect(text).toContain("Co-Authored-By");
+  });
+
+  test("another repository's mainline is the one named", () => {
+    expect(gitBoundary("trunk")).toContain("trunk");
+    expect(gitBoundary("trunk")).not.toContain("main");
+  });
+});
+
+describe("what a permission ask means in a repository (#205)", () => {
+  test("a push to a feature branch says where it goes, calmly", () => {
+    expect(gitAskNote("git push origin agent/readme-fixes", "main", false))
+      .toBe("Push to origin (agent/readme-fixes)");
+  });
+
+  test("a push to the default branch of a repository that deploys is a warning", () => {
+    const note = gitAskNote("git push origin main", "main", true);
+
+    expect(note).toContain("main");
+    expect(note).toContain("deploys on merge to main");
+  });
+
+  test("a push to the default branch without a deploy is still named", () => {
+    const note = gitAskNote("git push origin main", "main", false);
+
+    expect(note).toContain("main");
+    expect(note).not.toContain("deploys");
+  });
+
+  test("a command that is not git is not annotated", () => {
+    expect(gitAskNote("rm -rf node_modules", "main", true)).toBeNull();
+    expect(gitAskNote("npm test", "main", false)).toBeNull();
+  });
+
+  test("a commit away from the default branch is local, and stays quiet", () => {
+    expect(gitAskNote("git commit -m 'wip'", "main", true)).toBeNull();
+  });
+
+  test("a commit onto the default branch of a deploying repository is a warning", () => {
+    const note = gitAskNote("git checkout main && git commit -m 'wip'", "main", true);
+
+    expect(note).toContain("main");
+    expect(note).toContain("deploys on merge to main");
+  });
+
+  test("a push with no named branch still says what it is", () => {
+    expect(gitAskNote("git push", "main", true)).toBe("Push to origin");
+  });
+});
+
+describe("naming a branch on GitHub (#206)", () => {
+  test("an https remote becomes a tree url, .git suffix or not", () => {
+    expect(githubTreeUrl("https://github.com/acme/widgets", "agent/notes"))
+      .toBe("https://github.com/acme/widgets/tree/agent/notes");
+    expect(githubTreeUrl("https://github.com/acme/widgets.git", "main"))
+      .toBe("https://github.com/acme/widgets/tree/main");
+  });
+
+  test("an ssh remote becomes the same tree url", () => {
+    expect(githubTreeUrl("git@github.com:acme/widgets.git", "agent/notes"))
+      .toBe("https://github.com/acme/widgets/tree/agent/notes");
+  });
+
+  test("anything else is no link at all — a control without a target is hidden", () => {
+    expect(githubTreeUrl(null, "main")).toBeNull();
+    expect(githubTreeUrl("https://gitlab.example.test/acme/widgets", "main")).toBeNull();
+    expect(githubTreeUrl("/home/alice/src/widgets", "main")).toBeNull();
+  });
+});

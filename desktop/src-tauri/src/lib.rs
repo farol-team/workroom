@@ -28,11 +28,11 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
+use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
-/// Defaults to the adapter that ships with this application; any other ACP
-/// agent works by passing a different command.
+/// Defaults to the adapter `@agent` means when nobody has said otherwise; any
+/// other ACP agent works by passing a different command.
 #[tauri::command]
 async fn agent_start(
     app: AppHandle,
@@ -57,10 +57,10 @@ async fn agent_start(
 
 /// Where an agent named by a bare command actually is.
 ///
-/// The adapter ships with the application, so `npx` never runs: a package
-/// resolved from the registry at the moment somebody opens a channel is one
-/// that can change between two turns, and the name this project used to name
-/// was deprecated besides (#120).
+/// Nothing is ever fetched here: an agent arrives by `agent_install`, on a
+/// press, before any of this runs. A package resolved from the registry at the
+/// moment somebody opens a channel is one that can change between two turns —
+/// which is why `npx` appears nowhere in this application (#120).
 fn resolve(app: &AppHandle, command: &str) -> String {
     located(command, &places(app, command))
 }
@@ -69,37 +69,119 @@ fn resolve(app: &AppHandle, command: &str) -> String {
 fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
     candidates(
         command,
-        directories(
-            app.path()
-                .resolve("agents/bin", tauri::path::BaseDirectory::Resource)
-                .ok(),
-            std::env::current_dir()
-                .ok()
-                .map(|dir| dir.join("../node_modules/.bin")),
-            app.path().app_data_dir().ok(),
-            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
-        ),
+        directories(app.path().app_data_dir().ok(), user_path().clone()),
     )
 }
 
+/// How long the person's shell has to answer. An rc file that blocks — a
+/// network drive that is not there, a prompt nobody will answer — must not
+/// become an application that does not start.
+const SHELL_ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The directories this application looks in, and runs an install with.
+///
+/// Not the ones this process was handed. An application opened from the Dock or
+/// Finder inherits the system's own short PATH, and no profile is read for it —
+/// while Node arrives on people's machines through nvm and Homebrew, which are
+/// on neither. Under `pnpm tauri dev` the terminal's environment is the app's
+/// environment and none of this shows, which is exactly the shape of bug #120
+/// named: behaving one way where it is written and another where it is used.
+///
+/// Asked once. A machine does not change its shell configuration under a
+/// running window, and asking on every probe would pay a shell start-up for
+/// each row of the panel.
+fn user_path() -> &'static Vec<std::path::PathBuf> {
+    static PATH: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let given: Vec<std::path::PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        match asked_of_the_persons_shell() {
+            Some(said) => merged_path(given, &said),
+            None => given,
+        }
+    })
+}
+
+/// What the person's own shell says their PATH is.
+///
+/// Login **and** interactive: Homebrew writes itself into the file only a login
+/// shell reads and nvm into the one only an interactive shell reads, so asking
+/// for either alone answers on half the machines.
+///
+/// `None` for anything that is not an answer — no shell to ask, a shell that
+/// failed, a shell still thinking. Windows is `None` by design: `cmd /C` is
+/// started with the person's own environment already.
+fn asked_of_the_persons_shell() -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let shell = std::env::var("SHELL").ok()?;
+
+    let (said, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let answer = std::process::Command::new(&shell)
+            .args(["-lic", "printf %s \"$PATH\""])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+        let _ = said.send(answer);
+    });
+
+    // A shell that has not answered by now is one this application stops
+    // waiting for. The child is left to finish on its own and its answer is
+    // dropped — the alternative is a window that never opens.
+    heard.recv_timeout(SHELL_ANSWERS_WITHIN).ok().flatten()
+}
+
+/// What the shell said, folded into what this process already had.
+///
+/// The last line, because an rc file greets people and warns them about flags
+/// before anything is printed on purpose. Absolute directories only, because a
+/// shell that failed prints its error and fish prints its PATH space-separated
+/// — neither is a set of directories, and the pieces would sit in front of
+/// every lookup this application makes.
+fn merged_path(given: Vec<std::path::PathBuf>, said: &str) -> Vec<std::path::PathBuf> {
+    let answer = said
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .unwrap_or_default();
+
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = given.iter().cloned().collect();
+    let mut merged = given;
+    for dir in std::env::split_paths(answer) {
+        if dir.is_absolute() && seen.insert(dir.clone()) {
+            merged.push(dir);
+        }
+    }
+    merged
+}
+
+/// Those directories as a child process is given them. A list that cannot be
+/// joined — a directory with a separator in its name — leaves the child with
+/// what this process has, which is what it had before any of this.
+fn path_env(dirs: &[std::path::PathBuf]) -> std::ffi::OsString {
+    std::env::join_paths(dirs).unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
+}
+
 /// The directories a bare command is looked for in, in the order this
-/// application trusts them: the bundle, then beside the source under
-/// `pnpm tauri dev`, then the prefix `agent_install` fetches into — which is
+/// application trusts them: the prefix `agent_install` fetches into — which is
 /// `npm/bin` under the app data directory, because that is where
-/// `npm install --prefix` leaves what it installed — and last whatever is on
+/// `npm install --prefix` leaves what it installed — and then whatever is on
 /// the person's own PATH. Somebody naming an agent they already have means
 /// that one, and this must not take it away from them.
+///
+/// Two, and the same two under `pnpm tauri dev` as in a shipped build. A
+/// directory that exists only on one of those is a client that behaves one way
+/// where it is written and another way where it is used.
 fn directories(
-    bundle: Option<std::path::PathBuf>,
-    beside: Option<std::path::PathBuf>,
     app_data: Option<std::path::PathBuf>,
     on_path: Vec<std::path::PathBuf>,
 ) -> Vec<std::path::PathBuf> {
-    let ours = app_data.map(|dir| dir.join("npm").join("bin"));
-
-    [bundle, beside, ours]
+    app_data
+        .map(|dir| dir.join("npm").join("bin"))
         .into_iter()
-        .flatten()
         .chain(on_path)
         .collect()
 }
@@ -191,6 +273,12 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
         shell
     };
 
+    // `sh -c` reads no profile, and a packaged application was handed no
+    // useful PATH to begin with — so `npm` is not found on a machine where it
+    // answers in a terminal. The person's own directories are what this runs
+    // with (#240).
+    shell.env("PATH", path_env(user_path()));
+
     let out = shell
         .output()
         .await
@@ -205,96 +293,201 @@ async fn agent_install(command: String) -> Result<InstallResult, String> {
 }
 
 /// Open the working directory for this session and remember what was in it.
-/// The path is derived from who is working, with which agent, in which channel —
-/// the agent never names its own directory.
+/// The path is derived from the workspace and the channel — the agent never
+/// names its own directory. The root is `~/WorkRoom`: where an agent spends
+/// its days is work, and work should be visible in Finder, not hidden in
+/// app-data like a cache — and it stays out of iCloud's Documents domain,
+/// whose file eviction would corrupt an agent's working tree (#201).
+///
+/// Everything here reads a disk, so it happens on the blocking pool. An async
+/// command that walks a directory inline holds a runtime worker for as long as
+/// the walk takes, and on somebody's real repository that is the whole bridge
+/// answering nothing, mid-turn, for a directory listing (#179).
 #[tauri::command]
 async fn agent_workspace(
     app: AppHandle,
-    shots: State<'_, Workspaces>,
-    user: String,
-    name: String,
+    workspace: String,
     channel: String,
 ) -> Result<String, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("no app data directory: {e}"))?
-        .join("workspaces");
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
 
-    let dir = workspace::workspace_path(&root, &user, &name, &channel);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let dir = workspace::workspace_path(&root, &workspace, &channel);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
-    shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?
-        .insert(dir.clone(), workspace::snapshot(&dir));
-
-    Ok(dir.to_string_lossy().into_owned())
+        workspace::baseline(&app.state::<Workspaces>(), &dir)?;
+        Ok(dir.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("opening the workspace did not finish: {e}"))?
 }
 
 /// What this run wrote or changed, offered rather than uploaded — what leaves
 /// the machine stays the person's decision (Article D3 does not override P2).
+///
+/// The walk and the `git status` are the slow part and belong off the runtime;
+/// which files those are, and where the line between turns now sits, is
+/// `workspace::offer`'s to decide.
 #[tauri::command]
-async fn agent_produced(
-    shots: State<'_, Workspaces>,
+async fn agent_produced(app: AppHandle, workspace: String) -> Result<TurnProduced, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::offer(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("looking at the workspace did not finish: {e}"))?
+}
+
+/// Mark where a turn begins. Everything the offer says about the run is
+/// measured from here — what was already dirty is the person's, and only
+/// the delta is the run's (#202).
+#[tauri::command]
+async fn agent_turn_start(app: AppHandle, workspace: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::turn_start(&app.state::<Workspaces>(), std::path::Path::new(&workspace))
+    })
+    .await
+    .map_err(|e| format!("marking the turn's start did not finish: {e}"))?
+}
+
+/// What a folder's repository would mean for an agent about to work in it —
+/// read when the person picks the folder, so the warning that a merge ships
+/// something arrives before the agent does (#203). The reading is `git` and a
+/// directory listing, and belongs off the runtime like every other walk.
+#[tauri::command]
+async fn agent_repo_info(path: String) -> Result<workspace::RepoInfo, String> {
+    tokio::task::spawn_blocking(move || workspace::repo_info(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("looking at the repository did not finish: {e}"))
+}
+
+/// Clone the room's repository into the folder the room works in. The url is
+/// the room's own setting and the directory is derived — like every session
+/// working directory, it is never the agent's to name (#201).
+#[tauri::command]
+async fn agent_clone(url: String, dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::clone_repository(&url, std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("cloning did not finish: {e}"))?
+}
+
+/// Where the channel would work, answered *without* making it (#204).
+/// `agent_workspace` creates on sight, which is right when a session is about
+/// to start and wrong here: provisioning is only deciding what to do, and a
+/// decision that creates the folder would make every later answer — empty?
+/// missing? — a question about a directory we just made ourselves.
+#[tauri::command]
+async fn agent_derived_path(
+    app: AppHandle,
     workspace: String,
-) -> Result<Vec<Produced>, String> {
-    let dir = std::path::PathBuf::from(&workspace);
+    channel: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .home_dir()
+            .map_err(|e| format!("no home directory: {e}"))?
+            .join("WorkRoom");
+        Ok(workspace::workspace_path(&root, &workspace, &channel)
+            .to_string_lossy()
+            .into_owned())
+    })
+    .await
+    .map_err(|e| format!("deriving the path did not finish: {e}"))?
+}
 
-    // A folder somebody bound is their real work, and git already knows what
-    // changed in it — by their ignore rules, not ours.
-    if let Some(changed) = workspace::git_changes(&dir) {
-        return Ok(changed
-            .into_iter()
-            .filter_map(|path| {
-                let bytes = std::fs::metadata(dir.join(&path)).ok()?.len();
-                (bytes <= MAX_ARTIFACT_BYTES).then_some(Produced { path, bytes })
-            })
-            .collect());
-    }
+/// What the channel's folder currently is — there or not, empty or not, and
+/// which repository when it is one (#204). Read-only by construction: the
+/// answer decides between cloning, leaving alone, and warning, and every one
+/// of those needs the folder as it actually is.
+#[tauri::command]
+async fn agent_folder_state(dir: String) -> Result<workspace::FolderState, String> {
+    tokio::task::spawn_blocking(move || workspace::folder_state(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("looking at the folder did not finish: {e}"))
+}
 
-    let after = workspace::snapshot(&dir);
+/// Work in the folder that no run did (#207). Read-only: the line is the
+/// turn's to move, and the gate that asks this question asks it again on
+/// every focus, every open and every turn's end.
+#[tauri::command]
+async fn agent_human_changes(
+    app: AppHandle,
+    dir: String,
+) -> Result<workspace::HumanChanges, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::human_changes(&app.state::<Workspaces>(), std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| format!("reading the folder did not finish: {e}"))?
+}
 
-    let mut state = shots
-        .0
-        .lock()
-        .map_err(|_| "workspace state is poisoned".to_string())?;
-    let before = state.get(&dir).cloned().unwrap_or_default();
+/// Set the person's unreviewed work aside so a run can start from a clean
+/// tree (#207). The button says how to bring it back; git keeps it.
+#[tauri::command]
+async fn agent_stash(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::stash(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("stashing did not finish: {e}"))?
+}
 
-    let files = workspace::produced(&before, &after)
-        .into_iter()
-        .filter_map(|rel| {
-            let bytes = after.get(&rel).map(|(size, _)| *size).unwrap_or(0);
-            (bytes <= MAX_ARTIFACT_BYTES).then(|| Produced {
-                path: rel.to_string_lossy().into_owned(),
-                bytes,
-            })
-        })
-        .collect();
+/// A plain folder becomes a repository when the person says so (#207).
+/// Idempotent, and deliberately remote-less.
+#[tauri::command]
+async fn agent_git_init(dir: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || workspace::git_init(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| format!("init did not finish: {e}"))?
+}
 
-    // The next turn is measured from here, so one file is not offered twice.
-    state.insert(dir, after);
-    Ok(files)
+/// One file's changes, for the review dialog (#207). The dialog asks one row
+/// at a time, as the person expands them.
+#[tauri::command]
+async fn agent_file_diff(dir: String, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || workspace::file_diff(std::path::Path::new(&dir), &path))
+        .await
+        .map_err(|e| format!("reading the diff did not finish: {e}"))?
+}
+
+/// The reviewed changes, committed as the machine's own git identity (#207).
+/// No configuration is written here: if git cannot name the author, its own
+/// error is the dialog's to show.
+#[tauri::command]
+async fn agent_commit(dir: String, paths: Vec<String>, message: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::commit(std::path::Path::new(&dir), &paths, &message)
+    })
+    .await
+    .map_err(|e| format!("committing did not finish: {e}"))?
 }
 
 /// Read one produced file, as base64 — a work product is not always text.
 #[tauri::command]
 async fn agent_read(workspace: String, path: String) -> Result<String, String> {
-    let dir = std::path::PathBuf::from(&workspace)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
-    // A path that resolves outside its own workspace is not this session's to read.
-    if !file.starts_with(&dir) {
-        return Err(format!("{path} is outside the workspace"));
-    }
+    tokio::task::spawn_blocking(move || {
+        let dir = std::path::PathBuf::from(&workspace)
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let file = dir.join(&path).canonicalize().map_err(|e| e.to_string())?;
+        // A path that resolves outside its own workspace is not this session's to read.
+        if !file.starts_with(&dir) {
+            return Err(format!("{path} is outside the workspace"));
+        }
 
-    let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
-    if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
-        return Err(format!("{path} is too large to attach"));
-    }
-    Ok(BASE64.encode(bytes))
+        let bytes = std::fs::read(&file).map_err(|e| format!("cannot read {path}: {e}"))?;
+        if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+            return Err(format!("{path} is too large to attach"));
+        }
+        Ok(BASE64.encode(bytes))
+    })
+    .await
+    .map_err(|e| format!("reading the file did not finish: {e}"))?
 }
 
 /// Sign in through the person's own browser.
@@ -537,6 +730,11 @@ async fn agent_export_session(
 
     let out = tokio::process::Command::new(&command)
         .args(["export", &session_id])
+        // Named rather than resolved: this command has no app handle to derive
+        // the prefix from. The person's own directories are the difference
+        // between an exporter that is found and a feature that reads as absent
+        // in a packaged build (#240).
+        .env("PATH", path_env(user_path()))
         .output()
         .await
         .map_err(|e| format!("cannot run `{command} export`: {e}"))?;
@@ -596,6 +794,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(AgentState::default());
             app.manage(Workspaces::default());
+            // Asked now and off the thread that opens the window, so the first
+            // panel does not pay a shell start-up and a shell that never
+            // answers costs nobody a window (#240).
+            std::thread::spawn(|| {
+                let _ = user_path();
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -607,6 +811,16 @@ pub fn run() {
             agent_list,
             agent_workspace,
             agent_produced,
+            agent_turn_start,
+            agent_repo_info,
+            agent_clone,
+            agent_derived_path,
+            agent_folder_state,
+            agent_human_changes,
+            agent_stash,
+            agent_git_init,
+            agent_file_diff,
+            agent_commit,
             agent_read,
             agent_new_session,
             agent_load_session,
@@ -650,36 +864,21 @@ mod resolution {
         data.join("npm").join("bin")
     }
 
-    /// A machine, as this side is given one: what the bundle holds, what sits
-    /// beside the source, the app data directory, and the person's own PATH.
-    /// Everything below goes through the same chain the running application
-    /// builds — a test that hands `found` a list it ordered itself asserts only
-    /// that the list it wrote is in the order it wrote it.
-    fn chain(
-        command: &str,
-        bundle: Option<&Path>,
-        data: Option<&Path>,
-        on_path: Vec<PathBuf>,
-    ) -> Vec<PathBuf> {
-        candidates(
-            command,
-            directories(
-                bundle.map(Path::to_path_buf),
-                None,
-                data.map(Path::to_path_buf),
-                on_path,
-            ),
-        )
+    /// A machine, as this side is given one: the app data directory and the
+    /// person's own PATH. Everything below goes through the same chain the
+    /// running application builds — a test that hands `found` a list it ordered
+    /// itself asserts only that the list it wrote is in the order it wrote it.
+    fn chain(command: &str, data: Option<&Path>, on_path: Vec<PathBuf>) -> Vec<PathBuf> {
+        candidates(command, directories(data.map(Path::to_path_buf), on_path))
     }
 
     #[test]
-    fn our_own_prefix_is_looked_in_after_the_bundle_and_before_the_path() {
-        // The one directory this card adds, pinned by where it is and where it
-        // sits. `npm install --prefix P` puts its binaries in `P/bin`, so
-        // anything else here is a directory nothing will ever be found in.
+    fn our_own_prefix_is_looked_in_before_the_path_and_is_the_only_one_we_add() {
+        // Pinned by where it is and where it sits. `npm install --prefix P` puts
+        // its binaries in `P/bin`, so anything else here is a directory nothing
+        // will ever be found in — and there is no third place, because this
+        // application no longer carries an agent of its own (#120).
         let dirs = directories(
-            Some(PathBuf::from("/bundle/agents/bin")),
-            None,
             Some(PathBuf::from("/data")),
             vec![PathBuf::from("/usr/local/bin")],
         );
@@ -687,31 +886,9 @@ mod resolution {
         assert_eq!(
             dirs,
             vec![
-                PathBuf::from("/bundle/agents/bin"),
                 PathBuf::from("/data/npm/bin"),
                 PathBuf::from("/usr/local/bin"),
             ]
-        );
-    }
-
-    #[test]
-    fn the_adapter_in_the_bundle_wins_over_one_somebody_installed() {
-        // It ships with this application and is the version this client was
-        // tested against. An install into our own prefix is a fallback, not a
-        // replacement for what came in the bundle.
-        let bundle = temp("bundle");
-        let data = temp("data");
-        let shipped = binary(&bundle, "claude-agent-acp");
-        binary(&installed_in(&data), "claude-agent-acp");
-
-        assert_eq!(
-            found(&chain(
-                "claude-agent-acp",
-                Some(&bundle),
-                Some(&data),
-                vec![]
-            )),
-            Some(shipped.to_string_lossy().into_owned())
         );
     }
 
@@ -720,18 +897,29 @@ mod resolution {
         // What `agent_install` fetches goes into a directory this application
         // owns and nothing else on the machine knows about. Not looking there
         // means an agent somebody just installed still reads as missing.
-        let bundle = temp("empty-bundle");
         let data = temp("own-data");
         let elsewhere = temp("their-path");
         let installed = binary(&installed_in(&data), "opencode");
 
         assert_eq!(
-            found(&chain(
-                "opencode",
-                Some(&bundle),
-                Some(&data),
-                vec![elsewhere]
-            )),
+            found(&chain("opencode", Some(&data), vec![elsewhere])),
+            Some(installed.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn the_default_adapter_is_found_the_same_way_as_any_other() {
+        // Nothing about `claude-agent-acp` is special to this side: it is not
+        // carried, not looked for anywhere the others are not, and reads as
+        // missing until somebody installs it.
+        let data = temp("default-adapter");
+        let empty = temp("nothing-here");
+
+        assert_eq!(found(&chain("claude-agent-acp", Some(&data), vec![])), None);
+
+        let installed = binary(&installed_in(&data), "claude-agent-acp");
+        assert_eq!(
+            found(&chain("claude-agent-acp", Some(&data), vec![empty])),
             Some(installed.to_string_lossy().into_owned())
         );
     }
@@ -745,7 +933,7 @@ mod resolution {
         let already = binary(&theirs, "opencode");
 
         assert_eq!(
-            found(&chain("opencode", None, Some(&data), vec![theirs])),
+            found(&chain("opencode", Some(&data), vec![theirs])),
             Some(already.to_string_lossy().into_owned())
         );
     }
@@ -756,7 +944,7 @@ mod resolution {
         // must not take that away from them by answering for it.
         let data = temp("nothing-installed");
         let nowhere = temp("nowhere");
-        let looked = chain("kimi-acp", None, Some(&data), vec![nowhere]);
+        let looked = chain("kimi-acp", Some(&data), vec![nowhere]);
 
         assert_eq!(found(&looked), None);
         assert_eq!(located("kimi-acp", &looked), "kimi-acp");
@@ -792,6 +980,287 @@ mod resolution {
         let said = "é".repeat(TAIL * 2);
 
         assert!(tail(said.as_bytes()).ends_with('é'));
+    }
+}
+
+/// The PATH a person has, which is not the one this process was handed (#240).
+///
+/// An application opened from the Dock or Finder inherits the system's own
+/// short PATH and no profile is read for it. Node arrives on people's machines
+/// through nvm and Homebrew, neither of which is on that PATH, so the press
+/// that installs an agent answers `npm: not found` on a machine where `npm`
+/// answers perfectly well in a terminal.
+///
+/// The shell is asked once and can only add: what this process was given keeps
+/// its place, because a machine whose shell cannot be asked has to behave as it
+/// does today rather than worse.
+#[cfg(test)]
+mod the_path_a_person_has {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn dirs(raw: &[&str]) -> Vec<PathBuf> {
+        raw.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn what_this_process_was_given_keeps_its_place_and_the_shell_only_adds() {
+        let merged = merged_path(
+            dirs(&["/usr/bin", "/bin"]),
+            "/opt/homebrew/bin:/usr/bin:/bin:/Users/alice/.nvm/versions/node/v22/bin",
+        );
+
+        assert_eq!(
+            merged,
+            dirs(&[
+                "/usr/bin",
+                "/bin",
+                "/opt/homebrew/bin",
+                "/Users/alice/.nvm/versions/node/v22/bin",
+            ])
+        );
+    }
+
+    #[test]
+    fn a_directory_this_process_already_had_is_not_added_twice() {
+        // The lists overlap almost entirely — the system directories are in
+        // both. A PATH that repeats them is longer to walk and reads as though
+        // something went wrong.
+        let merged = merged_path(dirs(&["/usr/bin"]), "/usr/bin:/usr/bin:/opt/homebrew/bin");
+
+        assert_eq!(merged, dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+    }
+
+    #[test]
+    fn a_shell_that_said_nothing_leaves_the_path_exactly_as_it_was() {
+        // A shell that is not there, one that timed out, one that printed a
+        // blank line: three ways of answering nothing, and none of them is a
+        // reason to change where this application looks.
+        let given = dirs(&["/usr/bin", "/bin"]);
+
+        assert_eq!(merged_path(given.clone(), ""), given);
+        assert_eq!(merged_path(given.clone(), "  \n \n"), given);
+    }
+
+    #[test]
+    fn the_answer_is_the_last_line_because_a_profile_prints_its_own() {
+        // Somebody's rc file greets them, or warns about a deprecated flag.
+        // Taking the first line takes the greeting and loses the PATH.
+        let merged = merged_path(
+            dirs(&["/usr/bin"]),
+            "Welcome back, Alice\nnvm: using node v22\n/opt/homebrew/bin:/usr/bin\n",
+        );
+
+        assert_eq!(merged, dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+    }
+
+    #[test]
+    fn what_a_shell_says_is_only_believed_when_it_looks_like_a_path() {
+        // fish keeps PATH as a list and prints it space-separated; a shell that
+        // fails prints its own error. Neither is a set of directories, and
+        // adding the pieces would put nonsense in front of every lookup.
+        let given = dirs(&["/usr/bin"]);
+
+        assert_eq!(
+            merged_path(given.clone(), "command not found: printf"),
+            given
+        );
+    }
+
+    #[test]
+    fn an_install_runs_with_the_path_the_person_has() {
+        // The one that matters. `npm` is found by the shell this application
+        // starts, so the directories have to be in that shell's environment —
+        // the same list the probe walks, in the same order.
+        let joined = path_env(&dirs(&["/usr/bin", "/opt/homebrew/bin"]));
+
+        assert_eq!(joined.to_string_lossy(), "/usr/bin:/opt/homebrew/bin");
+    }
+}
+
+#[cfg(test)]
+mod what_the_commands_delegate {
+    //! Where the two workspace commands keep their behaviour, which is not in
+    //! themselves.
+    //!
+    //! A `#[tauri::command]` taking `State` cannot be invoked from a test —
+    //! there is no way to build one without a running application — so what
+    //! these commands do with the workspace is written as functions a test can
+    //! call, in `workspace`. That only means anything if the commands actually
+    //! go through those functions and keep no second copy of the logic: a
+    //! correct `offer` beside an `agent_produced` still diffing inline is a
+    //! green suite over a defect that never moved. Read off the source, the
+    //! way the capability list already is, because a command that cannot be
+    //! called leaves nothing else to look at.
+    //!
+    //! Only the delegation is asserted here. That the work then reaches the
+    //! blocking pool is read at the call sites when the card is accepted —
+    //! blocking and not blocking return the same value, and the difference is
+    //! visible only to everything else waiting on the runtime.
+
+    /// Each command, the function it must hand the workspace to, and what it
+    /// must therefore no longer be doing itself. Leaving the old inline copy in
+    /// place is how a suite goes green over a defect that is still there.
+    const DELEGATES: &[(&str, &str, &[&str])] = &[
+        (
+            "agent_workspace",
+            "workspace::baseline(",
+            &["workspace::snapshot(", ".lock()", ".insert("],
+        ),
+        (
+            "agent_produced",
+            "workspace::offer(",
+            &[
+                "workspace::snapshot(",
+                "workspace::git_changes(",
+                "workspace::produced(",
+                ".lock()",
+            ],
+        ),
+        // Provisioning's two questions (#204): the path is derived by the same
+        // function that derives it for a session, and the folder is read by
+        // the function the tests can reach — a second copy of either in the
+        // command would be logic no test can see.
+        (
+            "agent_derived_path",
+            "workspace::workspace_path(",
+            &["create_dir_all"],
+        ),
+        (
+            "agent_folder_state",
+            "workspace::folder_state(",
+            &["create_dir_all"],
+        ),
+        // The gate's three (#207): read the person's work without moving the
+        // line, and the two tree changes a button can ask for. A second copy
+        // of any of them in a command body would be logic no test can see.
+        (
+            "agent_human_changes",
+            "workspace::human_changes(",
+            &[".insert("],
+        ),
+        ("agent_stash", "workspace::stash(", &["create_dir_all"]),
+        (
+            "agent_git_init",
+            "workspace::git_init(",
+            &["create_dir_all"],
+        ),
+        // The review dialog's two (#207 part B): what one file's changes
+        // look like, and the commit that lands them. Same rule: the command
+        // wires, the workspace decides.
+        (
+            "agent_file_diff",
+            "workspace::file_diff(",
+            &["create_dir_all"],
+        ),
+        ("agent_commit", "workspace::commit(", &["create_dir_all"]),
+    ];
+
+    fn source() -> String {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+            .unwrap()
+    }
+
+    /// What one command does, from its signature to the brace that closes it,
+    /// with the commentary taken out — a command that only mentions a function
+    /// in a comment about it is not calling it.
+    fn body(source: &str, name: &str) -> String {
+        let start = source
+            .find(&format!("async fn {name}("))
+            .unwrap_or_else(|| panic!("`{name}` is not a command in this file"));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").expect("a command that ends");
+        rest[..end]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_commands_wire_and_the_workspace_decides() {
+        let source = source();
+
+        for (name, delegate, kept_inline) in DELEGATES {
+            let body = body(&source, name);
+            assert!(
+                body.contains(*delegate),
+                "`{name}` does not name `{delegate}` at all. What it passes is read at the call \
+                 site; that it calls it is read here"
+            );
+            for inline in kept_inline.iter() {
+                assert!(
+                    !body.contains(*inline),
+                    "`{name}` still does `{inline}` itself — a second copy of the line between \
+                     turns, in the one place no test can reach it"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod reading_a_produced_file {
+    //! The one workspace command a test can call: it takes no state, only the
+    //! two strings the panel sends. Its body is about to move inside a closure,
+    //! and the check that a path cannot climb out of its own workspace is the
+    //! kind of thing that survives a move by accident or not at all.
+
+    use super::*;
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("wr-read-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn a_produced_file_comes_back_as_it_was_written() {
+        let dir = temp("plain");
+        std::fs::write(dir.join("report.md"), "findings").unwrap();
+
+        let body = agent_read(dir.to_string_lossy().into_owned(), "report.md".into())
+            .await
+            .unwrap();
+
+        assert_eq!(BASE64.decode(body).unwrap(), b"findings");
+    }
+
+    #[tokio::test]
+    async fn a_path_that_climbs_out_of_the_workspace_is_not_this_sessions_to_read() {
+        // The agent names the path, and the panel passes it through. A session
+        // that can read a sibling's directory by writing `..` is not scoped by
+        // anything.
+        let dir = temp("escape");
+        std::fs::create_dir_all(dir.join("inside")).unwrap();
+        std::fs::write(dir.join("secret.env"), "TOKEN=secret").unwrap();
+
+        let error = agent_read(
+            dir.join("inside").to_string_lossy().into_owned(),
+            "../secret.env".into(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("outside the workspace"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_file_too_large_to_attach_is_refused_rather_than_sent() {
+        // The other guard in this body, and the other one a move could drop.
+        let dir = temp("too-large");
+        std::fs::write(
+            dir.join("dump.bin"),
+            vec![0u8; MAX_ARTIFACT_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let error = agent_read(dir.to_string_lossy().into_owned(), "dump.bin".into())
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("too large to attach"), "{error}");
     }
 }
 

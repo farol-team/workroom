@@ -24,7 +24,7 @@ const MODEL = process.env.WORKROOM_MODEL ?? "opencode/deepseek-v4-flash-free";
 // The same endpoints, in the same order, as `send()` in the client. If this
 // diverges it stops being evidence about what a real turn records.
 const api = async (path, init = {}) => {
-  const res = await fetch(`${SERVER}/api${path}`, {
+  const res = await fetch(`${SERVER}/api/v1${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}`, ...init.headers },
   });
@@ -103,7 +103,7 @@ await ask("initialize", {
 const { sessionId } = await ask("session/new", {
   cwd: process.cwd(),
   mcpServers: [ {
-    name: "workroom", type: "http", url: `${SERVER}/api/rail/${channel}`,
+    name: "workroom", type: "http", url: `${SERVER}/api/v1/rail/${channel}`,
     headers: [ { name: "Authorization", value: `Bearer ${TOKEN}` } ],
   } ],
 });

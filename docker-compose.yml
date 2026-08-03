@@ -22,11 +22,8 @@ services:
   # own — infrastructure inference, which Article P2 permits server-side and
   # permits for nothing else.
   openviking:
-    image: python:3.12-slim
+    build: docker/openviking
     profiles: ["memory"]
-    command: >
-      sh -c "pip install --no-cache-dir openviking==0.4.11 'mcp<2' &&
-             openviking-server --host 0.0.0.0 --port 1933"
     environment:
       OPENVIKING_CONFIG_FILE: /etc/openviking/ov.conf
     ports: ["1933:1933"]

@@ -28,18 +28,29 @@ different design.
 
 ## Which agents
 
-The Claude adapter **ships with the application** — pinned, integrity-checked by
-the lockfile, and resolved from the bundle rather than fetched when somebody
-opens a channel (#120). A person who has configured nothing has an agent that is
-certainly there.
+**The application carries no agent.** It carries a list of the ones this project
+supports and where each is published, and installs one on a press, into a prefix
+it owns (#120). Nothing is fetched when somebody opens a channel — an install is
+a thing a person does, once, with the command on screen before it runs.
 
-Any other agent that speaks ACP works by naming its command in the definitions
-file, which is what that file is for. Two are known to work:
+| Agent | Package | Command | Notes |
+|---|---|---|---|
+| **Claude** | `@agentclientprotocol/claude-agent-acp` | `claude-agent-acp` | First-party. What `@agent` means when nobody has said otherwise. |
+| **Codex** | `@agentclientprotocol/codex-acp` | `codex-acp` | First-party. Not `@zed-industries/codex-acp`, which is the older adapter. |
+| **opencode** | `opencode-ai` | `opencode acp` | First-party ACP server, MIT, released continuously. Ships free models. |
 
-| Agent | How | Notes |
-|---|---|---|
-| **opencode** | `opencode acp` | First-party ACP server, MIT, released continuously. The default. |
-| **Claude Code** | `@zed-industries/claude-code-acp` | Community-maintained adapter |
+Pinned in `desktop/src/agents/catalog.ts` and asserted by value in
+`desktop/test/catalog.test.ts`. Any other agent that speaks ACP works by naming
+its command in the definitions file, which is what that file is for.
+
+**The panel reports what the machine has, never what the catalog hoped for.**
+Each row's state comes from one question — is this command in our prefix, or on
+your PATH — asked of every agent alike, the default included. An agent that is
+not there reads `missing` and is offered an install; there is no agent this
+client can call ready without having found it.
+
+Somebody who already has one of these keeps their own: their command wins, and
+they are not offered an install for something they installed themselves.
 
 The handshake reports `mcpCapabilities`, which is how the capability rail reaches the agent —
 the client passes the rail's MCP configuration when it opens a session. It also reports
@@ -255,9 +266,12 @@ An agent writes files to its working directory by default. Left alone, results s
 laptop and a colleague sees the conversation without its output.
 
 The rule is that work product goes to the channel. Each session has a working directory
-scoped to its (user, agent, channel) triple, **derived rather than chosen** — an agent that
-could name its own working directory could name someone else's. A channel slug that looks
-like a path does not become one.
+scoped to its channel, rooted at `~/WorkRoom/<workspace>/<channel>/` — **derived rather
+than chosen**: an agent that could name its own working directory could name someone
+else's, and a channel slug that looks like a path does not become one. The root is a
+visible place on purpose — where an agent spends its days is work, not cache — and it
+stays out of iCloud's Documents domain, whose file eviction and partial `.git` sync
+would corrupt an agent's working tree.
 
 A channel may instead be **bound** to a folder somebody already has. `cwd` in ACP is the
 project root — an agent reads its conventions from there, and the code being asked about lives
@@ -269,6 +283,19 @@ A binding is **per person and stays on their machine**. One keeps the repository
 different for each of them, and a filesystem layout is not something the workspace should
 learn. It is also deliberate: an agent in somebody's real repository can change anything in
 it, which is normal for a coding agent and normal precisely because the person opened it there.
+
+A session whose workspace is a git repository gets **standing rules appended to its
+boundary** (#205): work on `agent/<topic>` branches, never commit or push to the default
+branch, never merge a pull request without an explicit human request, and end every commit
+message with a `Co-Authored-By:` trailer naming the agent — authorship stays the person whose
+machine the agent runs on, attribution rides in the trailer, the same convention this
+repository's own commits follow. The same rules are shown to people: the memory panel lists
+them with an `AUTO` mark (client-rendered, never written into the room's memory), and a
+permission ask that is `git push` or `git commit` is annotated with what it means — named
+branch, and an explicit warning when the repository deploys on merge. These rules are
+**prompt-level, honestly**: the agent is told, and a well-behaved agent complies. The
+structural guarantee is branch protection on the repository itself, which is why the
+settings dialog says so and hands over a checklist rather than pretending the prompt is one.
 
 When a turn ends, the directory is compared with how it was when the session opened. Files
 that appeared or changed are **offered**; files the agent deleted, and files it never
@@ -282,6 +309,17 @@ and says how many files it left out.
 
 Offered, not uploaded. Work product belongs to the channel, but what leaves the machine is
 still the person's decision — the same shape as the transcript offer, for the same reason.
+
+An uploaded file is stored by **what it is**, not by where it was put: its SHA-256 is its
+address, so the same file arriving from two rooms is one object, and the room's journal
+records the upload with that address. It comes back at
+`GET /api/v1/channels/:slug/record/:sha256` — inside the room that holds it, because a hash
+means the same thing everywhere and holding one is not permission to read it.
+
+`bin/rails record:export[slug,path]` writes the same artifacts out as ordinary files:
+`artifacts/<name>` in a git repository, one commit per journal entry, alongside the room's
+memory as markdown and its messages as monthly JSONL. Work product that can only be read
+back through this server is work product a team cannot leave with.
 
 This is what makes a channel a complete record rather than a discussion of work that
 happened elsewhere.

@@ -1,6 +1,7 @@
 # Data model
 
-Ten tables. Plain relational, one append-only log for audit.
+Fourteen tables, plus Active Storage's own. Plain relational, with two append-only logs:
+`activities` for audit and `channel_records` for the room's own record.
 
 ```
 users ──< memberships >── channels
@@ -8,6 +9,7 @@ users ──< memberships >── channels
                              ├──< messages ──< messages (one level)
                              ├──< agent_sessions ──< agent_runs ──< run_steps
                              ├──< artifacts
+                             ├──< channel_records  (append-only, chained)
                              └──< promotions
 
 activities                    (append-only, polymorphic)
@@ -29,6 +31,13 @@ visibility.
 `memory_uri` is the important one. It stores the channel's region in the context database as
 data rather than deriving it from the slug, so a channel can be renamed without orphaning
 what it knows, and a region can be re-pointed without a code change.
+
+`repository_url` names the repository the room's work lives in (#203). It is a fact of the
+room rather than of anybody's machine — a colleague joining the channel should land in the
+same checkout — and it is nullable because most rooms have no repository: a `meetings`
+channel is not a codebase, and clearing the setting writes NULL back so "no repository" and
+"never asked" stay the same value. A change is journaled as `kind=channel.updated`, naming
+the field, the old and new values, and who changed it.
 
 **`messages`** — belongs to a channel, has a polymorphic `author`, and an optional `parent`.
 
@@ -52,9 +61,46 @@ set explicitly and there is no `updated_at`: the table is append-only by intent.
 
 ## Output
 
-**`artifacts`** — files produced in a channel, attached through Active Storage. Optionally
-linked to the run that made them. The linkage is what turns a channel into a complete record
-instead of a discussion of work that happened elsewhere.
+**`artifacts`** — files produced in a channel, optionally linked to the run that made them.
+The linkage is what turns a channel into a complete record instead of a discussion of work
+that happened elsewhere.
+
+`sha256`, `byte_size` and `content_type` say where the bytes are and what they are. The
+address is the content: an upload is stored once under its digest and the row names it, so
+the same file arriving twice is one object and two rows. All three are nullable because rows
+written before the record store have their bytes in an Active Storage attachment instead and
+keep it — nothing migrates them, and a listing reads the size from wherever it actually is.
+The index on `sha256` is plain, not unique, for the same reason two rooms may name one object.
+
+Downloading is `GET /api/v1/channels/:slug/record/:sha256`, and it resolves through an
+artifact row of that channel rather than through the hash. A digest names the same bytes
+everywhere, so if it were the permission, overhearing one would be reading rights in every
+room that stored the file (Article P5).
+
+## Record
+
+**`channel_records`** — one row per thing that happened in a room, in the order it happened:
+`seq` numbered from one per channel, `kind`, an optional polymorphic `subject`, `entry_hash`
+and the `prev_hash` of the entry before it. `created_at` is set explicitly and there is no
+`updated_at`; the model marks persisted rows `readonly?`. A journal an edit could reach is
+not one, and the chain only notices an edit if somebody checks.
+
+What the entry *says* is not in the table. Every append writes one canonical JSON envelope —
+channel, seq, kind, subject, prev_hash, time and payload — into the object store under its own
+digest, and that digest is the row's `entry_hash`. So a reader holding the rows and the bucket
+can tell that nothing was removed from the middle, and the row cannot claim something the
+exported bytes do not.
+
+**The object store** is not a table. `RecordStore::Objects` addresses content by SHA-256 in the
+Active Storage service the environment already configures — Disk in development and test, the
+bucket in production — under `record/sha256/<digest>`. The algorithm is in the key because it
+will not always be SHA-256. Both halves of the record live there: artifact bytes and journal
+envelopes. Objects are written and never deleted, which is what makes "ask, then download"
+safe and what a rebuilt journal is checked against.
+
+Appends happen in the same transaction as the write they record, which the API's
+`around_action` already provides — a file or a message the journal could not record does not
+exist, and a write that was refused leaves no entry.
 
 ## Memory
 
@@ -66,6 +112,11 @@ kept nothing, which is an answer rather than a gap.
 There is no promotions table and no approval state. #22 removed the review queue, and
 distillation follows it: the agent writes to the channel's memory directly, and a wrong entry
 is corrected by superseding it (Article P3).
+
+Every write leaves a `kind=memory` entry in the room's journal — an agent remembering, an
+agent superseding, or a person recording something directly — naming the action, the uri, the
+author and the run. The uri rather than a row id, because memory may be held by an external
+context database where there is no row to point at.
 
 ## Audit
 

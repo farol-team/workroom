@@ -93,6 +93,17 @@ button.ghost { background: none; color: var(--muted); border: 1px solid var(--li
 .entry .o { color: var(--muted); line-height: 1.45; }
 .entry .mark { color: var(--accent); margin-right: 6px; }
 .entry.agent .mark { color: var(--agent); }
+/* A rule nobody learned, sitting among what the room learned: the AUTO mark
+   is what keeps the client's own prompt from reading as the room's memory
+   (#205). Muted where the learned entries are marked, because it is standing
+   rather than earned. */
+.entry.auto { color: var(--muted); }
+.auto-badge { font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted); border: 1px solid var(--muted);
+  border-radius: 4px; padding: 0 4px; margin-right: 6px; }
+/* What a permission ask means, said quietly under the question itself — the
+   question and the buttons stay the agent's (#205). */
+.ask-note { margin: 4px 0 6px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 12px; padding: 24px; min-width: 22rem; }
 dialog::backdrop { background: #000a; }
@@ -105,13 +116,36 @@ dialog input, dialog select { display: block; width: 100%; margin: 0;
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
 h2 { margin: 0 0 4px; font-size: 16px; }
 
+/* The room's name doubles as the way into its settings (#203), drawn as the
+   name rather than as a button — a gear would say machinery where there is a
+   room. */
+.header-name { background: none; border: none; color: var(--text); font: inherit;
+  font-weight: 700; padding: 0; cursor: pointer; }
+.header-name:hover { color: var(--accent); }
+
+/* A choice row is not a text field: the dialog shape above stretches fields
+   to fill their row, and a radio stretched that way reads as broken. */
+dialog .choice { display: flex; align-items: baseline; gap: 8px; margin: 8px 0;
+  font-size: 14px; cursor: pointer; }
+dialog .choice input[type="radio"] { display: inline-block; width: auto; margin: 0;
+  padding: 0; background: none; border: none; accent-color: var(--accent); }
+/* A class rule beats the UA's `[hidden]` on specificity, so without this the
+   clone row shows through its own `hidden` — a choice that must disappear
+   while the room names no repository. */
+dialog .choice[hidden] { display: none; }
+dialog .section-head { padding: 12px 0 4px; border-top: 1px solid var(--line);
+  margin-top: 14px; text-transform: uppercase; letter-spacing: .05em; }
+dialog input[readonly] { color: var(--muted); }
+
+/* Calm, on purpose: a repository that ships on merge is ordinary, and the
+   person needs the checklist, not an alarm (#203). */
+#cs-warning { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  margin: 10px 0; font-size: 13px; }
+#cs-warning p { margin: 0 0 8px; }
+
 #composer #destination { align-self: center; white-space: nowrap; font-size: 12px; }
 #composer #destination.to-agent { color: var(--agent); }
 #composer #summon { font-family: inherit; }
-
-.presence { font-size: 12px; color: var(--muted); font-style: italic; padding-left: 46px; }
-.vis select { background: #0f1114; color: var(--muted); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
 
 .plan { margin-left: 46px; border-left: 2px solid var(--accent); padding: 6px 0 6px 10px;
   font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
@@ -120,6 +154,10 @@ h2 { margin: 0 0 4px; font-size: 16px; }
 .plan-entry.completed { color: var(--muted); text-decoration: line-through; }
 
 .offer, .artifact { margin-left: 46px; font-size: 13px; color: var(--muted); }
+/* The one offer that can ship: a commit that landed on the repository's
+   mainline is marked in the accent colour, where every other row stays quiet
+   (#206). */
+.offer.committed .on-default { color: var(--accent); font-weight: 600; }
 .artifact { padding: 4px 0; }
 
 #session-options { display: flex; gap: 8px; padding: 8px 16px 0; }
@@ -140,8 +178,6 @@ aside#memory header.sub { border-top: 1px solid var(--line); margin-top: 8px; }
   position: relative; }
 .day::before { content: ""; position: absolute; left: 0; right: 0; top: 50%;
   border-top: 1px solid var(--line); z-index: 0; }
-.day { }
-.day::after { content: attr(data-day); display: none; }
 
 /* An empty room says what it is for. */
 .intro { color: var(--muted); padding: 24px 16px; white-space: pre-wrap; max-width: 56ch; }
@@ -232,7 +268,13 @@ button.template:disabled { cursor: default; opacity: .5; }
 #agents-dialog form { display: flex; flex-direction: column; gap: .6rem; min-width: 26rem; }
 #agents { display: flex; flex-direction: column; gap: 8px; }
 .agent-row { display: flex; align-items: center; gap: 10px; }
-.agent-row .agent-name { font-weight: 600; }
+/* `font: inherit`, not the longhands: the shorthand also resets the weight the
+   button's own stylesheet would otherwise keep, so the name reads at the
+   window's weight rather than a semibold of its own. */
+.agent-row .agent-name { background: none; border: 0; padding: 0;
+  font: inherit; color: var(--text); cursor: pointer; }
+/* The one this person addresses, said in the sidebar's own colour. */
+.agent-row .agent-name.chosen { color: var(--accent); }
 .agent-row .muted { flex: 1; }
 #agents > code { display: block; font-size: 11px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
@@ -260,3 +302,28 @@ button.ob-card.pickable:disabled { opacity: .5; cursor: default; }
 button.ob-card.pickable strong { flex: 1; }
 .ob-foot { display: flex; align-items: center; justify-content: space-between; }
 .ob-actions { display: flex; gap: 8px; }
+
+/* Runs paused: slim, above the composer, quiet — the gate informs, the feed
+   row carries the ways out (#207). The [hidden] guard is load-bearing: a
+   display rule here would beat the attribute and the banner would never hide. */
+#gate { display: flex; gap: 8px; align-items: center; margin: 0 16px 8px;
+  padding: 6px 12px; border: 1px solid var(--accent); border-radius: 8px;
+  font-size: 12px; color: var(--muted); }
+#gate[hidden] { display: none; }
+#gate #gate-summary { flex: 1; }
+#gate-refused { margin: -4px 16px 8px; }
+
+/* The review dialog (#207): one row per file, the diff under it. A file head
+   is a row, not a button-face — the house dialog shape is labelled rows. */
+#review-changes { min-width: 32rem; max-width: 44rem; }
+.rc-file-head { display: block; width: 100%; text-align: left; background: none;
+  border: none; border-bottom: 1px solid var(--line); color: var(--text);
+  font: inherit; font-size: 13px; padding: 8px 2px; cursor: pointer; }
+.rc-file-head:hover { color: var(--accent); }
+.rc-diff { margin: 6px 0 10px; padding: 10px 12px; background: #0f1114;
+  border: 1px solid var(--line); border-radius: 8px; font-size: 12px;
+  line-height: 1.45; max-height: 16rem; overflow: auto; white-space: pre-wrap;
+  word-break: break-word; color: var(--muted); }
+#rc-summary { border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 8px 0; line-height: 1.45; }
+#rc-commit-row { margin: 8px 0; }

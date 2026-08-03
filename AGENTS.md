@@ -94,6 +94,12 @@ bin/brakeman                # security static analysis
 loading a database from the schema (CI does this; `test/test_helper.rb`
 applies the boundary itself before anything is measured).
 
+`bin/rails record:verify` replays every room's journal against the object
+store, and `bin/rails record:export[slug,path]` mirrors one room's journal
+into a git repository at `path`. Both are read-only against the server, so
+they are safe to run against any database you can connect to (the record
+store itself is in `docs/DATA-MODEL.md`).
+
 ### Desktop (`desktop/`)
 
 ```bash
@@ -130,7 +136,8 @@ Sign in as `alice@farol.run`; development sign-in creates the account on the
 spot. The OpenViking context database is opt-in:
 `docker compose --profile memory up -d openviking` (needs `ov.conf` — see
 `ov.conf.example` and `docs/RUNNING.md`). Without it the memory store is
-PostgreSQL and nothing external is required.
+PostgreSQL and nothing external is required. RUNNING.md also documents a
+no-credential path through a local Ollama.
 
 ## How this repository is developed
 

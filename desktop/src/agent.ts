@@ -4,8 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type Update } from "./rules";
-import { profileFor, stateOf as stateOfProfile, type AgentState } from "./agents/catalog";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
+import { stateOf as stateOfCommand, type AgentState } from "./agents/catalog";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -44,9 +44,9 @@ export class Agents {
   }
 
   /// Where each of these commands is on this machine, as the bridge looks for
-  /// one: the bundle, our own prefix, and last the person's PATH. Kept, because
-  /// the panel asks on every render and a machine does not change under it —
-  /// what changes it is an install, and that re-probes.
+  /// one: our own prefix, and then the person's PATH. Kept, because the panel
+  /// asks on every render and a machine does not change under it — what changes
+  /// it is an install, and that re-probes.
   private located = new Map<string, string | null>();
 
   async probe(commands: string[]) {
@@ -61,23 +61,28 @@ export class Agents {
   }
 
   /// Whether an agent can be addressed. An agent nobody pinned is judged the
-  /// same way, minus the one thing a profile knows: whether it ships here.
+  /// same way as one this project named: by whether the machine has its command.
   stateOf(name: string): AgentState {
     const command = this.defs.find((d) => d.name === name)?.command;
-    const where = (command && this.located.get(command)) || null;
-    const profile = profileFor(name);
-    return profile ? stateOfProfile(profile, where) : where ? "ready" : "missing";
+    return stateOfCommand((command && this.located.get(command)) || null);
   }
 
-  /// Where this session works. Derived from who is working, with which agent,
-  /// in which channel — the agent never names its own directory.
-  workspace(user: string, name: string, channel: string) {
-    return invoke<string>("agent_workspace", { user, name, channel });
+  /// Where this session works: `~/WorkRoom/<workspace>/<channel>`, derived
+  /// from the room — the agent never names its own directory.
+  workspace(room: string, channel: string) {
+    return invoke<string>("agent_workspace", { workspace: room, channel });
   }
 
-  /// What the run wrote or changed there, since the directory was opened.
+  /// Mark where a turn begins, so the offer can tell the run's work from
+  /// what was already dirty when it started (#202).
+  turnStart(workspace: string) {
+    return invoke<void>("agent_turn_start", { workspace });
+  }
+
+  /// What the run wrote or changed since the turn began — and how many
+  /// changed paths were held back as pre-existing.
   produced(workspace: string) {
-    return invoke<Array<{ path: string; bytes: number }>>("agent_produced", { workspace });
+    return invoke<TurnProduced>("agent_produced", { workspace });
   }
 
   /// One produced file, base64 — a work product is not always text.
@@ -213,8 +218,6 @@ export class Agents {
     const command = this.defs.find((d) => d.name === name)?.command;
     return invoke<string | null>("agent_export_session", { sessionId, command });
   }
-
-  sessionIdFor(name: string, slug: string) { return this.sessions.get(sessionKey(name, slug)); }
 
   prompt(name: string, sessionId: string, text: string,
          context: string | null, history: string | null = null) {

@@ -17,6 +17,13 @@ module Memory
         Your channel's memory is rooted at #{channel.memory_uri}
         Read and write only inside it. Other channels' memory is reachable with
         your key and is not yours to read.
+
+        Write through the rail: workroom://memory/remember records a conclusion,
+        workroom://memory/supersede corrects one. Writes made that way land in
+        this channel's subtree with provenance and a journal record; the MCP
+        tools are for reading and search. An entry may carry a .<name>.meta.json
+        next to it — the server's journal lineage (seq, entry_hash) of the write
+        that made it.
       TEXT
     end
   end

@@ -107,7 +107,76 @@ class BroadcastTest < ActiveSupport::TestCase
     assert_empty payloads
   end
 
+  # Two customers both want a room called general, and a stream name is the only
+  # thing between them once the socket is open — nothing about a stream is
+  # refused later. Named by the slug alone, both rooms were the same stream.
+  test "two workspaces with a room of the same name do not share a stream" do
+    here = in_workspace(workspace(name: "Acme")) { channel(slug: "general", name: "General") }
+    there = in_workspace(workspace(name: "Globex")) { channel(slug: "general", name: "General") }
+
+    refute_equal Broadcast.stream_for(here), Broadcast.stream_for(there),
+                 "one customer's general is not the other's"
+  end
+
+  # The name is only half the claim: what matters is that the room the message
+  # was written in is the only room it is published to.
+  test "a message is published to its own workspace's stream and no other" do
+    acme = workspace(name: "Acme")
+    here = in_workspace(acme) { channel(slug: "general", name: "General") }
+    there = in_workspace(workspace(name: "Globex")) { channel(slug: "general", name: "General") }
+
+    published = in_workspace(acme) do
+      said = Message.create!(channel: here, author: user(name: "Carol", workspace: acme),
+                             body: "our numbers")
+      targets { Broadcast.message(said) }
+    end
+
+    assert_includes published, Broadcast.stream_for(here)
+    refute_includes published, Broadcast.stream_for(there),
+                    "the other customer's room was listening to this one"
+  end
+
+  # Untouched by the above: a user id is unique across the whole server, so this
+  # name has no collision to fix and a client subscribed to it keeps working.
+  test "a person's own stream is named by their id alone" do
+    assert_equal "user:#{@alice.id}", Broadcast.user_stream_for(@alice)
+  end
+
+  # The unread badge is the news that something happened, not what happened.
+  # Widening the room stream's name must not widen this payload.
+  test "the news of another room carries the slug and nothing else" do
+    bob = user(name: "Bob")
+    @channel.memberships.create!(user: bob)
+
+    payloads = user_broadcasts(bob) { Broadcast.message(@channel.messages.create!(author: @alice, body: "the number is 41")) }
+
+    assert_equal({ type: "elsewhere", channel: @channel.slug },
+                 payloads.find { |p| p[:type] == "elsewhere" })
+  end
+
   private
+
+  def in_workspace(room)
+    was = Current.workspace
+    enter(room)
+    yield
+  ensure
+    enter(was)
+  end
+
+  # Every stream a broadcast was published to, whoever it was meant for.
+  def targets
+    captured = []
+    original = ActionCable.server.method(:broadcast)
+    ActionCable.server.define_singleton_method(:broadcast) do |target, payload|
+      captured << target
+      original.call(target, payload)
+    end
+    yield
+    captured
+  ensure
+    ActionCable.server.singleton_class.send(:remove_method, :broadcast)
+  end
 
   # What one person's own stream carried.
   def user_broadcasts(user)

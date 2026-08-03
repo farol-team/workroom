@@ -66,19 +66,15 @@ module Memory
     end
 
     def write_skill(channel, title:, body:, key: nil, author: nil)
-      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{channel.skills_uri}#{key}.md"
-      uri = "#{channel.skills_uri}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
-
       entry = Entry.new(
-        uri: uri, title: title, detail: body, trust: "human",
-        overview: body.to_s.truncate(400), abstract: title,
+        **write_policy(channel.skills_uri, title: title, detail: body, key: key, extension: ".md"),
+        trust: "human",
         author_name: author.respond_to?(:name) ? author.name : author,
         created_at: Time.current
       )
 
       mkdir(channel.skills_uri)
-      post("/api/v1/content/write", uri: uri, content: serialize(entry), mode: "create", wait: false)
+      post("/api/v1/content/write", uri: entry.uri, content: serialize(entry), mode: "create", wait: false)
       entry
     end
 
@@ -101,27 +97,30 @@ module Memory
         entry.score = hit["score"]
         entry
       end
+    rescue Error
+      # The one reader that raised instead: a search against a store that was
+      # away took the room down while the listing beside it answered (#146).
+      # `available?` keeps the difference between this and nothing found.
+      []
     end
 
     # --- writing -------------------------------------------------------------
 
     def write(channel, title:, detail:, overview: nil, abstract: nil,
               trust: "agent", author: nil, source: nil, key: nil)
-      key ||= title.to_s.parameterize.presence || SecureRandom.hex(4)
-      uri = "#{root_of(channel)}#{key}.md"
-
       # A second entry under a taken name supersedes the first rather than
-      # replacing it — the store has no overwrite, which suits Article P6.
-      uri = "#{root_of(channel)}#{key}-#{SecureRandom.hex(3)}.md" if supersede(uri).present?
+      # replacing it — the store has no overwrite, which suits Article P6. Where
+      # the name comes from is Store#write_policy's business, here and in every
+      # other store.
+      attrs = write_policy(root_of(channel), title: title, detail: detail, key: key,
+                           overview: overview, abstract: abstract, extension: ".md")
 
       # Provenance is resolved at write time, in the keys the document will
       # carry: the run can be asked now and never again from a record that
       # points at nothing (Article P4).
       front = Provenance.front_matter(author: author, source: source, trust: trust)
       entry = Entry.new(
-        uri: uri, title: title, detail: detail, trust: trust,
-        overview: overview.presence || detail.to_s.truncate(400),
-        abstract: abstract.presence || title,
+        **attrs, trust: trust,
         author_name: front["author"], agent_kind: front["agent"],
         model: front["model"], run_id: front["run"],
         created_at: Time.current
@@ -132,9 +131,21 @@ module Memory
       # write, which takes seconds; an agent recording a conclusion mid-turn
       # must not sit through it. The entry is readable at once and retrievable
       # by meaning shortly after.
-      post("/api/v1/content/write", uri: uri, content: serialize(entry), mode: "create", wait: false)
-      tag(uri, entry, channel, source)
+      post("/api/v1/content/write", uri: entry.uri, content: serialize(entry), mode: "create", wait: false)
+      tag(entry.uri, entry, channel, source)
       entry
+    end
+
+    # The journal lineage of a write this store holds, written next to the
+    # entry as a dot-sidecar: machine-readable provenance a reader of the
+    # entry can follow back to the record of the write (#213, Article P4).
+    # An index, not the record — a store that refuses it answers like a tag
+    # that did not stick, because the journal is the source of truth.
+    def annotate(uri, **lineage)
+      post("/api/v1/content/write", uri: sidecar_uri(uri), content: lineage.to_json,
+           mode: "create", wait: false)
+    rescue Error
+      nil
     end
 
     # Nothing is destroyed: the entry moves out of what the room currently knows
@@ -146,7 +157,20 @@ module Memory
 
       mkdir(archive.rpartition("/").first + "/")
       post("/api/v1/fs/mv", from_uri: uri, to_uri: archive)
+      move_sidecar(uri, to: archive)
       entry
+    end
+
+    # What is filed under a key, out of the way. `ls` is how this store knows
+    # what it holds, and the name a correction left behind is the key plus the
+    # tilde form Store#write_policy gives it — a directory listing is the only
+    # way to ask for both at once.
+    def displace(root, key, extension)
+      filed = list(root).select do |uri|
+        uri == "#{root}#{key}#{extension}" || uri.start_with?("#{root}#{key}~")
+      end
+
+      filed.filter_map { |uri| supersede(uri) }.first
     end
 
     private
@@ -162,6 +186,27 @@ module Memory
       raise Error, "no archive path for #{uri}" if rest == uri.to_s || !rest.include?("/")
 
       "#{prefix}resources/superseded/#{rest}"
+    end
+
+    # Where an entry's lineage lives: a dot-file next to it, in the entry's own
+    # directory — including under superseded/, so the mapping works the same
+    # before and after a move. OpenViking's semantic layer skips dot-names at
+    # every stage (indexing, ls, glob, grep), so the sidecar is never
+    # summarized, embedded, or surfaced, and this adapter's own `internal?`
+    # filter keeps it out of what the room lists (#213).
+    def sidecar_uri(uri)
+      dir, _, name = uri.to_s.rpartition("/")
+      "#{dir}/.#{name.delete_suffix(".md")}.meta.json"
+    end
+
+    # The sidecar travels with the entry it describes — an archive the record
+    # cannot be found from is half a correction (Article P6). An index, not
+    # the record: a sidecar that was never written, or a store that refuses
+    # the move, does not stop a supersession.
+    def move_sidecar(uri, to:)
+      post("/api/v1/fs/mv", from_uri: sidecar_uri(uri), to_uri: sidecar_uri(to))
+    rescue Error
+      nil
     end
 
     def root_of(channel)

@@ -59,9 +59,8 @@ export function activeAgent(agents: AgentDef[], chosen?: string): string | undef
 ///
 /// Whatever survives, the agents this project supports are named beside it.
 /// An agent you did not guess the name of is one you do not have: without this
-/// the two that are not bundled exist only for somebody who already knew to
-/// write them down. Naming one installs nothing — it is listed, with the state
-/// it is really in.
+/// the three exist only for somebody who already knew to write them down.
+/// Naming one installs nothing — it is listed, with the state it is really in.
 export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   const seen = new Set<string>();
   const clean: AgentDef[] = [];
@@ -276,6 +275,10 @@ export interface Asked {
   /// they were never shown (#91).
   sessionId?: string;
   title: string;
+  /// The command the agent means to run, when the tool call carries one. More
+  /// precise than the title, which for a shell ask often *is* the command but
+  /// is not obliged to be (#205).
+  command?: string;
   options: Array<{ id: string; name: string; kind?: string }>;
 }
 
@@ -299,6 +302,9 @@ export function permissionAsked(event: unknown): Asked | null {
     id: e.id,
     sessionId: sessionOf(event),
     title: params.toolCall?.title ?? "The agent is asking to do something",
+    command: typeof params.toolCall?.rawInput?.command === "string"
+      ? params.toolCall.rawInput.command
+      : undefined,
     options: (params.options ?? []).map((o: any) => ({
       id: String(o.optionId), name: String(o.name ?? o.optionId), kind: o.kind,
     })),
@@ -365,6 +371,37 @@ export function worthOffering(files: Array<{ path: string; bytes: number }>): bo
   return files.some((f) => f.bytes > 0);
 }
 
+/// What a turn's offer is made of: the files, and how many changed paths
+/// were held back because they were dirty before the turn began (#202).
+export interface TurnProduced {
+  files: Array<{ path: string; bytes: number }>;
+  pre_existing: number;
+  /// The turn's work as a commit, when it landed one (#206). Always present
+  /// from the bridge, null outside a repository or when HEAD never moved.
+  committed?: { branch: string; commits: number; stat: string; on_default: boolean } | null;
+}
+
+/// Where a branch can be looked at, when the room's repository is on GitHub
+/// (#206). Anything else — a local path, another host — is no link at all,
+/// and the caller hides the control rather than offering a dead one.
+export function githubTreeUrl(repositoryUrl: string | null, branch: string): string | null {
+  const url = repositoryUrl?.trim();
+  if (!url) return null;
+  const match = /^git@github\.com:([^/]+)\/(.+)$/.exec(url)
+    ?? /^https:\/\/github\.com\/([^/]+)\/(.+)$/.exec(url);
+  if (!match) return null;
+  const repo = match[2].replace(/\.git\/?$/, "").replace(/\/$/, "");
+  return `https://github.com/${match[1]}/${repo}/tree/${branch}`;
+}
+
+/// A quiet account of what the turn was *not* credited with — without it,
+/// "the agent produced nothing" and "the offer is broken" look the same.
+export function preExistingNotice(count: number): string | null {
+  return count > 0
+    ? `Nothing new this turn (${count} pre-existing changes not offered)`
+    : null;
+}
+
 /// The distiller is the agent, not a job on the server. It already runs on this
 /// person's machine under their credentials, and it already reaches the room's
 /// memory through the rail — so it needs no mechanism, only to be asked.
@@ -389,6 +426,69 @@ export function closingInstruction(): string {
 export function withClosing(text: string): string {
   if (!text.trim()) return text;
   return `${text}\n\n${closingInstruction()}`;
+}
+
+/// The standing rules of a session whose workspace is a repository (#205).
+///
+/// Prompt-level, and honestly so: the agent is *told* these rules, and branch
+/// protection on the repository is the structure that makes the telling hold.
+/// That is also why the real default branch is named rather than spoken of as
+/// "the default branch" — a rule about a name the agent can see is one it can
+/// follow, and one a person reading the transcript can check.
+export function gitBoundary(defaultBranch: string): string {
+  return [
+    "This channel's workspace is a git repository. Its standing rules:",
+    `- Work on branches named agent/<topic>; never commit to ${defaultBranch}.`,
+    `- Never push to ${defaultBranch}, and never force-push anywhere.`,
+    "- Never merge a pull request unless a person explicitly asks for it in this turn.",
+    "- End every commit message with a Co-Authored-By trailer naming yourself;",
+    "  the commit's author stays the person whose machine you run on.",
+  ].join("\n");
+}
+
+/// A word in a command line, where "main" inside a message is not the branch
+/// named as a target — the best a text match can do, and used knowing that.
+const mentionsWord = (command: string, word: string): boolean =>
+  new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(command);
+
+/// Where a push is going, when the command says: `git push <remote> <branch>`.
+/// Flags are skipped, a refspec's source is dropped — what matters is the
+/// destination, because that is what a person is being asked to allow.
+function pushTarget(command: string): string | null {
+  const words = command.split(/\s+/);
+  const at = words.findIndex((w) => w === "push");
+  if (at < 0) return null;
+  const rest = words.slice(at + 1).filter((w) => !w.startsWith("-"));
+  const refspec = rest[1];
+  if (!refspec) return null;
+  return refspec.replace(/^\+/, "").split(":").pop() || null;
+}
+
+/// What a permission ask means, one muted line, when the ask is git (#205).
+///
+/// Annotation only: the allow/deny mechanics are the agent's and stay
+/// untouched. A commit that never leaves the machine is quiet — local and
+/// reversible, and the boundary already said its piece. A push is always
+/// named, because it is the moment work leaves. The default branch named in
+/// the command of a repository that deploys earns the warning in words:
+/// that is the one ask where Allow ships something.
+export function gitAskNote(
+  command: string, defaultBranch: string | null, deploysOnPush: boolean,
+): string | null {
+  const deployWarning = deploysOnPush && defaultBranch
+    ? ` — this repository deploys on merge to ${defaultBranch}.`
+    : "";
+  const onDefault = defaultBranch != null && mentionsWord(command, defaultBranch);
+
+  if (/\bgit\s+push\b/.test(command)) {
+    if (onDefault) return `Push to origin (${defaultBranch})${deployWarning}`;
+    const target = pushTarget(command);
+    return target ? `Push to origin (${target})` : "Push to origin";
+  }
+  if (/\bgit\s+commit\b/.test(command) && onDefault) {
+    return `Commit to ${defaultBranch}, the default branch${deployWarning}`;
+  }
+  return null;
 }
 
 /// What the room just said, as the agent would read it. Channel history is

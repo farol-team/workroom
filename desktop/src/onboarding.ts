@@ -8,11 +8,11 @@ export interface OnboardingHooks {
   /// Fresh answers from the machine, asked on every render — an install that
   /// just finished must change what its card says without a restart.
   cards: () => OnboardingCard[];
-  /// The exact command an install would run, shown before it runs. Null for
-  /// the one that ships in the bundle — there is nothing to fetch.
-  installCommand: (name: string) => string | null;
-  onInstall: (name: string) => Promise<void>;
-  onToggle: (name: string) => Promise<void>;
+  /// The agents panel's drawing of one agent, borrowed rather than copied: the
+  /// state, the command and the action are its answers, and an install started
+  /// here is the same install the panel is showing. `refresh` is how the card
+  /// asks this overlay to draw itself again.
+  agentCard: (card: OnboardingCard, refresh: () => void) => HTMLElement;
   /// The default chosen on the second step, when one was.
   onFinish: (picked: string | undefined) => void;
   /// The choice already made, when setup is run again from the agents panel.
@@ -31,7 +31,6 @@ export function showOnboarding(hooks: OnboardingHooks): void {
   const overlay = $("onboarding");
   let step = 0;
   let picked = hooks.initialPicked;
-  const busy = new Map<string, string>();
 
   function render() {
     const cards = hooks.cards();
@@ -45,51 +44,12 @@ export function showOnboarding(hooks: OnboardingHooks): void {
 
     const box = $("ob-cards");
     box.innerHTML = "";
-    for (const card of cards) box.append(step === 0 ? setupCard(card) : defaultCard(card));
-  }
-
-  function setupCard(card: OnboardingCard): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "ob-card";
-
-    const head = document.createElement("div");
-    head.className = "ob-card-head";
-    head.append(Object.assign(document.createElement("strong"), { textContent: card.label }));
-    head.append(Object.assign(document.createElement("span"), {
-      className: "muted",
-      textContent: busy.has(card.name) ? busy.get(card.name)!
-        : card.running ? "running" : card.state,
-    }));
-
-    el.append(head);
-
-    const command = hooks.installCommand(card.name);
-    if (card.action === "install" && command) {
-      // The exact command, before it runs — an application that installs
-      // something without saying what has asked for trust it has not earned.
-      // The card is narrower than the command, so the full text is the title.
-      el.append(Object.assign(document.createElement("code"),
-        { className: "muted", textContent: command, title: command }));
+    // The first step is the panel's own cards: the same agent, the same state,
+    // the same one action — setup is another door into that room, not a room
+    // of its own. The second step is this overlay's question and nobody else's.
+    for (const card of cards) {
+      box.append(step === 0 ? hooks.agentCard(card, render) : defaultCard(card));
     }
-
-    const action = document.createElement("button");
-    action.className = card.action === "install" ? "" : "ghost";
-    action.disabled = busy.has(card.name);
-    action.textContent = card.action === "install" ? "Install"
-      : card.action === "start" ? "Start" : "Stop";
-    action.onclick = async () => {
-      busy.set(card.name, card.action === "install" ? "installing…" : "starting…");
-      render();
-      try {
-        if (card.action === "install") await hooks.onInstall(card.name);
-        else await hooks.onToggle(card.name);
-      } finally {
-        busy.delete(card.name);
-        render();
-      }
-    };
-    el.append(action);
-    return el;
   }
 
   function defaultCard(card: OnboardingCard): HTMLElement {
