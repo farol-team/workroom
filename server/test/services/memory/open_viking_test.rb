@@ -22,8 +22,11 @@ class Memory::OpenVikingTest < ActiveSupport::TestCase
   end
 
   # Indexing is asynchronous by design — see the adapter's write. Retrieval
-  # tests wait for it rather than pretending it is instant.
-  def eventually(seconds: 60)
+  # tests wait for it rather than pretending it is instant. How long is the
+  # machine's to say: a hosted embedder answers in seconds, qwen3:4b on a
+  # two-core CI runner in minutes — the property is the same either way
+  # (#123), so the patience travels in the environment, never in the test.
+  def eventually(seconds: (ENV["OPENVIKING_PATIENCE"] || 60).to_i)
     deadline = Time.current + seconds
     loop do
       result = yield
