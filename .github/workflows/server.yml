@@ -9,14 +9,20 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only by default. See CONTRIBUTING.md for the pinning rule the `uses:`
+# lines follow.
+permissions:
+  contents: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       server: ${{ steps.filter.outputs.server }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         with:
           filters: |
@@ -28,6 +34,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -50,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           working-directory: server
           bundler-cache: false
@@ -87,11 +94,17 @@ jobs:
     needs: [changes, test]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Result
         run: |
+          echo "changes: ${{ needs.changes.result }}"
           echo "test: ${{ needs.test.result }}"
-          case "${{ needs.test.result }}" in
-            success|skipped) ;;
-            *) exit 1 ;;
-          esac
+          # `changes` is in the list: a broken path filter must turn this red,
+          # not skip `test` and count the silence as green (#173).
+          for result in "${{ needs.changes.result }}" "${{ needs.test.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          done
