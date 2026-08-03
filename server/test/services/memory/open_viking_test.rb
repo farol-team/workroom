@@ -138,11 +138,20 @@ class Memory::OpenVikingUnreachableTest < ActiveSupport::TestCase
   setup { @channel = channel(name: "Meetings") }
 
   # Asserted on `write`, which is the one path that does not swallow: `read`,
-  # `list`, `mkdir` and `tag` each rescue Error by design.
+  # `list`, `search`, `mkdir` and `tag` each rescue Error by design.
   test "a name that does not resolve arrives as the adapter's own error" do
     assert_raises(Memory::OpenViking::Error) do
       store.write(@channel, title: "Reporting cadence", detail: "Monthly.")
     end
+  end
+
+  # `search` was the reader left out of that list: the same failure the listing
+  # swallowed took a search down with a 500 (#146). It answers like the listing
+  # now, and `available?` keeps the difference from nothing found.
+  test "a search that could not reach the store lists nothing and says so" do
+    unreachable = store
+    assert_empty unreachable.search(@channel, "cadence")
+    refute unreachable.available?
   end
 
   # The half that matters more. Rescuing alone would make an unreachable store
