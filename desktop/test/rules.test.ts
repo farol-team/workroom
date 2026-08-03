@@ -198,13 +198,27 @@ describe("acp translation", () => {
     expect(translateAcp(update({ sessionUpdate: "plan", entries: [] }))).toBeNull();
   });
 
-  test("usage becomes usage", () => {
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000, cost: 0.42 })))
-      .toEqual({ kind: "usage", used: 84000, size: 200000, cost: 0.42 });
+  test("usage becomes usage, and cost is the object the protocol sends", () => {
+    // { amount, currency: ISO 4217 } — read as a bare number it was NaN, and
+    // the column stayed empty for every agent that followed the schema (#97).
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000,
+                                 cost: { amount: 0.42, currency: "EUR" } })))
+      .toEqual({ kind: "usage", used: 84000, size: 200000,
+                 cost: { amount: 0.42, currency: "EUR" } });
   });
 
-  test("cost is optional", () => {
+  test("a bare-number cost is an amount with no currency — never USD", () => {
+    // Inventing a currency for an agent that named none is how two rooms'
+    // totals become one wrong number.
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100, cost: 0.42 })))
+      .toEqual({ kind: "usage", used: 10, size: 100, cost: { amount: 0.42 } });
+  });
+
+  test("cost is optional, and a malformed one is no cost", () => {
     expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100 })))
+      .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
+    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100,
+                                 cost: { currency: "USD" } })))
       .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
   });
 
@@ -540,6 +554,13 @@ describe("the turn carries the question", () => {
     // so nothing else here can catch the question being quietly dropped. Losing
     // it would be invisible — turns keep working, and the room stops learning.
     expect(mainSource).toMatch(/agents\.prompt\(\s*name,\s*sessionId,\s*withClosing\(body\)/);
+  });
+
+  test("the turn's own summary reaches the record", () => {
+    // Same guard, same reason (#97): the prompt response was discarded for a
+    // year, and a turn that stopped at max_tokens read as one that finished.
+    expect(mainSource).toMatch(/const outcome = await agents\.prompt\(/);
+    expect(mainSource).toMatch(/finishRun\(run\.id, "succeeded", outcome\)/);
   });
 });
 

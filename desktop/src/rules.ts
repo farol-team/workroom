@@ -742,9 +742,35 @@ export type Update =
   | { kind: "thought"; text: string }
   | { kind: "tool"; label: string }
   | { kind: "plan"; entries: PlanEntry[] }
-  | { kind: "usage"; used: number; size: number; cost?: number }
+  | { kind: "usage"; used: number; size: number; cost?: Cost }
   | { kind: "config"; options: ConfigOption[] }
   | { kind: "other"; label: string };
+
+/// The protocol's own shape: an amount and an ISO 4217 code. Reading it as a
+/// bare number is how this column stayed empty — `Number({amount, currency})`
+/// is NaN — and inventing "USD" for a missing currency is how two rooms'
+/// totals become one wrong number (#97).
+export interface Cost { amount: number; currency?: string }
+
+function costOf(raw: unknown): Cost | undefined {
+  if (typeof raw === "number") return Number.isFinite(raw) ? { amount: raw } : undefined;
+  const c = raw as { amount?: unknown; currency?: unknown } | null | undefined;
+  const amount = Number(c?.amount);
+  if (!Number.isFinite(amount)) return undefined;
+  return { amount,
+           ...(typeof c?.currency === "string" && c.currency ? { currency: c.currency } : {}) };
+}
+
+/// The reply to session/prompt — the run's own summary, which this client used
+/// to discard entirely: a turn that stopped at max_tokens was recorded exactly
+/// like one that finished (#97). `usage` fields stay absent where the agent
+/// said nothing.
+export interface TurnOutcome {
+  stopReason?: string;
+  usage?: { totalTokens?: number; inputTokens?: number; outputTokens?: number;
+            thoughtTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number };
+  _meta?: Record<string, unknown>;
+}
 
 export function translateAcp(msg: unknown): Update | null {
   const m = msg as { method?: string; params?: { update?: Record<string, unknown> } };
@@ -768,8 +794,7 @@ export function translateAcp(msg: unknown): Update | null {
     return options.length ? { kind: "config", options } : null;
   }
   if (t === "usage_update") {
-    return { kind: "usage", used: Number(u.used), size: Number(u.size),
-             cost: u.cost === undefined ? undefined : Number(u.cost) };
+    return { kind: "usage", used: Number(u.used), size: Number(u.size), cost: costOf(u.cost) };
   }
   if (t === "plan") {
     const entries = (u.entries as PlanEntry[] | undefined) ?? [];

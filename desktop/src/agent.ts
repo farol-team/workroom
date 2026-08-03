@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnProduced, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnOutcome, type TurnProduced, type Update } from "./rules";
 import { stateOf as stateOfCommand, type AgentState } from "./agents/catalog";
 export type { Update };
 
@@ -298,9 +298,11 @@ export class Agents {
     return invoke<string | null>("agent_export_session", { sessionId, command });
   }
 
+  /// The reply is the run's own summary — stop reason, token usage, vendor
+  /// extras — and it is the caller's to record, not this class's to drop (#97).
   prompt(name: string, sessionId: string, text: string,
          context: string | null, history: string | null = null) {
-    return invoke<{ stopReason?: string }>("agent_prompt",
+    return invoke<TurnOutcome>("agent_prompt",
       { name, sessionId, text, context, history });
   }
 

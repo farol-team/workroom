@@ -478,10 +478,12 @@ async function send(text: string) {
     // The offer at the end of this turn is measured from here: what was
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
-    await agents.prompt(name, sessionId, withClosing(body),
+    const outcome = await agents.prompt(name, sessionId, withClosing(body),
                         [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
     if (reply.trim()) await api.agentSay(run.id, reply.trim());
-    await api.finishRun(run.id, "succeeded");
+    // The run's own summary travels with its end (#97): a turn that stopped at
+    // max_tokens is a different record from one that finished.
+    await api.finishRun(run.id, "succeeded", outcome);
     await timeline.offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
     await api.agentSay(run.id, `Agent error: ${String(err)}`).catch(() => {});
