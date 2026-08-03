@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom vs OpenWork — shared memory vs shared capabilities</title>
+  <meta name="description" content="OpenWork shares capabilities — skills, plugins, MCP connections — through a two-tool rail. WorkRoom shares memory: what the work taught the room, owned by the channel.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero versus">
+  <div class="wrap">
+    <p class="kicker">Comparison</p>
+    <h1>WorkRoom vs <em>OpenWork</em></h1>
+    <p class="lede">
+      Both products converge on the same elegant rail — one MCP endpoint, two tools:
+      search capabilities, execute capability. The difference is what flows through it.
+      OpenWork shares capabilities: skills, plugins, connections, published to a marketplace.
+      WorkRoom shares memory: what the work taught the room, owned by the channel.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Side by side</h2>
+    <p class="sub">OpenWork is an open-source control surface for agentic work — an Electron app around the OpenCode engine, with an org tier for teams. WorkRoom is a shared workspace where the room itself accumulates knowledge.</p>
+    <table class="compare">
+      <thead>
+        <tr><th>Axis</th><th class="wr">WorkRoom</th><th>OpenWork</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="axis">What the team shares</td>
+          <td class="wr">Memory — distilled knowledge, scoped and owned by the channel</td>
+          <td>Capabilities — skills, plugins, MCP connections, providers, via org marketplaces</td>
+        </tr>
+        <tr>
+          <td class="axis">The agent</td>
+          <td class="wr">Any ACP-speaking agent; the workspace is agent-agnostic by design</td>
+          <td>One embedded engine (OpenCode); you bring your own LLM key or client, not your own agent runtime</td>
+        </tr>
+        <tr>
+          <td class="axis">Protocols</td>
+          <td class="wr">ACP (control) + MCP (capability, memory) + HTTP/WebSocket (record)</td>
+          <td>MCP only — OpenWork itself is an MCP server you add to the agent you already have</td>
+        </tr>
+        <tr>
+          <td class="axis">Memory model</td>
+          <td class="wr">Channel-scoped shared store; the agent distills at end of turn; provenance and trust are mandatory; retrieval is pushed before every prompt</td>
+          <td>Per-user memory bank; every write is human-verified; recall is explicit search only — deliberately no auto-recall</td>
+        </tr>
+        <tr>
+          <td class="axis">Collaboration surface</td>
+          <td class="wr">Channels with a shared record: messages, run steps, artifacts, attribution</td>
+          <td>No rooms or shared chat; collaboration is grant-based access to capabilities and shared hosted workers</td>
+        </tr>
+        <tr>
+          <td class="axis">Rail scoping</td>
+          <td class="wr">Structural — one endpoint per channel, the channel is in the URL</td>
+          <td>Policy-based — org membership and grants, checked server-side</td>
+        </tr>
+        <tr>
+          <td class="axis">Enterprise surface</td>
+          <td class="wr">Hosted SaaS; SSO/SAML and always-on cloud agents in the Enterprise tier; workspaces isolated by PostgreSQL row-level security</td>
+          <td>SSO/SCIM, RBAC, Helm charts for three clouds, air-gapped installs, managed inference gateway</td>
+        </tr>
+        <tr>
+          <td class="axis">Maturity</td>
+          <td class="wr">Hosted SaaS, free for teams up to 5 · open-source self-host</td>
+          <td>Active v0.x product with a large user base and an enterprise tier</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where OpenWork is genuinely strong</h2>
+    <p class="sub">A credible comparison admits what the other side does better.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Meets you in your agent</h3>
+        <p>The desktop app is optional: add OpenWork's MCP to Claude Code, Codex, or Cursor and your
+        skills and connections follow you across tools. Adoption starts with a pasted prompt.</p>
+      </div>
+      <div class="card">
+        <h3>Capability distribution</h3>
+        <p>Org marketplaces for skills, plugins, and connections — with grants, kill switches, and
+        admin curation — solve "how does the team standardize its agent setup" today.</p>
+      </div>
+      <div class="card">
+        <h3>Enterprise readiness</h3>
+        <p>SSO/SCIM, desktop policies, air-gapped deployment, managed inference. Unusually deep
+        for a v0.x open-source project.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where WorkRoom is different</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Shared memory, not personal banks</h3>
+        <p>OpenWork's memory is per-user and manually saved — knowledge stays with the person.
+        In WorkRoom the channel owns what the work produced, so it outlives any person's session,
+        machine, or employment.</p>
+      </div>
+      <div class="card">
+        <h3>The room is the record</h3>
+        <p>Channels carry messages, run steps, and artifacts with attribution. You can see what
+        ran, what it cost, and what came back — the visibility layer capability-sharing doesn't have.</p>
+      </div>
+      <div class="card">
+        <h3>Memory that comes to the agent</h3>
+        <p>WorkRoom pushes the channel's knowledge into every prompt, trust-ordered, before the
+        agent starts. OpenWork deliberately never auto-recalls — the agent only knows what it
+        remembers to search for.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Which one fits</h2>
+    <div class="verdict">
+      <div class="choose wr">
+        <h3>Choose WorkRoom if…</h3>
+        <ul>
+          <li>The pain is re-learning: every session and every new hire starts from zero</li>
+          <li>You want knowledge owned by the room, with trust levels and provenance</li>
+          <li>You want a shared, attributable record of what agents did in each domain of work</li>
+          <li>You want to stay agent-agnostic across whatever ACP agents your people prefer</li>
+          <li>You want a hosted SaaS workspace with a free tier — nothing to install to get the team started</li>
+        </ul>
+      </div>
+      <div class="choose">
+        <h3>Choose OpenWork if…</h3>
+        <ul>
+          <li>The pain is setup drift: everyone wires their own skills, tools, and connections</li>
+          <li>You want to distribute capabilities through a marketplace with admin control</li>
+          <li>You need SSO/SCIM, air-gapped deployment, and managed inference now</li>
+          <li>You prefer one curated agent engine over a bring-your-own-agent workspace</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="index.html">Back to overview</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="index.html">Overview</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-buzz.html">vs Buzz</a>
+    <a href="vs-qm.html">vs qm</a>
+    <a href="vs-standalone-agents.html">vs Standalone agents</a>
+  </div>
+</footer>
+
+</body>
+</html>

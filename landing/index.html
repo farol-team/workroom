@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom — People + AI agents + Memory</title>
+  <meta name="description" content="WorkRoom is a team workspace where every person brings their own AI agent, and every channel owns a shared memory of what the work produced.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<!-- Doodle faces, Notion-style: ink strokes, no fill, one line language for
+     people (round heads) and agents (antennas, visors, bolt ears). Used at
+     32px in mocks and 46px in the hero parade. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="f-h1" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="24" cy="26" r="12.5"/>
+      <path d="M12 25c-1.5-8.5 4.5-14 12-14s13.5 5.5 12 14"/>
+      <path d="M35.5 19q7.5 3 5.5 12"/>
+      <circle cx="19.5" cy="26.5" r="1.5" fill="#17202b" stroke="none"/>
+      <circle cx="28.5" cy="26.5" r="1.5" fill="#17202b" stroke="none"/>
+      <path d="M20 31.5q4 3.5 8 0"/>
+    </symbol>
+    <symbol id="f-h2" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="24" cy="26" r="12.5"/>
+      <path d="M12.5 21q1.5-9 11.5-9t11.5 9"/>
+      <circle cx="19" cy="26" r="3.4"/>
+      <circle cx="29" cy="26" r="3.4"/>
+      <path d="M22.4 26h3.2"/>
+      <path d="M21 32.5q3 2.5 6 0"/>
+    </symbol>
+    <symbol id="f-h3" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="24" cy="26" r="12.5"/>
+      <path d="M11 31a13.5 13.5 0 1 1 26 0"/>
+      <path d="M11 31v4M37 31v4"/>
+      <circle cx="19.5" cy="26.5" r="1.5" fill="#17202b" stroke="none"/>
+      <circle cx="28.5" cy="26.5" r="1.5" fill="#17202b" stroke="none"/>
+      <path d="M15.5 24l-2.5-2M32.5 24l2.5-2"/>
+      <path d="M20.5 31.5q3.5 3 7 0"/>
+    </symbol>
+    <symbol id="f-h4" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="24" cy="27" r="12"/>
+      <circle cx="15" cy="16" r="3.2"/>
+      <circle cx="21" cy="12.5" r="3.2"/>
+      <circle cx="27.5" cy="12.5" r="3.2"/>
+      <circle cx="33" cy="16" r="3.2"/>
+      <circle cx="19.5" cy="27" r="1.5" fill="#17202b" stroke="none"/>
+      <circle cx="28.5" cy="27" r="1.5" fill="#17202b" stroke="none"/>
+      <path d="M20 32q4 3 8 0"/>
+    </symbol>
+    <symbol id="f-a1" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="11" y="15" width="26" height="23" rx="7"/>
+      <path d="M24 15V8"/>
+      <circle cx="24" cy="5.5" r="2.2"/>
+      <path d="M11 24H7.5v7H11M37 24h3.5v7H37"/>
+      <circle cx="19" cy="25" r="1.6" fill="#17202b" stroke="none"/>
+      <circle cx="29" cy="25" r="1.6" fill="#17202b" stroke="none"/>
+      <path d="M19.5 30.5q4.5 3.5 9 0"/>
+    </symbol>
+    <symbol id="f-a2" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="24" cy="26" r="12.5"/>
+      <path d="M24 13.5V9"/>
+      <circle cx="24" cy="5.5" r="1.8" fill="#17202b" stroke="none"/>
+      <rect x="15.5" y="22.5" width="17" height="7" rx="3.5"/>
+      <circle cx="20.5" cy="26" r="1.1" fill="#17202b" stroke="none"/>
+      <circle cx="27.5" cy="26" r="1.1" fill="#17202b" stroke="none"/>
+      <path d="M21 33q3 2 6 0"/>
+    </symbol>
+    <symbol id="f-a3" viewBox="0 0 48 48" fill="none" stroke="#17202b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="12" y="15" width="24" height="23" rx="5"/>
+      <path d="M19 15v-4M29 15v-4"/>
+      <path d="M18 25q2.5-3 5 0M25.5 25q2.5-3 5 0"/>
+      <path d="M20 30.5q4 3.5 8 0"/>
+    </symbol>
+  </defs>
+</svg>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="kicker">People + AI agents + Memory</p>
+    <h1>The workspace for <span class="hl"><span class="hl-dot"></span><em>AI-native teams.</em></span></h1>
+    <p class="lede">
+      Every person brings their own AI agent, running locally on their machine. The room keeps
+      what the work produced — so every agent starts where the last one left off.
+    </p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" href="mailto:hello@farol.run">Talk to sales</a>
+    </div>
+    <p class="btn-note">Free for teams up to 5 seats &nbsp;·&nbsp; No credit card &nbsp;·&nbsp; Agents and credentials stay on your machines</p>
+    <div class="parade">
+      <span class="pface" style="--r:-7deg"><svg class="face"><use href="#f-h1"/></svg></span>
+      <span class="pface" style="--r:5deg"><svg class="face"><use href="#f-a1"/></svg></span>
+      <span class="pface" style="--r:-4deg"><svg class="face"><use href="#f-h2"/></svg></span>
+      <span class="pface" style="--r:6deg"><svg class="face"><use href="#f-a2"/></svg></span>
+      <span class="pface" style="--r:-5deg"><svg class="face"><use href="#f-h3"/></svg></span>
+      <span class="pface" style="--r:4deg"><svg class="face"><use href="#f-a3"/></svg></span>
+      <span class="pface" style="--r:-6deg"><svg class="face"><use href="#f-h4"/></svg></span>
+      <span class="parade-note">every seat in the room — a person and their agent</span>
+    </div>
+  </div>
+</header>
+
+<section class="proof">
+  <div class="wrap">
+    <p class="proof-label">Bring the agents you already use</p>
+    <p class="proof-names">Claude Code · Goose · Codex · OpenCode · Kimi Code</p>
+    <p class="proof-note">Anything that speaks ACP — with MCP for capabilities and memory.</p>
+  </div>
+</section>
+
+<section class="slim">
+  <div class="wrap">
+    <div class="chips flush">
+      <a class="chip" href="for-sales.html">Prep a sales follow-up</a>
+      <a class="chip" href="for-meetings.html">Summarize a meeting</a>
+      <a class="chip" href="for-hr.html">Screen candidates</a>
+      <a class="chip" href="for-legal.html">Review a contract</a>
+      <a class="chip" href="for-marketing.html">Draft a launch brief</a>
+      <a class="chip" href="for-support.html">Answer from known fixes</a>
+      <a class="chip" href="for-engineering.html">Debug with the team's knowledge</a>
+      <a class="chip" href="for-finance.html">Explain a budget line</a>
+      <a class="chip" href="for-product.html">Ask why a decision was made</a>
+      <a class="chip" href="for-operations.html">Ask about a vendor</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="oneliner">Reimagine what <span class="hl"><em>your team's agents</em></span> can do.</h2>
+    <p class="sub">With the room's memory underneath them, everyday agent work changes shape.</p>
+    <div class="grid cols-3">
+      <div class="card scenario">
+        <h3>Prep a follow-up with the deal's full history</h3>
+        <div class="mock">
+          <div class="mock-head"># sales</div>
+          <div class="mock-body">
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-h2"/></svg>
+              <div>
+                <div class="mock-name">Ben <span class="time">09:02</span></div>
+                <div class="mock-text">Prep the Acme follow-up.</div>
+              </div>
+            </div>
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-a1"/></svg>
+              <div>
+                <div class="mock-name">Claude <span class="badge">agent</span></div>
+                <div class="mock-run">
+                  <span>→ memory: 4 entries injected — cadence, procurement path, objections</span>
+                </div>
+                <div class="mock-text">Draft ready — leads with the monthly rollup Acme asked for.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="card-link" href="for-sales.html">For sales teams →</a>
+      </div>
+      <div class="card scenario">
+        <h3>Summarize the meeting you missed</h3>
+        <div class="mock">
+          <div class="mock-head"># meetings</div>
+          <div class="mock-body">
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-h1"/></svg>
+              <div>
+                <div class="mock-name">Alice <span class="time">08:47</span></div>
+                <div class="mock-text">Catch me up on yesterday's Globex call.</div>
+              </div>
+            </div>
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-a2"/></svg>
+              <div>
+                <div class="mock-name">Kimi <span class="badge">agent</span></div>
+                <div class="mock-run">
+                  <span>→ history: call summary + the concern behind an offhand remark</span>
+                </div>
+                <div class="mock-text">Outcomes, owners, and the open concern — not a transcript.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="card-link" href="for-meetings.html">For meetings →</a>
+      </div>
+      <div class="card scenario">
+        <h3>Answer "why did we decide this?"</h3>
+        <div class="mock">
+          <div class="mock-head"># product</div>
+          <div class="mock-body">
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-h3"/></svg>
+              <div>
+                <div class="mock-name">Maria <span class="time">16:20</span></div>
+                <div class="mock-text">Why did we drop usage-based pricing?</div>
+              </div>
+            </div>
+            <div class="mock-msg">
+              <svg class="face" aria-hidden="true"><use href="#f-a3"/></svg>
+              <div>
+                <div class="mock-name">Codex <span class="badge">agent</span></div>
+                <div class="mock-run">
+                  <span>→ rail: search_capabilities — "pricing decision" (1 entry, stated by Alice)</span>
+                </div>
+                <div class="mock-text">The decision, its reasoning, and who made it — with provenance.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="card-link" href="for-product.html">For product teams →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="product">
+  <div class="wrap">
+    <h2>What it looks like</h2>
+    <p class="sub">A channel is a domain of work. People post, agents run visibly, and the room
+    keeps the conclusion.</p>
+    <div class="mock">
+      <div class="mock-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;# meetings</div>
+      <div class="mock-body">
+        <div class="mock-msg">
+          <svg class="face" aria-hidden="true"><use href="#f-h1"/></svg>
+          <div>
+            <div class="mock-name">Alice <span class="time">09:12</span></div>
+            <div class="mock-text">Summarize the Acme call and note anything we agreed to.</div>
+          </div>
+        </div>
+        <div class="mock-msg">
+          <svg class="face" aria-hidden="true"><use href="#f-a1"/></svg>
+          <div>
+            <div class="mock-name">Claude <span class="badge">agent · claude-sonnet</span> <span class="time">09:13</span></div>
+            <div class="mock-run">
+              <span>→ read transcript.md (attached by Alice)</span>
+              <span>→ rail: search_capabilities — "reporting cadence" (2 entries)</span>
+              <span>→ rail: execute_capability — workroom://memory/remember</span>
+            </div>
+            <div class="mock-text">Acme wants monthly rollups, not weekly — weekly created noise and
+            nobody read it. Agreed: first Tuesday of each month.</div>
+            <div class="mock-mem">◦ remembered: "Acme wants monthly reporting, not weekly" — recorded by Claude (run #418), inferred by an agent</div>
+          </div>
+        </div>
+        <div class="mock-msg">
+          <svg class="face" aria-hidden="true"><use href="#f-h2"/></svg>
+          <div>
+            <div class="mock-name">Ben <span class="time">14:40, next day</span></div>
+            <div class="mock-text">Prep the Acme follow-up. <i>(Ben's agent opens the channel already
+            knowing the cadence agreement — Alice's agent recorded it.)</i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Record. <span class="hl"><em>Remember.</em></span> Reuse.</h2>
+    <p class="sub">The loop every turn goes through: the work stays visible in the record, the
+    room keeps what mattered, and your agent starts the next turn already briefed.</p>
+    <div class="grid cols-2 how">
+      <div class="steps">
+        <div class="step">
+          <h3>You post in a channel; your agent is rehydrated</h3>
+          <p>Before your prompt is sent, your local agent receives what the channel knows —
+          trusted entries first, human statements ranked above agent inferences — plus recent history.</p>
+        </div>
+        <div class="step">
+          <h3>The agent works, visibly</h3>
+          <p>Every tool call streams to the channel as a run step — who ran what, what it cost, what came
+          back. The agent can reach only its own channel's memory and skills, never another room's —
+          access is a fact of the setup, not a promise.</p>
+        </div>
+        <div class="step">
+          <h3>The room keeps the conclusion</h3>
+          <p>The agent records what the room should know next week — with who, which model, and which run
+          attached. Files it produced are offered to you; only what you accept becomes a channel artifact.</p>
+        </div>
+      </div>
+      <div class="term">
+        <span class="p">$</span> bin/acp-turn meetings "Summarize the Acme call"<br>
+        <br>
+        → rehydrate: 12 memory entries · last 20 messages<br>
+        → rail: search_capabilities <span class="c">"reporting cadence"</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;2 entries · workroom://memory/…<br>
+        → rail: execute_capability <span class="c">memory/remember</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="p">"Acme wants monthly reporting" · run #418</span><br>
+        → done: 3 steps · recorded to the room
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The room <span class="hl"><em>remembers</em></span> — and knows how the work is done.</h2>
+    <p class="sub">
+      Memory is what the room knows; skills are how the room works. Before every prompt — every
+      single time — your agent is rehydrated with the channel's memory, human statements ranked
+      above agent inferences, and pulls the team's agreed procedures when the task calls for them.
+      Not a search box you have to remember to use: context that arrives on its own.
+    </p>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>What arrives before every prompt</h3>
+        <p style="margin-bottom: 12px;">The channel's memory, human statements ranked above agent
+        inferences and visibly marked — your agent always knows how much to trust what it reads.</p>
+        <p style="margin-bottom: 12px;">The channel's recent history, so a colleague's message is
+        context too. And the rail stays open mid-turn: full entries, skills, and capabilities are
+        one call away.</p>
+        <p style="margin: 0;">A store that can't answer says so — your agent is told memory is
+        unavailable, never handed an empty room masquerading as one.</p>
+      </div>
+      <div class="memlist">
+        <div class="memlist-head"># sales — injected before your prompt</div>
+        <ul>
+          <li class="human">Acme wants monthly rollups, not weekly
+            <span>stated by Alice · 2026-07-14</span></li>
+          <li class="human">Never lead with seat-count pricing against usage-based competitors
+            <span>stated by the Head of Sales</span></li>
+          <li>Globex requires a security review before any pricing conversation
+            <span>inferred by Claude · run #512</span></li>
+          <li>Beta renews in September; start expansion talks in July
+            <span>stated by Ben</span></li>
+          <li>+ the last 20 messages of the channel · full entries by URI via the rail</li>
+        </ul>
+      </div>
+    </div>
+    <div class="grid cols-3" style="margin-top: 16px;">
+      <div class="card">
+        <h3>Memory becomes an asset</h3>
+        <p>Models get cheaper and interchangeable every quarter — what they know about your
+        customers, conventions, and decisions can't be bought off the shelf. It accumulates in
+        the room instead of dying on someone's laptop, and it doesn't get amnesia when someone
+        changes laptops, agents, or jobs.</p>
+      </div>
+      <div class="card">
+        <h3>One standard, no drift</h3>
+        <p>The sales playbook, the hiring rubric, the review checklist — one agreed version,
+        shared by every agent, instead of everyone's private prompt files quietly diverging.
+        Written by people, found by agents — and unlike facts, procedures don't go stale.</p>
+      </div>
+      <div class="card">
+        <h3>Senior on day one</h3>
+        <p>A new hire's agent — or a colleague's, covering for you — enters the channel with 100%
+        of its context, already working the way your team works, not improvising a way of its own.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Trust is <span class="hl"><em>structural</em></span>, not promised.</h2>
+    <p class="sub">
+      Most AI workspaces ask you to trust a policy. WorkRoom is built so the policy can't be
+      broken — the guarantees below are facts of the architecture, verifiable in the code.
+    </p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Runs under your credentials</h3>
+        <p>Agents execute on each person's machine, with their own model keys. The server never
+        runs an agent and never sees a credential — there is no code path that moves one
+        server-side.</p>
+      </div>
+      <div class="card">
+        <h3>Every run is logged</h3>
+        <p>Who ran what, which model, what it cost, what came back — streamed to the channel as
+        it happens and kept in the room's record. Audit is not an export you request; it's the
+        product.</p>
+      </div>
+      <div class="card">
+        <h3>Scope is structural</h3>
+        <p>A channel's memory and capabilities live behind a URL that names the channel. An
+        agent can't reach another room by asking differently — the route doesn't exist.</p>
+      </div>
+      <div class="card">
+        <h3>Isolation enforced by the database</h3>
+        <p>Workspaces are separated by PostgreSQL row-level security, not application checks.
+        The boundary holds even when the application code is wrong.</p>
+      </div>
+      <div class="card">
+        <h3>Reversible and exportable</h3>
+        <p>The record is plain PostgreSQL. <code>record:verify</code> replays every room's journal
+        against the object store; <code>record:export</code> mirrors a room into git. Take your
+        data and leave whenever you like.</p>
+      </div>
+      <div class="card">
+        <h3>Your keys, your bill</h3>
+        <p>Inference is billed by your model provider to you — never through us. WorkRoom
+        charges for hosting the workspace, not for what your agents do.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Is this for you?</h2>
+    <p class="sub">WorkRoom is built for AI-native teams — where several people already work with
+    AI agents on shared domains, and the knowledge those agents produce evaporates between sessions.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Two or more agent users</h3>
+        <p>Your salespeople, recruiters, marketers, lawyers, engineers — each runs their own
+        agent on overlapping work, whatever they prefer: Claude Code, Goose, Codex. Anything one
+        agent learns should be available to the next.</p>
+      </div>
+      <div class="card">
+        <h3>Execution must stay local</h3>
+        <p>Credentials and files can't leave each person's machine. WorkRoom's server never runs
+        an agent and never sees a model credential — by design, not by policy.</p>
+      </div>
+      <div class="card">
+        <h3>Memory must stay yours</h3>
+        <p>What a team learns over a year is the most valuable output of agentic work. It should
+        live in a store you control, in a form you can read, audit, and take with you.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="roles">
+  <div class="wrap">
+    <h2>Not just for <span class="hl"><em>engineers.</em></span></h2>
+    <p class="sub">
+      Agents aren't only writing code. A sales team's agent drafts follow-ups from call notes and
+      remembers the pricing objections. HR's agent screens candidates against the team's own
+      hiring rubric. Legal's agent flags the clauses you never accept. What they learn belongs in
+      their room — not in one person's chat history. WorkRoom starts with rooms shaped for how a
+      company actually works, not with a blank page: each comes with a purpose and the skills for
+      how that work is done — and a team without a legal department never gets handed an empty
+      #legal.
+    </p>
+    <div class="chips">
+      <a class="chip" href="for-sales.html"># sales</a>
+      <a class="chip" href="for-marketing.html"># marketing</a>
+      <a class="chip" href="for-meetings.html"># meetings</a>
+      <a class="chip" href="for-hr.html"># hiring</a>
+      <a class="chip" href="for-legal.html"># legal</a>
+      <a class="chip" href="for-finance.html"># finance</a>
+      <a class="chip" href="for-product.html"># product</a>
+      <a class="chip" href="for-operations.html"># operations</a>
+      <a class="chip" href="for-support.html"># support</a>
+      <a class="chip" href="for-engineering.html"># engineering</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Prefer to self-host? It's all <span class="hl"><em>open source.</em></span></h2>
+    <p class="sub">The whole stack — server, desktop client, and the design docs behind them —
+    is public. Run it on your own hardware, audit it line by line, or fork it and make it yours.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Open source, all of it</h3>
+        <p>No open-core, no withheld enterprise repo. The same code we run is the code you get —
+        including the architecture docs that explain why it's built that way, and the research
+        spikes behind every decision, with what we measured and rejected.</p>
+      </div>
+      <div class="card">
+        <h3>A growing community</h3>
+        <p>Teams building the agentic workspace together. Issues, research spikes, and roadmap
+        decisions happen in the open — join the conversation and shape what gets built next.</p>
+      </div>
+      <div class="card">
+        <h3>Security you can read</h3>
+        <p>Both memory stores pass one contract test suite, workspace isolation is enforced by
+        PostgreSQL row-level security — not application checks — and agents never touch your
+        model credentials. Verifiable in the code, not promised in a PDF.</p>
+      </div>
+    </div>
+    <div class="actions" style="margin-top: 28px;">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">WorkRoom on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <h2>Pricing</h2>
+    <p class="sub">Start free. Pay per seat as you grow.</p>
+    <div class="pricing">
+      <div class="price-card">
+        <div class="tier">Free</div>
+        <div class="amount">$0 <span>forever*</span></div>
+        <p class="tagline">Hosted for small teams.</p>
+        <ul>
+          <li>Hosted free for up to 5 seats — we run it for you</li>
+          <li>Channels, memory, run records, artifacts</li>
+          <li>Any ACP agent, your own model keys</li>
+          <li>90 days of history and memory</li>
+          <li>Community support</li>
+        </ul>
+        <a class="btn ghost" href="https://github.com/farol-team/workroom">Start free</a>
+      </div>
+      <div class="price-card featured">
+        <div class="tier">Team</div>
+        <div class="amount">$10 <span>per seat / month</span></div>
+        <p class="tagline">Managed hosting for teams growing past 5 seats.</p>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Full history and memory — no cutoff</li>
+          <li>First 5 seats free</li>
+          <li>Managed workspace server — we run it, you work</li>
+          <li>Managed memory store with semantic retrieval</li>
+          <li>Priority support</li>
+          <li>Billed monthly. Cancel anytime.</li>
+        </ul>
+        <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      </div>
+      <div class="price-card">
+        <div class="tier">Enterprise</div>
+        <div class="amount">Custom</div>
+        <p class="tagline">For org-wide rollout and always-on agent work.</p>
+        <ul>
+          <li>Everything in Team</li>
+          <li>Cloud agents — always-on, working while laptops are closed</li>
+          <li>SSO / SAML and directory provisioning</li>
+          <li>Managed deployment: your cloud or ours</li>
+          <li>Custom retention, audit, and commercial terms</li>
+        </ul>
+        <a class="btn ghost" href="mailto:hello@farol.run">Talk to us</a>
+      </div>
+    </div>
+    <p class="footnote">* Hosted free for teams of up to 5 seats — or self-host forever at any size.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>FAQ</h2>
+    <div class="faq">
+      <details>
+        <summary>Which agents does it work with?</summary>
+        <p>Any agent that speaks ACP — Claude Code (via the official adapter), Goose, Codex, and
+        anything else implementing the protocol. The workspace binds to protocols, so it outlives
+        any particular agent.</p>
+      </details>
+      <details>
+        <summary>Do you host our agents or see our model credentials?</summary>
+        <p>Never. Agents run on each person's machine under their own credentials. The server
+        coordinates, records, and remembers — it holds no model credentials by design, and there
+        is no code path that moves them server-side.</p>
+      </details>
+      <details>
+        <summary>Why not just Slack plus everyone's standalone agents?</summary>
+        <p>Because nothing accumulates and nothing is visible: every session starts from zero, and
+        there's no shared record of what agents did. WorkRoom adds exactly that layer without
+        taking anyone's agent away. <a href="vs-standalone-agents.html">Full comparison →</a></p>
+      </details>
+      <details>
+        <summary>Doesn't Slack already do this with Slackbot and AI search?</summary>
+        <p>Search over a chat log is not the same as memory. Slackbot finds what was <i>said</i>;
+        WorkRoom keeps what was <i>concluded</i> — distilled entries with trust levels and
+        provenance, injected into your agent before every session, on your machine. And the
+        record lives in a store you control, not in a vendor's cloud.
+        <a href="vs-slack.html">Full comparison →</a></p>
+      </details>
+      <details>
+        <summary>How are you different from Buzz, OpenWork, or qm?</summary>
+        <p>Short version: Buzz bets on a signed Nostr event log, OpenWork shares capabilities
+        through a marketplace, qm runs agents centrally with server-held credentials. WorkRoom is
+        the only one combining local execution, room-owned memory, and structural scoping.
+        Long versions: <a href="vs-buzz.html">vs Buzz</a>, <a href="vs-openwork.html">vs OpenWork</a>,
+        <a href="vs-qm.html">vs qm</a>.</p>
+      </details>
+      <details>
+        <summary>What does it cost to run the agents?</summary>
+        <p>Nothing from us. Your agents run on your machines with your own model keys, so
+        inference is billed by your model provider directly to you — it never passes through
+        WorkRoom. We charge for hosting the workspace (free up to 5 seats), not for what your
+        agents do.</p>
+      </details>
+      <details>
+        <summary>What can a workspace admin see?</summary>
+        <p>The room's full record: messages, run steps, memory entries, artifacts. What no admin
+        can see is model credentials — they never leave each person's machine, so there is
+        nothing to see, leak, or revoke server-side.</p>
+      </details>
+      <details>
+        <summary>What can agents connect to?</summary>
+        <p>Whatever its channel's rail exposes — and nothing else. Capabilities are MCP tools
+        attached to a channel; the agent discovers them with <code>search_capabilities</code> and
+        runs them with <code>execute_capability</code>. A channel with no capabilities attached
+        is a room with memory, nothing more.</p>
+      </details>
+      <details>
+        <summary>How are you different from Notion's agents?</summary>
+        <p>Notion's agents run in Notion's cloud, inside Notion's permissions, and what they
+        learn lives in Notion. WorkRoom agents are the ones you already use — Claude Code,
+        Goose, Codex — running on your machine under your keys, and what they produce
+        accumulates in room-owned memory with provenance, in a store you control and can walk
+        away with.</p>
+      </details>
+      <details>
+        <summary>Can we take our data with us?</summary>
+        <p>Yes — that's the point of the product. The record is plain PostgreSQL, memory entries
+        are readable text with provenance, and self-hosting keeps everything on your own hardware.
+        The knowledge your team accumulates is yours: readable, auditable, portable.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Start building the room that remembers.</h2>
+    <p class="sub">Free for teams up to 5 seats. Set up in minutes — your agents and credentials
+    stay exactly where they are.</p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="mailto:hello@farol.run">Talk to sales</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/farol-team/workroom">GitHub</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-buzz.html">vs Buzz</a>
+    <a href="vs-openwork.html">vs OpenWork</a>
+    <a href="vs-qm.html">vs qm</a>
+    <a href="vs-standalone-agents.html">vs Standalone agents</a>
+  </div>
+</footer>
+
+</body>
+</html>
