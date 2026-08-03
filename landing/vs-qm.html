@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom vs qm — local agents vs a central agent platform</title>
+  <meta name="description" content="qm runs agents centrally on org infrastructure with server-held credentials and Slack as the surface. WorkRoom keeps execution on each person's machine and centralizes only memory and the record.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero versus">
+  <div class="wrap">
+    <p class="kicker">Comparison</p>
+    <h1>WorkRoom vs <em>qm</em></h1>
+    <p class="lede">
+      Both products build shared, scoped memory for teams of people working with agents.
+      They give opposite answers to one question — where the agent runs. qm centralizes execution:
+      the org's server runs the agents and holds the credentials. WorkRoom centralizes only memory
+      and the record; execution never leaves your machine.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Side by side</h2>
+    <p class="sub">qm is a self-hosted "multiplayer agent harness": a central TypeScript core serving the whole org, surfaced in Slack and a web app, with per-scope durable sandboxes. WorkRoom is a workspace of local agents coordinated by a record server.</p>
+    <table class="compare">
+      <thead>
+        <tr><th>Axis</th><th class="wr">WorkRoom</th><th>qm</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="axis">Where agents run</td>
+          <td class="wr">On each person's machine, under their own credentials — the server never executes an agent</td>
+          <td>Centrally: the org's core runs the model loop in per-scope cloud sandboxes</td>
+        </tr>
+        <tr>
+          <td class="axis">Credentials</td>
+          <td class="wr">Model credentials never leave the owner's machine; the server holds none, by design</td>
+          <td>Held server-side in a per-scope keychain; documented as plaintext while in use</td>
+        </tr>
+        <tr>
+          <td class="axis">Agent choice</td>
+          <td class="wr">Any ACP-speaking agent; the workspace outlives any particular agent</td>
+          <td>Four harness adapters (Pi, OpenCode, Codex, Claude Code) behind qm's own tool protocol</td>
+        </tr>
+        <tr>
+          <td class="axis">Protocols</td>
+          <td class="wr">Open standards: ACP for control, MCP for capability and memory</td>
+          <td>A custom, fixed tool surface (execute, read, write, memory, post, reach…); not ACP/MCP</td>
+        </tr>
+        <tr>
+          <td class="axis">Memory model</td>
+          <td class="wr">Channel-owned context database; agent distills at end of turn; trust (human vs agent) and provenance are mandatory fields; correction by supersession</td>
+          <td>Per-scope markdown notebooks; automatic background LLM extraction after every turn; periodic LLM consolidation; revision history</td>
+        </tr>
+        <tr>
+          <td class="axis">Collaboration surface</td>
+          <td class="wr">Its own channels: messages, run steps, artifacts — the room is the record</td>
+          <td>Slack (DMs, channels, groups) plus a web chat; the agent has ambient presence in channels</td>
+        </tr>
+        <tr>
+          <td class="axis">Always-on work</td>
+          <td class="wr">The agent works when its owner's machine is on — no central queue, no central bottleneck</td>
+          <td>Crons, watches, and ambient channel presence run unattended on the server</td>
+        </tr>
+        <tr>
+          <td class="axis">Maturity</td>
+          <td class="wr">Hosted SaaS, free for teams up to 5 · open-source self-host</td>
+          <td>Early, experimental v0.1.x, self-hosted only</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where qm is genuinely strong</h2>
+    <p class="sub">A credible comparison admits what the other side does better.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Ambient presence</h3>
+        <p>The agent overhears every channel message and decides like a thoughtful coworker whether
+        to speak. Crons and watches deliver unattended work into conversations.</p>
+      </div>
+      <div class="card">
+        <h3>Durable sandbox computers</h3>
+        <p>Every person and every room gets a persistent Linux machine where installed tools stay
+        installed — plus agent-published internal web apps with access control.</p>
+      </div>
+      <div class="card">
+        <h3>Memory engineering</h3>
+        <p>Automatic extraction with strict anti-inference rules, LLM consolidation passes, revision
+        history — and a memory benchmark with an LLM judge scoring signal-to-noise and staleness.
+        The most rigorous memory QA in this class.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where WorkRoom is different</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>No honeypot</h3>
+        <p>Central execution means the server holds every credential — one breach away from
+        everything. In WorkRoom the server holds no model credentials at all; there is nothing
+        central to steal.</p>
+      </div>
+      <div class="card">
+        <h3>Trust you can read at retrieval</h3>
+        <p>qm's auto-extraction makes memory effortless but flattens who knows what. WorkRoom keeps
+        human statements and agent inferences visibly distinct, with run- and model-level provenance —
+        because a wrong inference that corroborates itself is unarguable within a month.</p>
+      </div>
+      <div class="card">
+        <h3>Open protocols, no Slack dependency</h3>
+        <p>WorkRoom's seams are ACP and MCP — swap the agent, the client, or the memory store
+        independently, and the room doesn't live inside someone else's chat platform.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Which one fits</h2>
+    <div class="verdict">
+      <div class="choose wr">
+        <h3>Choose WorkRoom if…</h3>
+        <ul>
+          <li>Credentials and execution must stay on each person's machine — compliance or principle</li>
+          <li>You want open protocols (ACP/MCP) instead of a vendor-specific tool surface</li>
+          <li>You want memory with explicit trust levels and provenance, not fully automatic capture</li>
+          <li>You don't want the room's record and identity to depend on Slack</li>
+          <li>You want managed hosting — qm is self-hosted only; everything runs on infrastructure you operate</li>
+        </ul>
+      </div>
+      <div class="choose">
+        <h3>Choose qm if…</h3>
+        <ul>
+          <li>Your team already lives in Slack and wants agents present there ambiently</li>
+          <li>You need unattended, scheduled, always-on agent work (crons, watches)</li>
+          <li>Centralized credentials and sandboxed execution are acceptable — or desired for control</li>
+          <li>You want durable per-person cloud machines agents can install tools on</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="index.html">Back to overview</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="index.html">Overview</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-buzz.html">vs Buzz</a>
+    <a href="vs-openwork.html">vs OpenWork</a>
+    <a href="vs-standalone-agents.html">vs Standalone agents</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -46,8 +46,6 @@ function deps(over: Partial<TimelineDeps> = {}): TimelineDeps {
     produced: vi.fn(async () => ({ files: [], pre_existing: 0 })),
     readFile: vi.fn(async () => ""),
     attach: vi.fn(async () => {}),
-    exportSession: vi.fn(async () => null),
-    attachTranscript: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -67,6 +65,25 @@ describe("the room's timeline", () => {
 
     expect(document.querySelectorAll("#messages .msg")).toHaveLength(1);
     expect(timeline.held()).toHaveLength(1);
+  });
+
+  test("reopening a room draws what was attached while nobody watched", () => {
+    // Work product belongs to the channel (#160): before this, an artifact was
+    // visible only to whoever had the room open when the socket announced it.
+    const timeline = createTimeline(deps());
+    timeline.open(
+      room([
+        said("run the report", { created_at: "2026-01-01T09:00:00Z" }),
+        said("done, transcript attached", { created_at: "2026-01-01T09:05:00Z" }),
+      ]),
+      [ { id: 7, name: "run-3 transcript.json", kind: "transcript",
+          created_at: "2026-01-01T09:04:00Z" } ],
+    );
+
+    const rows = [ ...$("messages").children ].map((el) => el.className);
+    expect($("messages").querySelector(".artifact")?.textContent).toContain("run-3 transcript.json");
+    expect(rows.indexOf("artifact")).toBeGreaterThan(rows.findIndex((c) => c.includes("msg")));
+    expect(rows[rows.length - 1]).toContain("msg");
   });
 
   test("an empty room says what it is for, and stops once something is said", () => {

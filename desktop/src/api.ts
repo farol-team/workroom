@@ -16,6 +16,12 @@ export interface Channel {
   /// a meetings channel is not a codebase.
   repository_url?: string | null;
   message_count: number;
+  /// How much the room knows, counted by the store when the room was opened.
+  /// Only `channels#show` carries it, and not when the store was away — an
+  /// absent number is the store being unreachable, not a zero (#161, #146).
+  memory_count?: number;
+  /// Which of the two an absent count means: "ok" or "unavailable".
+  memory?: string;
 }
 
 import type { RoomTemplate } from "./rules";
@@ -94,7 +100,8 @@ export class Api {
 
   /// A channel in the room this token names. `template` fills one in from the
   /// shapes the server offers; without it the three fields are the channel.
-  createChannel(body: { slug?: string; name?: string; purpose?: string; template?: string }) {
+  createChannel(body: { slug?: string; name?: string; purpose?: string; template?: string;
+                        visibility?: string }) {
     return this.call<Channel>("/channels", { method: "POST", body: JSON.stringify(body) });
   }
 
@@ -112,11 +119,11 @@ export class Api {
 
   invitations() {
     return this.call<Array<{ id: number; code: string; email: string | null; role: string;
-                             expires_at: string; invited_by: string }>>("/invitations");
+                             invited_by: string }>>("/invitations");
   }
 
   invite(email?: string, role = "member") {
-    return this.call<{ code: string; email: string | null; role: string; expires_at: string }>(
+    return this.call<{ code: string; email: string | null; role: string }>(
       "/invitations", { method: "POST", body: JSON.stringify({ email, role }) });
   }
 
@@ -192,6 +199,16 @@ export class Api {
     });
   }
 
+  /// A person deliberately recording something the room should know (#162).
+  /// The server defaults this endpoint's trust to "human" and journals the
+  /// write; an agent never comes this way — it writes through the rail, which
+  /// stamps the run it came from.
+  remember(slug: string, title: string, detail: string) {
+    return this.call<{ uri: string; title: string; trust: string }>(`/channels/${slug}/memory`, {
+      method: "POST", body: JSON.stringify({ title, detail }),
+    });
+  }
+
   /// Who is in the room. A name and a role, nothing that identifies anyone
   /// elsewhere.
   members(slug: string) {
@@ -221,6 +238,14 @@ export class Api {
       body: JSON.stringify({ trigger_message_id: triggerMessageId, agent_kind: agentKind,
                              external_id: externalId, model }),
     });
+  }
+
+  /// Work product belongs to the channel, so reopening the room must not lose
+  /// what was attached while nobody watched (#160). Newest first, as served.
+  artifacts(slug: string) {
+    return this.call<Array<{ id: number; name: string; kind: string | null;
+                             sha256: string | null; created_at: string }>>(
+      `/channels/${slug}/artifacts`);
   }
 
   attachArtifact(runId: number, name: string, content: string, kind = "transcript") {

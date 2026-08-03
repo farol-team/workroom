@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -19,6 +19,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
 const agents = new Agents(settings.load());
+// When a session ends its transcript is kept, automatically — a record of what
+// already happened in the room, not a reach into somebody's folder (#124).
+agents.attachTranscript = async (runId, name, body) => { await api.attachArtifact(runId, name, body); };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let channels: Channel[] = [];
@@ -51,8 +54,6 @@ const timeline = createTimeline({
   attach: async (runId, path, body, contentType) => {
     await api.attachBytes(runId, path, body, contentType);
   },
-  exportSession: (name, sessionId) => agents.exportSession(name, sessionId),
-  attachTranscript: async (runId, name, body) => { await api.attachArtifact(runId, name, body); },
   repositoryUrl: () => current?.repository_url ?? null,
   copyText: (text) => navigator.clipboard.writeText(text),
   openUrl: (url) => openUrl(url),
@@ -336,16 +337,24 @@ function showPresence(run: Presence) {
 }
 
 async function open(slug: string) {
-  const full = await api.channel(slug);
+  // Fetched beside the channel, not after it — and a listing that fails must
+  // not keep the room shut: the artifacts are the record's, the room is not
+  // theirs (#160).
+  const [ full, artifacts ] = await Promise.all([
+    api.channel(slug),
+    api.artifacts(slug).catch(() => []),
+  ]);
   current = full;
   renderChannels();
   $("channel-name").textContent = `# ${full.slug}`;
   $("channel-purpose").textContent = full.purpose ?? "";
+  // The count the server paid one store call for at this exact moment (#161).
+  $("memory-toggle").textContent = memoryToggleLabel(full.memory_count);
   renderBinding();
   // Before the timeline draws, not after: what it draws counts itself as seen
   // through `onShown`, and setting the count afterwards would throw that away.
   seenCount.set(slug, full.messages.length);
-  timeline.open(full);
+  timeline.open(full, artifacts);
 
   // After the room is drawn, and never in its way: provisioning is this
   // machine making the channel's folder ready, not something the room waits
@@ -447,6 +456,8 @@ async function turn(name: string, postedId: number, body: string) {
                                             api.rail(current.slug), store);
   const run = await api.startRun(current.slug, postedId, name, sessionId,
                                  agents.modelFor(name, current.slug));
+  // The anchor the session's transcript will be attached to when it ends (#124).
+  agents.noteRun(sessionId, run.id);
   activeRuns += 1;
   panel.renderOptions();
 
@@ -483,11 +494,13 @@ async function turn(name: string, postedId: number, body: string) {
   });
 
   let theAgentFailed = false;
+  // The run's own summary, recorded with its end (#97).
+  let outcome: TurnOutcome | undefined;
   try {
     // The offer at the end of this turn is measured from here: what was
     // already dirty stays the person's, only the delta is the run's (#202).
     await agents.turnStart(workspace).catch(() => {});
-    await agents.prompt(name, sessionId, withClosing(body),
+    outcome = await agents.prompt(name, sessionId, withClosing(body),
                         [ boundary, guard, context ].filter(Boolean).join("\n\n") || null, history);
   } catch (err) {
     // The agent's own failure, recorded as the run's — the one case where
@@ -516,8 +529,7 @@ async function turn(name: string, postedId: number, body: string) {
     say(`${name} answered, but the reply could not be posted to the room. ${String(err)}`);
   }
   try {
-    await api.finishRun(run.id, "succeeded");
-    timeline.offerTranscript(run.id, name, sessionId);
+    await api.finishRun(run.id, "succeeded", outcome);
     await timeline.offerProduced(run.id, workspace).catch(() => {});
   } catch (err) {
     // Not the agent's, and not nobody's: a run whose end was never recorded
@@ -620,8 +632,8 @@ window.addEventListener("focus", () => {
 /// Ask for a name and an address. One dialog, because making a room and making
 /// a channel ask the same two questions.
 function askForOne(
-  title: string, note: string, templates: RoomTemplate[] = [],
-): Promise<{ slug: string; name: string; template?: string } | null> {
+  title: string, note: string, templates: RoomTemplate[] = [], withVisibility = false,
+): Promise<{ slug: string; name: string; template?: string; visibility?: string } | null> {
   const dialog = $<HTMLDialogElement>("make");
   $("make-title").textContent = title;
   $("make-note").textContent = note;
@@ -629,6 +641,15 @@ function askForOne(
   const slug = $<HTMLInputElement>("make-slug");
   name.value = "";
   slug.value = "";
+
+  // Channels have a visibility; workspaces do not. The note follows the
+  // choice, so the dialog says which room it is about to make (#256).
+  const visibility = $<HTMLSelectElement>("make-visibility");
+  $("make-visibility-row").hidden = !withVisibility;
+  visibility.value = "open";
+  visibility.onchange = () => {
+    if (withVisibility) $("make-note").textContent = visibilityNote(visibility.value);
+  };
 
   // The address is derived while it is untouched, and left alone once it is
   // not — somebody who typed one meant it.
@@ -644,8 +665,11 @@ function askForOne(
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => {
       if (dialog.returnValue !== "go") return resolve(null);
-      if (chosen.key) return resolve({ slug: chosen.key, name: name.value, template: chosen.key });
-      resolve(slug.value ? { slug: slug.value, name: name.value } : null);
+      const picked = withVisibility ? { visibility: visibility.value } : {};
+      if (chosen.key) {
+        return resolve({ slug: chosen.key, name: name.value, template: chosen.key, ...picked });
+      }
+      resolve(slug.value ? { slug: slug.value, name: name.value, ...picked } : null);
     }, { once: true });
   });
 }
@@ -813,7 +837,7 @@ $("channel-new").addEventListener("click", async () => {
   // A server too old to offer shapes, or one that cannot be reached for them,
   // still opens the dialog. The templates are the offer, not the feature.
   const templates = await api.channelTemplates().catch(() => []);
-  const asked = await askForOne("New channel", "Everybody in this workspace can find it.", templates);
+  const asked = await askForOne("New channel", visibilityNote("open"), templates, true);
   const body = channelToCreate(asked);
   if (!body) return;
 
@@ -929,6 +953,19 @@ $("signin-provider").addEventListener("click", async () => {
     button.disabled = false;
     button.textContent = "Sign in with your organisation";
   }
+});
+
+$("memory-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $<HTMLInputElement>("memory-title").value.trim();
+  const detail = $<HTMLTextAreaElement>("memory-detail").value.trim();
+  if (!current || !title || !detail) return;
+  try {
+    await api.remember(current.slug, title, detail);
+    $<HTMLInputElement>("memory-title").value = "";
+    $<HTMLTextAreaElement>("memory-detail").value = "";
+    renderMemory();
+  } catch (err) { alert(String(err)); }
 });
 
 $("skill-form").addEventListener("submit", async (e) => {

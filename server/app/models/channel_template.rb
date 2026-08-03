@@ -23,8 +23,12 @@ class ChannelTemplate
 
   # Skills, never memory. A room's first fact has to be true for that room, and
   # a template cannot know one.
-  def create!(owner:)
-    channel = Channel.create!(slug: key, name: name, purpose: purpose)
+  #
+  # Visibility is the caller's, not the template's: `# legal` picked with
+  # "private" must not open an open room (#255).
+  def create!(owner:, visibility: nil)
+    channel = Channel.create!(slug: key, name: name, purpose: purpose,
+                              visibility: visibility.presence || "open")
     channel.memberships.create!(user: owner, role: "owner")
 
     skills.each do |skill|

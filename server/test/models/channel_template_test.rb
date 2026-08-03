@@ -30,6 +30,19 @@ class ChannelTemplateTest < ActiveSupport::TestCase
     assert_empty Memory::Store.current.all(channel), "a new room knows nothing yet"
   end
 
+  test "a template honors the visibility the caller asked for" do
+    # `# legal` picked with "private" must not open an open room.
+    channel = ChannelTemplate.find("legal").create!(owner: user(name: "Alice"), visibility: "private")
+
+    assert_equal "private", channel.visibility
+  end
+
+  test "a template asked for nothing makes an open room, as before" do
+    channel = ChannelTemplate.find("strategy").create!(owner: user(name: "Alice"))
+
+    assert_equal "open", channel.visibility
+  end
+
   test "a template nobody defined is a refusal, not an empty channel" do
     assert_nil ChannelTemplate.find("astrology")
   end

@@ -90,6 +90,35 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   });
 }
 
+/// The editor's save (#231): the person's own list with `def` in place of any
+/// entry answering to the same name, case-insensitively — a name is how an
+/// agent is addressed, and `@Crm` and `@crm` must not become two agents. When
+/// the saved one is the default, nobody else stays default: two defaults is
+/// the coin toss normalizeAgents exists to resolve, and the editor should not
+/// manufacture the situation it would have to resolve.
+export function upsertDefinition(defs: AgentDef[], def: AgentDef): AgentDef[] {
+  const rest = defs.filter((d) => d.name.toLowerCase() !== def.name.toLowerCase());
+  return def.default
+    ? [ ...rest.map(({ default: _, ...d }) => d), def ]
+    : [ ...rest, def ];
+}
+
+/// Taking a definition out of the person's list. For one of the baseline three
+/// this is a reset, not a removal — normalizeAgents appends them whatever was
+/// saved, so the project's own definition comes back (#231).
+export function removeDefinition(defs: AgentDef[], name: string): AgentDef[] {
+  return defs.filter((d) => d.name.toLowerCase() !== name.toLowerCase());
+}
+
+/// Arguments as a person types them: one line, split on whitespace. An argument
+/// that itself contains a space cannot be written here — the definitions this
+/// edits have never carried one, and inventing quoting for the form would be a
+/// shell nobody asked for.
+export function splitArgs(raw: string): string[] {
+  const trimmed = raw.trim();
+  return trimmed ? trimmed.split(/\s+/) : [];
+}
+
 /// A session outlives the window that opened it. Without this every restart
 /// creates a new one and loses the thread — in a product whose claim is that the
 /// room does not forget.
@@ -623,6 +652,14 @@ export function threadSummary(replies: Threaded[]): string | null {
 }
 
 /// A conversation is read a day at a time.
+/// The toggle answers its own question before it is pressed (#161): the count
+/// the server already paid one store call for at the moment the room opened.
+/// A zero is a room that knows nothing and says so; an absent count is the
+/// store being away, and inventing a number for it is the lie #146 closed.
+export function memoryToggleLabel(count?: number): string {
+  return count === undefined ? "What the room knows" : `What the room knows (${count})`;
+}
+
 export function dayLabel(at: string, today = new Date()): string {
   const day = at.slice(0, 10);
   const shift = (n: number) => new Date(today.getTime() + n * 86_400_000).toISOString().slice(0, 10);
@@ -749,11 +786,26 @@ export function translateAcp(msg: unknown): Update | null {
   return t ? { kind: "other", label: t } : null;
 }
 
-/// What an attached transcript is called. Named after the run rather than the
-/// session, because the run is what a colleague was watching.
-export function transcriptName(runId: number, at: Date): string {
+/// What an attached transcript is called. Named after the session, because the
+/// record is the session's: one document when it ends, not one growing copy
+/// per turn (#124).
+export function transcriptName(sessionId: string, at: Date): string {
   const stamp = at.toISOString().slice(0, 16).replace("T", " ").replace(":", "");
-  return `run-${runId} transcript ${stamp}.json`;
+  return `session ${sessionId} transcript ${stamp}.json`;
+}
+
+/// The session's record as this client rendered it — said in the document
+/// itself, because it is assembled from the updates the dispatcher received,
+/// not read from the agent's own storage. The entries speak the vocabulary the
+/// room already shows (`text`, `thought`, `tool`, `plan`, `usage`); `config`
+/// is a session option changing, which is nobody's transcript.
+export function transcriptOf(sessionId: string, at: string, updates: Update[]): string {
+  return JSON.stringify({
+    session: sessionId,
+    at,
+    rendered_by: "workroom-desktop",
+    entries: updates.filter((u) => u.kind !== "config"),
+  }, null, 2);
 }
 
 /// Occupancy is worth showing once it stops being noise. A run at nine percent
@@ -795,10 +847,24 @@ export function templateNote(t: RoomTemplate): string {
 /// its key and nothing else: the name and purpose are the server's, and sending
 /// this client's copy of them would let the two drift apart on the first edit
 /// to `channel_templates.yml`.
+///
+/// Visibility travels only when it is a decision: "open" is the server's own
+/// default, and sending this client's copy of it would be the same drift. The
+/// template path carries it too — `# legal` picked with "private" must not
+/// open an open room (#255, #256).
 export function channelToCreate(
-  asked: { template?: string; slug?: string; name?: string } | null,
-): { template: string } | { slug: string; name: string } | null {
+  asked: { template?: string; slug?: string; name?: string; visibility?: string } | null,
+): { template: string; visibility?: string } | { slug: string; name: string; visibility?: string } | null {
   if (!asked) return null;
-  if (asked.template) return { template: asked.template };
-  return asked.slug ? { slug: asked.slug, name: asked.name ?? asked.slug } : null;
+  const chosen = asked.visibility === "private" ? { visibility: "private" } : {};
+  if (asked.template) return { template: asked.template, ...chosen };
+  return asked.slug ? { slug: asked.slug, name: asked.name ?? asked.slug, ...chosen } : null;
+}
+
+/// The dialog says which room it is about to make (#256) — before the button
+/// is pressed, because after is a surprise.
+export function visibilityNote(visibility: string): string {
+  return visibility === "private"
+    ? "Only people added to this room will see it."
+    : "Everybody in this workspace can find it.";
 }

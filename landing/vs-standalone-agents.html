@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom vs standalone agents — what changes when the room remembers</title>
+  <meta name="description" content="Everyone on the team already has an AI agent. WorkRoom doesn't replace it — it adds the layer that makes a team of agents more than the sum of its parts.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero versus">
+  <div class="wrap">
+    <p class="kicker">Comparison</p>
+    <h1>WorkRoom vs <em>standalone agents</em></h1>
+    <p class="lede">
+      The most common alternative to WorkRoom is no product at all: everyone runs their own
+      agent — Claude Code, Codex, Goose — on their own machine, alone. That works well for one
+      person. This page is about what breaks the moment a second person joins, and what WorkRoom
+      adds without taking your agent away.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What the status quo costs a team</h2>
+    <p class="sub">None of these are agent problems. They're the missing layer around the agents.</p>
+    <div class="grid cols-3">
+      <div class="card pain">
+        <h3>Every session starts from zero</h3>
+        <p>The agent that spent an hour learning your reporting conventions forgets all of it tonight.
+        Your colleague's agent learns it again tomorrow. The organization pays repeatedly for
+        knowledge it already bought.</p>
+      </div>
+      <div class="card pain">
+        <h3>Nobody can see the work</h3>
+        <p>What did the agent actually do? What did it cost? What came back? With standalone agents
+        there is no shared history, no audit trail, and no way to build on a colleague's run.</p>
+      </div>
+      <div class="card pain">
+        <h3>Setup drifts per person</h3>
+        <p>Everyone assembles their own instructions, tools, and connections. Onboarding a new hire
+        means a day of copying someone's dotfiles — and the person who figured something out last
+        month is the only one who still knows it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What WorkRoom adds — and what it doesn't touch</h2>
+    <p class="sub">WorkRoom is not a replacement for your agent. It's the room your agent works in.</p>
+    <table class="compare">
+      <thead>
+        <tr><th>Axis</th><th class="wr">With WorkRoom</th><th>Standalone agents</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="axis">Getting started</td>
+          <td class="wr">Hosted — sign up and invite the team in minutes; self-host if you prefer</td>
+          <td>Everyone installs, configures, and maintains their own setup</td>
+        </tr>
+        <tr>
+          <td class="axis">Your agent</td>
+          <td class="wr">Unchanged — same local agent, same credentials, same model choice; now connected to a room over ACP and MCP</td>
+          <td>Whatever you run today, exactly as you run it</td>
+        </tr>
+        <tr>
+          <td class="axis">Session start</td>
+          <td class="wr">Your agent is rehydrated with what the channel knows — trusted entries first — before it sees your prompt</td>
+          <td>Starts from zero, or from whatever you remembered to paste in</td>
+        </tr>
+        <tr>
+          <td class="axis">When work finishes</td>
+          <td class="wr">The conclusion enters the channel's memory with provenance; files are offered to you, and what you accept becomes a channel artifact</td>
+          <td>The conversation ends; the knowledge evaporates with the session</td>
+        </tr>
+        <tr>
+          <td class="axis">A colleague continues</td>
+          <td class="wr">Their agent — a different one, on their machine — starts where yours stopped, because the room holds the knowledge</td>
+          <td>They start over, or you forward chat logs</td>
+        </tr>
+        <tr>
+          <td class="axis">Visibility</td>
+          <td class="wr">Every run streams its steps to the channel: who ran what, what it cost, what it produced — attributed and auditable</td>
+          <td>None, outside each person's terminal</td>
+        </tr>
+        <tr>
+          <td class="axis">Shared how-to</td>
+          <td class="wr">Skills live in the channel, written by people, discoverable through the rail — one standard, no drift</td>
+          <td>Everyone curates their own; the best setup belongs to whoever built it</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What you keep either way</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Your agent, your choice</h3>
+        <p>WorkRoom binds to protocols, not to an agent. Whatever speaks ACP works — and whatever
+        wins next year will too.</p>
+      </div>
+      <div class="card">
+        <h3>Your credentials, your machine</h3>
+        <p>Execution stays local and model credentials never leave your laptop. The server
+        coordinates, records, and remembers — it never runs your agent.</p>
+      </div>
+      <div class="card">
+        <h3>Your files</h3>
+        <p>Repositories and documents stay where they are. Nothing uploads unless you explicitly
+        accept the offer — every byte that leaves your machine is your decision.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Which one fits</h2>
+    <div class="verdict">
+      <div class="choose wr">
+        <h3>Add WorkRoom if…</h3>
+        <ul>
+          <li>More than one person works with agents on the same domains</li>
+          <li>You've watched a new hire's agent re-learn what a leaver's agent knew</li>
+          <li>You need a shared, auditable record of what agents did and produced</li>
+          <li>You want team standards for how work is done — without centralizing anyone's agent</li>
+          <li>You want the team layer without a setup project — hosted, free for teams up to 5</li>
+        </ul>
+      </div>
+      <div class="choose">
+        <h3>Stay standalone if…</h3>
+        <ul>
+          <li>You're one person, or your work never overlaps with anyone else's</li>
+          <li>Sessions are disposable — nothing from today is worth knowing next week</li>
+          <li>You don't need visibility into cost, process, or output across people</li>
+          <li>Your agent setup is personal and you intend to keep it that way</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="index.html">Back to overview</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="index.html">Overview</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-buzz.html">vs Buzz</a>
+    <a href="vs-openwork.html">vs OpenWork</a>
+    <a href="vs-qm.html">vs qm</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
 import indexHtml from "../index.html?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, translateAcp, unreadCount, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -233,15 +233,42 @@ describe("acp translation", () => {
 });
 
 describe("transcript naming", () => {
-  test("names the artifact after the run a colleague was watching", () => {
-    const name = transcriptName(42, new Date("2026-07-31T09:05:00Z"));
-    expect(name).toMatch(/^run-42 transcript /);
+  test("names the artifact after the session whose record it is", () => {
+    const name = transcriptName("ses_42", new Date("2026-07-31T09:05:00Z"));
+    expect(name).toMatch(/^session ses_42 transcript /);
     expect(name.endsWith(".json")).toBe(true);
   });
 
-  test("two runs never collide", () => {
+  test("stable for one session and instant, and two sessions never collide", () => {
     const at = new Date("2026-07-31T09:05:00Z");
-    expect(transcriptName(1, at)).not.toEqual(transcriptName(2, at));
+    expect(transcriptName("ses_1", at)).toEqual(transcriptName("ses_1", at));
+    expect(transcriptName("ses_1", at)).not.toEqual(transcriptName("ses_2", at));
+  });
+});
+
+describe("the transcript this client renders", () => {
+  test("carries the entries in arrival order, in the room's own vocabulary", () => {
+    const body = JSON.parse(transcriptOf("ses_9", "2026-08-03T12:00:00Z", [
+      { kind: "tool", label: "read a file" },
+      { kind: "text", text: "done" },
+    ]));
+
+    expect(body.session).toBe("ses_9");
+    expect(body.at).toBe("2026-08-03T12:00:00Z");
+    expect(body.rendered_by).toBe("workroom-desktop");
+    expect(body.entries).toEqual([
+      { kind: "tool", label: "read a file" },
+      { kind: "text", text: "done" },
+    ]);
+  });
+
+  test("a session option changing is nobody's transcript", () => {
+    const body = JSON.parse(transcriptOf("ses_9", "2026-08-03T12:00:00Z", [
+      { kind: "config", options: [] },
+      { kind: "text", text: "hello" },
+    ]));
+
+    expect(body.entries).toEqual([ { kind: "text", text: "hello" } ]);
   });
 });
 
@@ -324,6 +351,38 @@ describe("which agent the controls act on", () => {
   test("a choice that outlived its definition is not a choice", () => {
     expect(activeAgent(three, "kimi")).toBe("claude");
     expect(activeAgent([], "claude")).toBeUndefined();
+  });
+});
+
+describe("editing a definition", () => {
+  const crm = { name: "crm", command: "opencode", args: [ "acp" ] };
+
+  test("saving under a taken name replaces, case-insensitively", () => {
+    // @Crm and @crm must not become two agents — the address is the identity.
+    const defs = upsertDefinition([ crm ], { name: "CRM", command: "codex-acp", args: [] });
+    expect(defs).toEqual([ { name: "CRM", command: "codex-acp", args: [] } ]);
+  });
+
+  test("choosing a default un-chooses everybody else", () => {
+    const defs = upsertDefinition(
+      [ { ...crm, default: true } ],
+      { name: "support", command: "opencode", args: [], default: true },
+    );
+    expect(defs.filter((d) => d.default).map((d) => d.name)).toEqual([ "support" ]);
+  });
+
+  test("removing a baseline name is a reset, not a removal", () => {
+    // normalizeAgents appends the baseline three whatever was saved (#231), so
+    // what comes back is the project's own definition.
+    const kept = removeDefinition([ { name: "opencode", command: "/my/fork", args: [] } ], "opencode");
+    expect(kept).toEqual([]);
+    const opencode = normalizeAgents(kept).find((d) => d.name === "opencode");
+    expect(opencode?.command).toBe("opencode");
+  });
+
+  test("arguments are one line, split on whitespace", () => {
+    expect(splitArgs("  acp   --flag  ")).toEqual([ "acp", "--flag" ]);
+    expect(splitArgs("   ")).toEqual([]);
   });
 });
 
@@ -485,6 +544,15 @@ describe("the turn carries the question", () => {
   });
 });
 
+describe("a person can add to what the room knows", () => {
+  test("the memory form writes through api.remember", () => {
+    // A source-level guard, like the send() one above and for the same reason:
+    // the form needs a window. A lost call site is exactly how this endpoint
+    // spent months as the one route with no caller (#162).
+    expect(mainSource).toMatch(/api\.remember\(\s*current\.slug/);
+  });
+});
+
 describe("what is happening in the room", () => {
   test("a colleague's agent working is one signal, whatever produced it", () => {
     // The pain this product exists for is not knowing what is going on. A
@@ -548,6 +616,21 @@ describe("a day at a time", () => {
     expect(timeLabel("2026-07-31T09:05:00Z")).toBe("09:05");
     expect(timeLabel("2026-07-31T23:59:59.573+03:00")).toBe("23:59");
     expect(timeLabel("not a timestamp")).toBe("");
+  });
+});
+
+describe("what the room knows, counted", () => {
+  test("the toggle answers its own question before it is pressed", () => {
+    // The server pays one store call per open for this number (#161); a count
+    // that reaches no pixel is that call wasted.
+    expect(memoryToggleLabel(12)).toBe("What the room knows (12)");
+  });
+
+  test("a room that knows nothing says zero, a store that is away says nothing", () => {
+    // An absent count is the store being unreachable (#146); rendering it as 0
+    // would be the room claiming to know nothing — the lie that card closed.
+    expect(memoryToggleLabel(0)).toBe("What the room knows (0)");
+    expect(memoryToggleLabel(undefined)).toBe("What the room knows");
   });
 });
 
@@ -986,6 +1069,25 @@ describe("the shape a room can be added with", () => {
 
   test("an address with no name is still a room", () => {
     expect(channelToCreate({ slug: "pricing" })).toEqual({ slug: "pricing", name: "pricing" });
+  });
+
+  test("private travels on both paths, because a template is a shape, not a verdict", () => {
+    // `# legal` picked with "private" must not open an open room (#255, #256).
+    expect(channelToCreate({ template: "legal", visibility: "private" }))
+      .toEqual({ template: "legal", visibility: "private" });
+    expect(channelToCreate({ slug: "pricing", visibility: "private" }))
+      .toEqual({ slug: "pricing", name: "pricing", visibility: "private" });
+  });
+
+  test("open does not travel — it is the server's default, not this client's copy of it", () => {
+    expect(channelToCreate({ slug: "pricing", visibility: "open" }))
+      .toEqual({ slug: "pricing", name: "pricing" });
+  });
+
+  test("the dialog says which room it is about to make", () => {
+    expect(visibilityNote("private")).toContain("Only people added");
+    expect(visibilityNote("open")).toContain("Everybody in this workspace");
+    expect(visibilityNote("open")).not.toEqual(visibilityNote("private"));
   });
 
   test("a cancelled dialog asks for nothing", () => {

@@ -6,7 +6,7 @@
 import type { Agents } from "./agent";
 import type { Channel } from "./api";
 import { installCommand, profileFor } from "./agents/catalog";
-import { activeAgent, onboardingCards, selectable, type OnboardingCard } from "./rules";
+import { activeAgent, onboardingCards, removeDefinition, selectable, splitArgs, upsertDefinition, type AgentDef, type OnboardingCard } from "./rules";
 import * as settings from "./settings";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -171,7 +171,17 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
       action.textContent = answer.action;
       action.onclick = () => press(card, answer.command, render);
 
-      row.append(name, said, action);
+      // The definition behind the row, editable at last (#231) — before this,
+      // the only way to name your own agent was the developer console.
+      const edit = document.createElement("button");
+      edit.className = "ghost";
+      edit.textContent = "Edit";
+      edit.title = "The definition behind this row: name, command, arguments, default";
+      edit.onclick = () => openEditor(def);
+
+      // Before the action, which stays the row's last button — "the one thing
+      // to do about an agent" is a contract the setup overlay reads too.
+      row.append(name, said, edit, action);
       box.append(row);
 
       // The exact command, before it runs. An application that installs something
@@ -296,6 +306,68 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
       throw err;
     }
   }
+
+  /// The editor over a definition's four fields. It never validates on its
+  /// own: what survives a save is normalizeAgents' answer, the same rule the
+  /// definitions file has always been read through.
+  function openEditor(original?: AgentDef) {
+    const dialog = $<HTMLDialogElement>("agent-editor");
+    $("agent-editor-title").textContent = original ? `@${original.name}` : "An agent of your own";
+    $<HTMLInputElement>("agent-editor-name").value = original?.name ?? "";
+    $<HTMLInputElement>("agent-editor-command").value = original?.command ?? "";
+    $<HTMLInputElement>("agent-editor-args").value = (original?.args ?? []).join(" ");
+    $<HTMLInputElement>("agent-editor-default").checked = Boolean(original?.default);
+
+    // Said out loud because it is already true and invisible: the baseline
+    // three come back whatever is saved, so removing one is a reset.
+    const baseline = original && profileFor(original.name);
+    $("agent-editor-note").textContent = baseline
+      ? `${baseline.label} is one of the agents this project always lists — ` +
+        "Remove returns the project's own definition."
+      : "";
+
+    const remove = $<HTMLButtonElement>("agent-editor-delete");
+    remove.hidden = !original;
+    remove.textContent = baseline ? "Reset" : "Remove";
+    remove.onclick = () => {
+      apply(settings.saveAgents(removeDefinition(settings.loadDefined(), original!.name)));
+      dialog.close("removed");
+    };
+
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue !== "save") return;
+      const name = $<HTMLInputElement>("agent-editor-name").value.trim();
+      const command = $<HTMLInputElement>("agent-editor-command").value.trim();
+      if (!name || !command) return;
+
+      const def: AgentDef = {
+        name, command,
+        args: splitArgs($<HTMLInputElement>("agent-editor-args").value),
+        ...($<HTMLInputElement>("agent-editor-default").checked ? { default: true } : {}),
+      };
+      // A rename is a removal and an addition — the old name would otherwise
+      // stay behind as a second agent nobody meant to keep.
+      let defs = settings.loadDefined();
+      if (original && original.name.toLowerCase() !== name.toLowerCase()) {
+        defs = removeDefinition(defs, original.name);
+      }
+      apply(settings.saveAgents(upsertDefinition(defs, def)));
+    }, { once: true });
+
+    dialog.showModal();
+  }
+
+  /// What the application runs from now on: the normalized list, probed so the
+  /// new row says the state its command is really in.
+  function apply(normalized: AgentDef[]) {
+    agents.use(normalized);
+    void refresh();
+  }
+
+  // Absent in surfaces that mount only part of the page — the overlay's specs
+  // draw the panel without the dialog chrome.
+  const adder = document.getElementById("agent-add");
+  if (adder) adder.onclick = () => openEditor();
 
   return {
     render, renderOptions, refresh, cards, agentCard, install, toggle, start, pick,

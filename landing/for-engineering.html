@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom for Engineering — your team's agents finally share what they learn</title>
+  <meta name="description" content="WorkRoom gives engineering teams AI agents with shared memory: codebase knowledge, conventions, debugging discoveries, architectural decisions — kept by the room, not relearned per developer per session.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero versus">
+  <div class="wrap">
+    <p class="kicker">WorkRoom for Engineering</p>
+    <h1>Your team's agents finally share <em>what they learn about your codebase.</em></h1>
+    <p class="lede">
+      Your engineers already run the best agents available — Claude Code, Goose, Codex. Each one
+      spends its first hour re-learning the codebase, and everything it discovers dies with the
+      session. WorkRoom keeps the agents exactly where they are and gives the team a shared
+      memory underneath them.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The expensive amnesia in engineering</h2>
+    <p class="sub">You're paying for the same discovery work over and over — once per developer,
+    per agent, per session.</p>
+    <div class="grid cols-3">
+      <div class="card pain">
+        <h3>The codebase, relearned daily</h3>
+        <p>Which service owns billing, why the deploy order matters, where the bodies are buried —
+        every agent re-derives it, every morning, on every machine in the team.</p>
+      </div>
+      <div class="card pain">
+        <h3>Debugging discoveries evaporate</h3>
+        <p>The two-hour hunt that ended in a one-line fix — the next engineer's agent starts the
+        same hunt from scratch, because the trail existed only in one session.</p>
+      </div>
+      <div class="card pain">
+        <h3>Conventions drift per agent</h3>
+        <p>The team agreed on events over direct writes. Half the team's agents don't know, so
+        review keeps catching the same architectural violations by hand.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What the room remembers</h2>
+    <p class="sub">An engineering channel's memory in WorkRoom — the codebase knowledge that
+    used to live in senior heads.</p>
+    <div class="memlist">
+      <div class="memlist-head"># engineering — what the room knows</div>
+      <ul>
+        <li class="human">Never deploy the billing service on Fridays — the reconciliation job makes
+        rollbacks messy
+          <span>stated by the tech lead · after the February incident</span></li>
+        <li class="human">Architecture decision: events over direct DB writes for anything audited —
+        see the ADR discussion
+          <span>stated by the architect · adopted 2026-04</span></li>
+        <li>The flaky checkout test is timing-dependent, not a real regression — safe to quarantine
+          <span>inferred by Claude (run #522) · five CI failure investigations</span></li>
+        <li>Auth service latency spikes trace to the legacy session lookup, not the database
+          <span>inferred by GPT (run #487) · two-hour profiling session, distilled</span></li>
+        <li class="human">Review checklist: migrations need rollback notes, new endpoints need rate limits
+          <span>stated by the tech lead · review standards agreement</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>How the team uses it</h2>
+    <p class="sub">Same agents, same machines, same workflows — with the team's knowledge
+    underneath.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>Your agent starts senior</h3>
+        <p>Before your prompt is sent, your agent is rehydrated with the channel's knowledge:
+        conventions, deploy rules, recent discoveries — the hour of exploration just disappears.</p>
+      </div>
+      <div class="step">
+        <h3>Work with the whole team watching</h3>
+        <p>Every run streams its steps to the channel — what was tried, what it cost, what came
+        back. Review stops being the only place knowledge transfers.</p>
+      </div>
+      <div class="step">
+        <h3>Discovery becomes infrastructure</h3>
+        <p>The root cause, the gotcha, the decision — recorded with provenance at the end of the
+        turn. The next agent to touch this code starts where yours finished.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Start free</h2>
+    <p class="sub">Hosted for teams up to 5 seats. Your agents and credentials stay on your
+    machines — the room only keeps what the work taught it.</p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="index.html">Back to overview</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="for-sales.html">Sales</a>
+    <a href="for-marketing.html">Marketing</a>
+    <a href="for-hr.html">HR</a>
+    <a href="for-legal.html">Legal</a>
+    <a href="for-product.html">Product</a>
+    <a href="for-support.html">Support</a>
+    <a href="for-meetings.html">Meetings</a>
+    <a href="for-finance.html">Finance</a>
+    <a href="for-operations.html">Operations</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-buzz.html">vs Buzz</a>
+    <a href="vs-openwork.html">vs OpenWork</a>
+    <a href="vs-qm.html">vs qm</a>
+    <a href="vs-standalone-agents.html">vs Standalone</a>
+  </div>
+</footer>
+
+</body>
+</html>

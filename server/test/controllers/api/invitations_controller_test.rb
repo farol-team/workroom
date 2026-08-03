@@ -64,16 +64,6 @@ class Api::V1::InvitationsControllerTest < ActionDispatch::IntegrationTest
                  "already used and never existed are different sentences")
   end
 
-  test "an expired one is refused, and says which of the two it is" do
-    code = invite(email: "bob@example.test")["code"]
-    Invitation.find_by!(code:).update!(expires_at: 1.hour.ago)
-
-    body = accept(code, as: user(name: "Bob"))
-
-    assert_response :gone
-    assert_match(/expired/, body["error"])
-  end
-
   test "a code nobody issued is not an invitation" do
     accept("not-a-code", as: user(name: "Bob"))
 

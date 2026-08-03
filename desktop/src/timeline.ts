@@ -4,7 +4,7 @@
 // from the record and the page is only how much of it fits.
 
 import type { Channel, Message } from "./api";
-import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, githubTreeUrl, type Asked, type PlanEntry, type TurnProduced } from "./rules";
+import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, worthOffering, githubTreeUrl, type Asked, type PlanEntry, type TurnProduced } from "./rules";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -25,8 +25,6 @@ export interface TimelineDeps {
   produced: (workspace: string) => Promise<TurnProduced>;
   readFile: (workspace: string, path: string) => Promise<string>;
   attach: (runId: number, path: string, base64: string, contentType: string) => Promise<void>;
-  exportSession: (name: string, sessionId: string) => Promise<string | null>;
-  attachTranscript: (runId: number, name: string, body: string) => Promise<void>;
   /// The room's repository, for the commit row's link (#206). Where the link
   /// would lead nowhere — no url, not GitHub — the control is hidden, not
   /// offered dead.
@@ -35,8 +33,14 @@ export interface TimelineDeps {
   openUrl?: (url: string) => Promise<void>;
 }
 
+/// An artifact as the channel's listing serves it — enough to draw the row the
+/// live socket would have drawn (#160).
+export interface ChannelArtifact {
+  id: number; name: string; kind: string | null; created_at: string;
+}
+
 export interface Timeline {
-  open(channel: Channel & { messages: Message[] }): void;
+  open(channel: Channel & { messages: Message[] }, artifacts?: ChannelArtifact[]): void;
   add(m: Message): void;
   /// Everything this channel has said, in the order it was said. The turn reads
   /// it, and so does anything that has to know what the page left out.
@@ -52,7 +56,6 @@ export interface Timeline {
   addArtifact(a: { id: number; name: string; kind: string | null }): void;
   askPermission(name: string, asked: Asked, note?: string | null): void;
   offerProduced(runId: number, workspace: string): Promise<void>;
-  offerTranscript(runId: number, name: string, sessionId: string): void;
 }
 
 export const escape = (s: string) =>
@@ -202,7 +205,7 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     $("messages").append(el);
   }
 
-  function open(channel: Channel & { messages: Message[] }) {
+  function open(channel: Channel & { messages: Message[] }, artifacts: ChannelArtifact[] = []) {
     $("messages").innerHTML = "";
     held = [ ...channel.messages ];
     closeThread();
@@ -214,8 +217,16 @@ export function createTimeline(deps: TimelineDeps): Timeline {
       earlier.textContent = `${shown.hidden} earlier messages are not shown`;
       $("messages").append(earlier);
     }
-    if (channel.messages.length) shown.messages.forEach(add);
-    else showIntro(channel);
+    if (channel.messages.length || artifacts.length) {
+      // What was said and what was attached, drawn in the order it happened —
+      // the same order watching the room live would have shown (#160).
+      [ ...shown.messages.map((m) => ({ at: m.created_at, draw: () => add(m) })),
+        ...artifacts.map((a) => ({ at: a.created_at, draw: () => addArtifact(a) })) ]
+        .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+        .forEach((row) => row.draw());
+    } else {
+      showIntro(channel);
+    }
   }
 
   /// The last few turns of the room, as the agent would read them. From the
@@ -408,26 +419,9 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     box.scrollTop = box.scrollHeight;
   }
 
-  /// Attaching is a decision made with the work in front of you, so it is an
-  /// action on the finished run rather than a setting chosen once in the abstract.
-  function offerTranscript(runId: number, name: string, sessionId: string) {
-    const box = $("messages");
-    const el = document.createElement("div");
-    el.className = "offer";
-
-    el.append(ghostButton("Attach transcript", "Attaching…", async () => {
-      const body = await deps.exportSession(name, sessionId);
-      if (!body) { el.textContent = "This agent keeps no transcript."; return; }
-      await deps.attachTranscript(runId, transcriptName(runId, new Date()), body);
-      el.remove();
-    }));
-    box.append(el);
-    box.scrollTop = box.scrollHeight;
-  }
-
   return {
     open, add, closeThread, addStep, revealSteps, showPlan, addArtifact, askPermission,
-    offerProduced, offerTranscript, recentHistory,
+    offerProduced, recentHistory,
     held: () => held,
     openThread: () => openThread,
   };

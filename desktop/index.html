@@ -84,6 +84,14 @@
       <aside id="memory" hidden>
         <header><strong>Memory</strong><span id="memory-uri" class="muted"></span></header>
         <div id="memory-list"></div>
+        <!-- A colleague who knows something true about the room can put it
+             there (#162) — the same shape as skills, one panel down. What a
+             person states is marked ● human, the way the list already reads. -->
+        <form id="memory-form">
+          <input id="memory-title" placeholder="Acme reports monthly" />
+          <textarea id="memory-detail" rows="3" placeholder="Decided on the June call; weekly rollups were noise."></textarea>
+          <button class="ghost" type="submit">Add to what the room knows</button>
+        </form>
         <header class="sub"><strong>In this room</strong></header>
         <div id="members"></div>
         <header class="sub"><strong>How work is done here</strong></header>
@@ -152,6 +160,15 @@
         <label>Address <input id="make-slug" required autocomplete="off"
                               pattern="[a-z0-9][a-z0-9._-]*"
                               title="lowercase letters, numbers, dot, dash or underscore" /></label>
+        <!-- Channels only — a workspace has no visibility. The note below
+             follows the choice, so the dialog says which room it is about to
+             make (#256). -->
+        <label id="make-visibility-row" hidden>Who can see it
+          <select id="make-visibility">
+            <option value="open">Open — everybody in this workspace</option>
+            <option value="private">Private — only people added to it</option>
+          </select>
+        </label>
         <p id="make-note" class="muted"></p>
         <menu>
           <button value="cancel" formnovalidate>Cancel</button>
@@ -256,8 +273,39 @@
         <h3>Your agents</h3>
         <div id="agents"></div>
         <menu>
+          <button type="button" id="agent-add" class="ghost">Add an agent…</button>
           <button type="button" id="agents-setup" class="ghost">Run setup again</button>
           <button value="close">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- A definition is four fields and nothing else: what to call it, what to
+         run, with which arguments, and whether @agent means it. Never a
+         credential — the agent authenticates itself (Article P2). Until now the
+         only way to write one was the developer console (#231). -->
+    <dialog id="agent-editor">
+      <form method="dialog">
+        <h3 id="agent-editor-title">An agent of your own</h3>
+        <label>Name <input id="agent-editor-name" required autocomplete="off"
+                           pattern="[a-zA-Z0-9][a-zA-Z0-9._-]*"
+                           title="letters, numbers, dot, dash or underscore" /></label>
+        <!-- Already true and until now invisible: the name is the address and
+             the attribution. -->
+        <p class="muted">The name is how it is addressed — <code>@crm</code> — and how
+          its runs are signed in the room. Renaming an agent renames it in front
+          of colleagues.</p>
+        <label>Command <input id="agent-editor-command" required autocomplete="off"
+                              placeholder="opencode" /></label>
+        <label>Arguments <input id="agent-editor-args" autocomplete="off"
+                                placeholder="acp" /></label>
+        <label class="vis"><input type="checkbox" id="agent-editor-default" />
+          <code>@agent</code> means this one</label>
+        <p id="agent-editor-note" class="muted"></p>
+        <menu>
+          <button type="button" id="agent-editor-delete" class="ghost" hidden>Remove</button>
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button value="save">Save</button>
         </menu>
       </form>
     </dialog>

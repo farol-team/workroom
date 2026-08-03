@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkRoom vs Buzz — channel-owned memory vs the signed event log</title>
+  <meta name="description" content="WorkRoom and Buzz both put people and agents in shared rooms. Buzz builds on Nostr with a git forge and per-agent encrypted memory; WorkRoom builds around channel-owned shared memory with trust and provenance.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html">Work<span class="rm"><i>R</i><i>o</i><i>o</i><i>m</i></span></a>
+    <div class="links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#roles">Roles</a>
+      <a href="vs-slack.html">Compare</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a class="cta" href="https://github.com/farol-team/workroom">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero versus">
+  <div class="wrap">
+    <p class="kicker">Comparison</p>
+    <h1>WorkRoom vs <em>Buzz</em></h1>
+    <p class="lede">
+      Both products put people and agents in the same rooms, and both speak ACP and MCP.
+      The difference is what the room accumulates: Buzz treats the signed event log as the memory;
+      WorkRoom treats distilled, channel-owned knowledge as a first-class thing the room holds.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Side by side</h2>
+    <p class="sub">Buzz is a self-hostable team workspace on the Nostr protocol, built at Block, Inc. — with chat, a git forge, workflows, and voice. WorkRoom is deliberately narrower: channels, memory, and the record.</p>
+    <table class="compare">
+      <thead>
+        <tr><th>Axis</th><th class="wr">WorkRoom</th><th>Buzz</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="axis">Core bet</td>
+          <td class="wr">The room remembers: channels own distilled, scoped, trusted memory</td>
+          <td>The protocol is the product: one signed Nostr event log for everything</td>
+        </tr>
+        <tr>
+          <td class="axis">Agent execution</td>
+          <td class="wr">Always local, on the owner's machine, under the owner's credentials — a defended rule</td>
+          <td>Local by default; pooled community compute (Mesh) and remote agents are planned</td>
+        </tr>
+        <tr>
+          <td class="axis">Agent identity</td>
+          <td class="wr">A run is attributed to the person, the agent kind, and the model</td>
+          <td>Each agent has its own Nostr keypair and signs every event — cryptographic attribution</td>
+        </tr>
+        <tr>
+          <td class="axis">Shared memory</td>
+          <td class="wr">Channel-scoped context database; tiered entries (abstract / overview / detail); human trust ranks above agent inference; correction by supersession</td>
+          <td>The searchable signed event log itself, plus per-(agent, owner) encrypted engrams — agent memory is private to that pair, not channel-owned</td>
+        </tr>
+        <tr>
+          <td class="axis">How work becomes memory</td>
+          <td class="wr">The agent distills at the end of the turn via the capability rail, with mandatory provenance (run, model, author)</td>
+          <td>The agent publishes to the channel (the log is the record) and keeps private engrams via CLI, at its own discipline</td>
+        </tr>
+        <tr>
+          <td class="axis">Capability scoping</td>
+          <td class="wr">Structural: one MCP rail per channel, the channel is in the URL</td>
+          <td>Membership-based: channel access is enforced on the relay; the tool surface is uniform</td>
+        </tr>
+        <tr>
+          <td class="axis">Scope of product</td>
+          <td class="wr">Channels, memory, runs, artifacts — deliberately nothing else</td>
+          <td>Chat + forum + DMs + git forge + workflows + voice huddles + media — a full workspace OS</td>
+        </tr>
+        <tr>
+          <td class="axis">Tenancy</td>
+          <td class="wr">One organization per deployment; workspaces isolated by PostgreSQL row-level security</td>
+          <td>Multi-community relay with formally verified isolation (TLA+, Tamarin)</td>
+        </tr>
+        <tr>
+          <td class="axis">Maturity</td>
+          <td class="wr">Hosted SaaS, free for teams up to 5 · open-source self-host</td>
+          <td>v0.5.x with shipped desktop releases, in production at Block</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where Buzz is genuinely strong</h2>
+    <p class="sub">A credible comparison admits what the other side does better.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Cryptographic everything</h3>
+        <p>Every message, reaction, workflow step, and git push is a signed event with a hash-chained
+        audit trail. Per-event attribution is built into the substrate, not layered on top.</p>
+      </div>
+      <div class="card">
+        <h3>The workspace is the forge</h3>
+        <p>Built-in git hosting on object storage, branches as channels, patches and reviews as
+        first-class events. WorkRoom explicitly stays out of code hosting.</p>
+      </div>
+      <div class="card">
+        <h3>Breadth and maturity</h3>
+        <p>Desktop, web, mobile, CLI, voice — plus formally verified multi-tenancy and real
+        production mileage inside Block. Buzz is much further along.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where WorkRoom is different</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Knowledge, not just history</h3>
+        <p>A searchable log answers "what happened." WorkRoom's channel memory answers "what do we
+        know" — distilled entries with trust levels and provenance, pushed to the agent before every
+        turn, not just findable after the fact.</p>
+      </div>
+      <div class="card">
+        <h3>Memory belongs to the room</h3>
+        <p>Buzz's engrams are encrypted to one agent–owner pair; when either leaves, the knowledge
+        leaves. In WorkRoom the channel owns the memory, so a colleague's different agent starts
+        where yours stopped.</p>
+      </div>
+      <div class="card">
+        <h3>Three seams, one server</h3>
+        <p>WorkRoom is a Rails app, a desktop client, and your local agent — no relay, no Redis,
+        no event protocol to operate. Self-host in one command, or run nothing at all: the hosted
+        workspace is a signup, free for small teams.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Which one fits</h2>
+    <div class="verdict">
+      <div class="choose wr">
+        <h3>Choose WorkRoom if…</h3>
+        <ul>
+          <li>The expensive problem is knowledge evaporating between sessions and people</li>
+          <li>You want shared memory with trust levels and provenance, not a log to dig through</li>
+          <li>Agents must stay local under each person's own credentials, with no planned exception</li>
+          <li>You prefer one small system you can read end-to-end over a platform</li>
+          <li>You want to start today on a hosted workspace — free for small teams — instead of operating infrastructure</li>
+        </ul>
+      </div>
+      <div class="choose">
+        <h3>Choose Buzz if…</h3>
+        <ul>
+          <li>You want chat, code hosting, CI visibility, and automation in one event log</li>
+          <li>Cryptographic per-event attribution and tamper-evident audit are requirements</li>
+          <li>You need a proven, multi-tenant deployment with formal isolation guarantees</li>
+          <li>Your team is ready to operate a Nostr relay stack (Postgres, Redis, MinIO)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/farol-team/workroom">Start free</a>
+      <a class="btn ghost" style="color: var(--ink); border-color: var(--line);" href="index.html">Back to overview</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WorkRoom — the room remembers.</span>
+    <span class="spacer"></span>
+    <a href="index.html">Overview</a>
+    <a href="vs-slack.html">vs Slack</a>
+    <a href="vs-openwork.html">vs OpenWork</a>
+    <a href="vs-qm.html">vs qm</a>
+    <a href="vs-standalone-agents.html">vs Standalone agents</a>
+  </div>
+</footer>
+
+</body>
+</html>

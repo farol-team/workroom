@@ -79,6 +79,17 @@ client asks `/api/v1/auth/methods`, gets `development: false, provider: false`, 
 shows a sentence instead of a form that cannot work. That is the correct state
 for a server that is up before its identity provider is configured.
 
+With an issuer configured, the provider decides who a person is and this server
+decides whether they get in (#227): members sign in, strangers need an open
+invitation naming their address, and an empty workspace admits its first person
+as its owner — so sign in yourself before you share the URL. That first-person
+rule is also why pointing at a public issuer (`accounts.google.com`) does not
+make every account on the internet a member. For Google use a **Web
+application** client, register the redirect URI exactly as the server sends it
+(`localhost` and `127.0.0.1` are different strings to Google), and never delete
+and re-create the client — `sub` is per client, and a new one turns every
+existing member into a stranger with a familiar address (see RUNNING.md).
+
 ## Verified, and where
 
 The production image was built and booted against a real PostgreSQL before any
