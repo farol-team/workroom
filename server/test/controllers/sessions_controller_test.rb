@@ -7,6 +7,12 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
       provider: "openid_connect", uid: "okta|0001",
       info: { email: "dana@farol.run", name: "Dana Ruiz" }
     )
+    # Dana is new here, and new people are admitted by invitation (#227). The
+    # sign-in mechanics these tests pin — tokens, redirects, subjects — are the
+    # same whichever way somebody got in, and must not depend on whether the
+    # database around them happens to be empty (CI seeds it; local runs may not).
+    Invitation.create!(workspace: in_a_workspace, invited_by: user(name: "Inviter"),
+                       email: "dana@farol.run", role: "member")
   end
 
   teardown do
@@ -105,6 +111,112 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
       get "/auth/openid_connect/callback"
     end
     assert_response :unauthorized
+  end
+end
+
+# Signing up is not the same act as signing in (#227). Against a public issuer
+# — accounts.google.com — the provider vouches for every account on the
+# internet, so who gets in is this application's decision, not the issuer's.
+class SignUpAdmissionTest < ActionDispatch::IntegrationTest
+  setup do
+    OmniAuth.config.test_mode = true
+    OmniAuth.config.mock_auth[:openid_connect] = OmniAuth::AuthHash.new(
+      provider: "openid_connect", uid: "google|555",
+      info: { email: "sasha@newco.example", name: "Sasha Ito" }
+    )
+  end
+
+  teardown do
+    OmniAuth.config.test_mode = false
+    OmniAuth.config.mock_auth[:openid_connect] = nil
+  end
+
+  test "a stranger the workspace has not invited is refused, not created" do
+    user(name: "Alice")
+
+    assert_no_difference -> { User.count } do
+      get "/auth/openid_connect/callback"
+    end
+
+    assert_response :forbidden
+    assert_includes response.body, "does not admit sasha@newco.example",
+                    "a refusal is a different sentence from a failure"
+  end
+
+  test "an invitation naming the address is the way in, and is spent by it" do
+    alice = user(name: "Alice")
+    # The address as somebody typed it — the match must not depend on case.
+    invitation = Invitation.create!(workspace: in_a_workspace, invited_by: alice,
+                                    email: "Sasha@NewCo.example", role: "member")
+
+    assert_difference -> { User.count }, 1 do
+      get "/auth/openid_connect/callback"
+    end
+
+    assert_response :success
+    sasha = User.find_by!(email: "sasha@newco.example")
+    membership = sasha.workspace_memberships.sole
+    assert_equal "member", membership.role, "the role is the invitation's"
+    assert invitation.reload.spent?, "an invitation that admitted somebody is used up"
+    assert_equal sasha, invitation.accepted_by
+    assert_includes response.body, membership.api_token
+  end
+
+  test "an empty workspace takes its first person as its owner" do
+    # There is nobody yet to do the inviting, and a workspace nobody can enter
+    # stays empty forever. Emptied by hand, because a seeded database (CI) is
+    # not empty and this rule is about the fresh-deploy case.
+    WorkspaceMembership.delete_all
+    get "/auth/openid_connect/callback"
+
+    assert_response :success
+    assert_equal "owner",
+                 User.find_by!(email: "sasha@newco.example").workspace_memberships.sole.role
+  end
+
+  test "an address the provider has not verified is refused, invitation or not" do
+    alice = user(name: "Alice")
+    Invitation.create!(workspace: in_a_workspace, invited_by: alice,
+                       email: "sasha@newco.example", role: "member")
+    OmniAuth.config.mock_auth[:openid_connect] = OmniAuth::AuthHash.new(
+      provider: "openid_connect", uid: "google|555",
+      info: { email: "sasha@newco.example", name: "Sasha Ito" },
+      extra: { raw_info: { email_verified: false } }
+    )
+
+    assert_no_difference -> { User.count } do
+      get "/auth/openid_connect/callback"
+    end
+
+    assert_response :forbidden
+    assert_includes response.body, "not a verified address"
+  end
+
+  test "a member signs in as before, whoever has joined since" do
+    sasha = User.create!(email: "sasha@newco.example", name: "Sasha Ito",
+                         provider: "openid_connect", uid: "google|555")
+    WorkspaceMembership.create!(user: sasha, workspace: in_a_workspace)
+    user(name: "Alice")
+
+    assert_no_difference -> { WorkspaceMembership.count } do
+      get "/auth/openid_connect/callback"
+    end
+
+    assert_response :success
+    assert_includes response.body, sasha.workspace_memberships.sole.api_token
+  end
+
+  test "an invitation with no address admits nobody at sign-in" do
+    # A code-only invitation is redeemed through the accept endpoint by somebody
+    # already signed in; at this door there is no code, only an address.
+    alice = user(name: "Alice")
+    Invitation.create!(workspace: in_a_workspace, invited_by: alice, role: "member")
+
+    assert_no_difference -> { User.count } do
+      get "/auth/openid_connect/callback"
+    end
+
+    assert_response :forbidden
   end
 end
 

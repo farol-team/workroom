@@ -21,11 +21,45 @@ class SessionsController < ActionController::Base
     uid = auth&.dig("uid").presence
     return failure unless email && uid
 
+    # An address the provider itself does not vouch for is not an identity —
+    # Google relays whatever was typed until the person verifies it. Only an
+    # explicit false refuses: providers that omit the claim have nothing to say,
+    # and refusing on silence would lock out every issuer that does not send it.
+    return refusal("#{email} is not a verified address with your identity provider.") if
+      auth.dig("extra", "raw_info", "email_verified") == false
+
     user = User.find_by(email: email.downcase)
     # The provider's subject is the identity. An address that already belongs to
     # a different subject is not a sign-in — it is somebody else arriving with a
     # familiar name.
     return failure if user && user.provider == "openid_connect" && user.uid != uid
+
+    # Signing up is not the same act as signing in (#227). Against an issuer
+    # that vouches only for the organisation's own people the two coincide;
+    # against a public one — accounts.google.com — whoever it vouches for would
+    # become a member. So membership is decided before anything is written, and
+    # a stranger the workspace has not asked for is refused, not created.
+    #
+    # Three ways in, tried in order: the place a person already holds; an
+    # invitation naming their address; and an empty workspace, which has nobody
+    # yet to do the inviting and takes its first person as its owner.
+    #
+    # An invitation rather than a domain allow-list, deliberately: it already
+    # exists end to end, it names a person rather than everyone at a mail host,
+    # it reads the same against every provider — `hd` is Google's alone — and it
+    # keeps admission an act somebody took and the room recorded (`invited_by`),
+    # not a config file nobody re-reads.
+    invitation = Invitation.open.where("LOWER(email) = ?", email.downcase)
+                           .order(:created_at).first
+    way_in =
+      if user&.workspace_memberships&.exists? then :membership
+      elsif invitation then :invitation
+      elsif WorkspaceMembership.none? then :first_person
+      end
+    unless way_in
+      return refusal("This workspace does not admit #{email}. " \
+                     "Ask somebody in it to invite you.")
+    end
 
     user ||= User.new(email: email.downcase)
     user.assign_attributes(provider: "openid_connect", uid: uid,
@@ -38,7 +72,12 @@ class SessionsController < ActionController::Base
     # without being in it.
     # The token names the room, so it is the membership's — there is no other
     # kind left to hand out.
-    membership = Workspace.admit(user)
+    membership =
+      case way_in
+      when :membership   then user.workspace_memberships.order(:workspace_id).first
+      when :invitation   then invitation.redeem!(user)
+      when :first_person then Workspace.admit(user, role: "owner")
+      end
     Workspace.entered(membership.workspace) do
       Activity.log(actor: user, action: "session.signed_in", subject: user)
     end
@@ -59,6 +98,13 @@ class SessionsController < ActionController::Base
   end
 
   private
+
+  # A different sentence from `failure`, because it is a different fact: the
+  # provider vouched for this person and the workspace said no. What the person
+  # can do about it is the message.
+  def refusal(message)
+    render plain: message, status: :forbidden
+  end
 
   # A port a listener on this machine could actually hold. Anything else — a
   # privileged port, a hostname, a negative number, something that is not a
