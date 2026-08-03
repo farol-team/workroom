@@ -90,6 +90,35 @@ export function normalizeAgents(defs: AgentDef[]): AgentDef[] {
   });
 }
 
+/// The editor's save (#231): the person's own list with `def` in place of any
+/// entry answering to the same name, case-insensitively — a name is how an
+/// agent is addressed, and `@Crm` and `@crm` must not become two agents. When
+/// the saved one is the default, nobody else stays default: two defaults is
+/// the coin toss normalizeAgents exists to resolve, and the editor should not
+/// manufacture the situation it would have to resolve.
+export function upsertDefinition(defs: AgentDef[], def: AgentDef): AgentDef[] {
+  const rest = defs.filter((d) => d.name.toLowerCase() !== def.name.toLowerCase());
+  return def.default
+    ? [ ...rest.map(({ default: _, ...d }) => d), def ]
+    : [ ...rest, def ];
+}
+
+/// Taking a definition out of the person's list. For one of the baseline three
+/// this is a reset, not a removal — normalizeAgents appends them whatever was
+/// saved, so the project's own definition comes back (#231).
+export function removeDefinition(defs: AgentDef[], name: string): AgentDef[] {
+  return defs.filter((d) => d.name.toLowerCase() !== name.toLowerCase());
+}
+
+/// Arguments as a person types them: one line, split on whitespace. An argument
+/// that itself contains a space cannot be written here — the definitions this
+/// edits have never carried one, and inventing quoting for the form would be a
+/// shell nobody asked for.
+export function splitArgs(raw: string): string[] {
+  const trimmed = raw.trim();
+  return trimmed ? trimmed.split(/\s+/) : [];
+}
+
 /// A session outlives the window that opened it. Without this every restart
 /// creates a new one and loses the thread — in a product whose claim is that the
 /// room does not forget.

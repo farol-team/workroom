@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 // and node's globals have no types here — nothing else in this window-shaped
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, transcriptName, transcriptOf, translateAcp, unreadCount, visibilityNote, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -350,6 +350,38 @@ describe("which agent the controls act on", () => {
   test("a choice that outlived its definition is not a choice", () => {
     expect(activeAgent(three, "kimi")).toBe("claude");
     expect(activeAgent([], "claude")).toBeUndefined();
+  });
+});
+
+describe("editing a definition", () => {
+  const crm = { name: "crm", command: "opencode", args: [ "acp" ] };
+
+  test("saving under a taken name replaces, case-insensitively", () => {
+    // @Crm and @crm must not become two agents — the address is the identity.
+    const defs = upsertDefinition([ crm ], { name: "CRM", command: "codex-acp", args: [] });
+    expect(defs).toEqual([ { name: "CRM", command: "codex-acp", args: [] } ]);
+  });
+
+  test("choosing a default un-chooses everybody else", () => {
+    const defs = upsertDefinition(
+      [ { ...crm, default: true } ],
+      { name: "support", command: "opencode", args: [], default: true },
+    );
+    expect(defs.filter((d) => d.default).map((d) => d.name)).toEqual([ "support" ]);
+  });
+
+  test("removing a baseline name is a reset, not a removal", () => {
+    // normalizeAgents appends the baseline three whatever was saved (#231), so
+    // what comes back is the project's own definition.
+    const kept = removeDefinition([ { name: "opencode", command: "/my/fork", args: [] } ], "opencode");
+    expect(kept).toEqual([]);
+    const opencode = normalizeAgents(kept).find((d) => d.name === "opencode");
+    expect(opencode?.command).toBe("opencode");
+  });
+
+  test("arguments are one line, split on whitespace", () => {
+    expect(splitArgs("  acp   --flag  ")).toEqual([ "acp", "--flag" ]);
+    expect(splitArgs("   ")).toEqual([]);
   });
 });
 
