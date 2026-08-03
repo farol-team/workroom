@@ -10,6 +10,24 @@ module Api
     class RecordsController < BaseController
       before_action :require_channel_access!
 
+      # One page of the listing. A mirror reads from `after`, the way
+      # GitExport reads from its state file — only what is new since last time.
+      LISTING_LIMIT = 500
+
+      # The journal, listed (#220): rows in order, each carrying the payload
+      # read back from its envelope in the object store — so a client can keep
+      # a `.workroom/` mirror that is exactly as good as the journal, without
+      # the server's database or a rake task. Read-only by design; there is no
+      # write in this controller and never will be (spike #45).
+      def index
+        after = params[:after].to_i
+        rows = channel!.channel_records.where(seq: (after + 1)..).order(:seq).limit(LISTING_LIMIT)
+        render json: rows.map { |entry|
+          entry.slice(:seq, :kind, :prev_hash, :entry_hash, :created_at)
+               .merge(payload: JSON.parse(RecordStore::Objects.current.get(entry.entry_hash))["payload"])
+        }
+      end
+
       def show
         artifact = channel!.artifacts.find_by!(sha256: params[:sha256])
 

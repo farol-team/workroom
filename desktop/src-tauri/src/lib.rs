@@ -28,7 +28,7 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use workspace::{TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
+use workspace::{MirrorFile, TurnProduced, Workspaces, MAX_ARTIFACT_BYTES};
 
 /// Start one of this person's agents, under the name they address it with.
 /// Defaults to the adapter `@agent` means when nobody has said otherwise; any
@@ -771,6 +771,14 @@ async fn agent_export_session(
     Ok(if body.is_empty() { None } else { Some(body) })
 }
 
+/// The room's journal as files inside the channel's folder (#220). One-way and
+/// read-only in contract: the mirror is exactly as good as the journal, and a
+/// write path is what spike #45 declined.
+#[tauri::command]
+async fn workspace_write_mirror(dir: String, files: Vec<MirrorFile>) -> Result<usize, String> {
+    workspace::write_mirror(std::path::Path::new(&dir), &files)
+}
+
 /// Stop one agent, or every agent when no name is given.
 #[tauri::command]
 async fn agent_stop(state: State<'_, AgentState>, name: Option<String>) -> Result<(), String> {
@@ -854,7 +862,8 @@ pub fn run() {
             agent_export_session,
             agent_close_session,
             agent_cancel,
-            agent_stop
+            agent_stop,
+            workspace_write_mirror
         ])
         .run(tauri::generate_context!())
         // A panic here is a backtrace where a person needed a sentence: there is

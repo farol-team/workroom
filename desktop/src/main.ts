@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, memoryToggleLabel, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -367,6 +367,10 @@ async function open(slug: string) {
   // Opening a room is one of the moments the person's unreviewed work is
   // most likely to be sitting in its folder (#207).
   humanGate.check(full);
+  // The mirror follows the room, quietly (#220): refreshed where it is on,
+  // showing its state in the settings box either way.
+  $<HTMLInputElement>("cs-mirror").checked = settings.mirrorOn(slug);
+  refreshMirror(full).catch(() => {});
 
   renderChannels();
   if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
@@ -916,6 +920,33 @@ $("folder").addEventListener("click", async (e) => {
 
 /// The room's name is the other door into the same settings.
 $("channel-name").addEventListener("click", () => channelSettings.open());
+
+/// The mirror, refreshed (#220): the whole journal re-rendered — idempotent,
+/// and a fetch that fails leaves the previous tree in place, complete or
+/// absent, never partial. Artifact bytes ride along by digest.
+async function refreshMirror(channel: Channel) {
+  if (!settings.mirrorOn(channel.slug)) return;
+  const dir = boundFolder(channel.slug, bindings)
+    ?? await agents.workspace(rooms.current!, channel.slug);
+  const rows = await api.records(channel.slug);
+  const files = rows.map(mirrorEntryOf);
+  for (const row of rows) {
+    const p = row.payload as { sha256?: string; name?: string } | null;
+    if (row.kind !== "artifact" || !p?.sha256 || !p?.name) continue;
+    const body = await api.recordBytes(channel.slug, p.sha256).catch(() => null);
+    if (body) files.push({ path: `artifacts/${p.name.replace(/[/\\]/g, "_")}`, body, base64: true });
+  }
+  await invoke("workspace_write_mirror", { dir, files });
+}
+
+$("cs-mirror").addEventListener("change", async (e) => {
+  if (!current) return;
+  const on = (e.target as HTMLInputElement).checked;
+  settings.setMirror(current.slug, on);
+  if (on) {
+    await refreshMirror(current).catch((err) => say(`The mirror was not written. ${String(err)}`));
+  }
+});
 
 $("thread-close").addEventListener("click", () => timeline.closeThread());
 

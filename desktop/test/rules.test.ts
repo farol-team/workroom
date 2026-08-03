@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 // suite reaches the filesystem.
 import mainSource from "../src/main.ts?raw";
 import indexHtml from "../index.html?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, mirrorEntryOf, MIRROR_README, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -365,6 +365,31 @@ describe("which agent the controls act on", () => {
   test("a choice that outlived its definition is not a choice", () => {
     expect(activeAgent(three, "kimi")).toBe("claude");
     expect(activeAgent([], "claude")).toBeUndefined();
+  });
+});
+
+describe("the journal as files in the mirror", () => {
+  const row = { seq: 7, kind: "memory", prev_hash: "b".repeat(64), entry_hash: "a".repeat(64),
+                created_at: "2026-08-03T12:00:00Z",
+                payload: { title: "Cadence", detail: "Monthly, not weekly." } };
+
+  test("an entry is a dated, chained markdown file whose name sorts as the room happened", () => {
+    const file = mirrorEntryOf(row);
+    expect(file.path).toBe("journal/00007-memory.md");
+    expect(file.body).toContain("seq: 7");
+    expect(file.body).toContain(`entry_hash: ${"a".repeat(64)}`);
+    expect(file.body).toContain("# Cadence");
+    expect(file.body).toContain("Monthly, not weekly.");
+  });
+
+  test("a payload with no title stays itself, as json — never invented prose", () => {
+    const file = mirrorEntryOf({ ...row, payload: { action: "attached", sha256: "ff" } });
+    expect(file.body).toContain("```json");
+    expect(file.body).toContain('"sha256": "ff"');
+  });
+
+  test("the README carries the spike's sentence word for word", () => {
+    expect(MIRROR_README).toContain("edits here do not survive — write to the channel instead");
   });
 });
 

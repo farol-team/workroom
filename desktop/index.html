@@ -209,6 +209,14 @@
         </div>
         <p id="cs-error" class="muted"></p>
 
+        <!-- The journal as files inside this folder (#220): one-way,
+             read-only in contract, opt in per channel on this machine —
+             grep, Spotlight and git log over what the room knows, offline. -->
+        <label class="vis">
+          <input type="checkbox" id="cs-mirror" />
+          Mirror the room's journal into <code>.workroom/</code> here
+        </label>
+
         <menu>
           <button value="cancel" formnovalidate id="cs-cancel">Cancel</button>
           <button type="button" id="cs-save">Save</button>
