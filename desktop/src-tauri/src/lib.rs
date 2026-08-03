@@ -22,11 +22,11 @@ mod workspace;
 
 use std::sync::Arc;
 
-use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState};
+use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState, Deadlines};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use workspace::{Produced, Workspaces, MAX_ARTIFACT_BYTES};
 
@@ -46,7 +46,14 @@ async fn agent_start(
     let args = args.unwrap_or_default();
 
     let command = resolve(&app, &command);
-    let agent = Agent::launch(app, &name, &command, &args).await?;
+    // The bridge takes what to emit rather than the handle itself, so its tests
+    // can launch a real process without a window. This closure is the window.
+    let agent = Agent::launch(&name, &command, &args, Deadlines::default(), {
+        move |event: &str, payload: Value| {
+            let _ = app.emit(event, payload);
+        }
+    })
+    .await?;
     // Starting again under the same name is a restart. The process it replaces
     // is shut down here, or it lingers unaddressable with the user's session open.
     if let Some(previous) = state.insert(&name, agent).await {
@@ -386,10 +393,23 @@ async fn agent_cancel(
     running(&state, name).await?.cancel(&session_id).await
 }
 
-/// Which of this person's agents are running.
+/// Which of this person's agents are running — asked of the processes, not of
+/// the bookkeeping. An agent whose reader has run out of stdout is a process
+/// that is gone, and it is forgotten here rather than hidden: pressing Start
+/// again is a fresh process, not a second one nobody can address (#174).
 #[tauri::command]
 async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String> {
-    Ok(state.names().await)
+    let mut names = Vec::new();
+    for name in state.names().await {
+        match state.get(&name).await {
+            Some(agent) if agent.alive() => names.push(name),
+            Some(_) => {
+                state.take(&name).await;
+            }
+            None => {}
+        }
+    }
+    Ok(names)
 }
 
 /// The rail is the only way what a room knows reaches an agent. An agent that
@@ -898,7 +918,15 @@ mod the_agents_panel {
             "both are running, and both are offered"
         );
 
-        claude.shutdown().await;
+        // The process dies from outside — a crash, not this client's own stop —
+        // so the only thing that can tell the panel is the reader noticing.
+        let pid = claude.pid().await.expect("a live agent has a pid");
+        let killed = tokio::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .await
+            .expect("kill must be runnable");
+        assert!(killed.success(), "the process must be there to die");
 
         // Asked until it settles, because the process dying and this side
         // noticing are two different moments.

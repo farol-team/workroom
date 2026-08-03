@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::{oneshot, Mutex};
@@ -25,16 +25,32 @@ type Activity = Arc<Mutex<HashMap<String, Instant>>>;
 /// cannot appear in an id we would otherwise collide with.
 const EVERYTHING: &str = "/any";
 
-/// A turn that is streaming is working, however long it takes. A turn that has
-/// said nothing for this long has stopped, whatever it believes. Idle rather
-/// than total, because total punishes the long turns this product is for.
-const IDLE_LIMIT: Duration = Duration::from_secs(620);
+/// The clocks a request is measured against, given to the agent at launch.
+/// Fields rather than constants, because ten idle minutes is not a thing a test
+/// suite can wait out — production launches with the defaults, a test injects
+/// milliseconds.
+#[derive(Clone, Copy, Debug)]
+pub struct Deadlines {
+    /// A turn that is streaming is working, however long it takes. A turn that
+    /// has said nothing for this long has stopped, whatever it believes. Idle
+    /// rather than total, because total punishes the long turns this product
+    /// is for.
+    pub idle: Duration,
+    /// And a wall clock, because an agent can be talkative and stuck at once.
+    pub hard: Duration,
+    /// How often the wait wakes up to ask whether it has been abandoned.
+    pub tick: Duration,
+}
 
-/// And a wall clock, because an agent can be talkative and stuck at once.
-const HARD_LIMIT: Duration = Duration::from_secs(7200);
-
-/// How often the wait wakes up to ask whether it has been abandoned.
-const DEADLINE_TICK: Duration = Duration::from_secs(5);
+impl Default for Deadlines {
+    fn default() -> Self {
+        Deadlines {
+            idle: Duration::from_secs(620),
+            hard: Duration::from_secs(7200),
+            tick: Duration::from_secs(5),
+        }
+    }
+}
 
 /// How much of the agent's stderr is worth keeping. Enough for a stack trace or
 /// a refusal, far short of a session's logging.
@@ -148,6 +164,12 @@ pub struct Agent {
     /// When each session last showed a sign of life. A turn with no deadline is
     /// a run that says "working" forever to everybody watching (#92).
     activity: Activity,
+    /// The clocks every request on this agent is measured against.
+    deadlines: Deadlines,
+    /// False from the moment the reader runs out of stdout. However the process
+    /// went, the reader is what notices — and a process that is gone is not an
+    /// agent to offer anybody a turn on (#174).
+    alive: Arc<AtomicBool>,
 }
 
 /// Which session a message is about, when it says. `session/update` carries it,
@@ -246,11 +268,17 @@ pub type AgentState = Registry<Arc<Agent>>;
 
 impl Agent {
     /// Launch the agent and complete the ACP handshake.
+    ///
+    /// Takes what to emit rather than an `AppHandle`, because a window is the
+    /// one thing a cargo test cannot have — and the clocks a turn is measured
+    /// against, because ten idle minutes is not a thing a suite can wait out.
+    /// Production wraps its handle and passes `Deadlines::default()`.
     pub async fn launch(
-        app: AppHandle,
         name: &str,
         command: &str,
         args: &[String],
+        deadlines: Deadlines,
+        emit: impl Fn(&str, Value) + Send + 'static,
     ) -> Result<Arc<Self>, String> {
         let mut child = tokio::process::Command::new(command)
             .args(args)
@@ -289,6 +317,8 @@ impl Agent {
             });
         }
 
+        let alive = Arc::new(AtomicBool::new(true));
+
         // One reader task owns stdout for the life of the process: replies go to
         // whoever is waiting, notifications become UI events.
         {
@@ -296,6 +326,7 @@ impl Agent {
             let closing = diagnostics.clone();
             let closing_name = name.to_string();
             let heard = activity.clone();
+            let alive = alive.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -325,10 +356,10 @@ impl Agent {
                             // Answered by the person, through the interface. A
                             // client that answers on their behalf has quietly
                             // moved the decision.
-                            let _ = app.emit("acp://ask", json!({ "id": id, "request": msg }));
+                            emit("acp://ask", json!({ "id": id, "request": msg }));
                         }
                         Inbound::Notify(msg) => {
-                            let _ = app.emit("acp://notify", msg);
+                            emit("acp://notify", msg);
                         }
                         // Nowhere better to put it yet — surfacing what the
                         // agent says is #93's subject. What matters here is
@@ -340,11 +371,21 @@ impl Agent {
                         Inbound::Ignore => {}
                     }
                 }
+                // Out of stdout is out of agent, however it went — it exited,
+                // it crashed, it was killed by something that was not us. The
+                // reader is the first to know, and the waiters are let go
+                // before anything else: dropping their senders turns every
+                // pending wait into "agent closed" now, not ten idle minutes
+                // from now (#174).
+                alive.store(false, Ordering::SeqCst);
+                pending.lock().await.clear();
                 // Which agent stopped, and the last thing it said. A name is
                 // the difference between "an agent stopped" and something a
-                // person can act on when several are running.
+                // person can act on when several are running. Said only after
+                // the waiters are gone, so a stopped agent is never announced
+                // with turns still spinning in it.
                 let tail: Vec<String> = closing.lock().await.iter().cloned().collect();
-                let _ = app.emit(
+                emit(
                     "acp://closed",
                     json!({ "name": closing_name, "diagnostics": tail }),
                 );
@@ -359,6 +400,8 @@ impl Agent {
             handshake: Mutex::new(Value::Null),
             diagnostics: diagnostics.clone(),
             activity: activity.clone(),
+            deadlines,
+            alive,
         });
 
         const PROTOCOL_VERSION: i64 = 1;
@@ -430,10 +473,18 @@ impl Agent {
 
         {
             let mut w = self.stdin.lock().await;
-            w.write_all(frame(id, method, params).as_bytes())
-                .await
-                .map_err(|e| e.to_string())?;
-            w.flush().await.map_err(|e| e.to_string())?;
+            let wrote = async {
+                w.write_all(frame(id, method, params).as_bytes()).await?;
+                w.flush().await
+            }
+            .await;
+            // A frame that never reached the agent is not a request that was
+            // made. The slot is taken back before the error is returned, or
+            // the map fills with replies that can never come.
+            if let Err(e) = wrote {
+                self.pending.lock().await.remove(&key);
+                return Err(e.to_string());
+            }
         }
 
         // Sending is a sign of life too, or a first request would be judged
@@ -461,7 +512,7 @@ impl Agent {
         sent: Instant,
     ) -> Result<Value, String> {
         loop {
-            match tokio::time::timeout(DEADLINE_TICK, &mut rx).await {
+            match tokio::time::timeout(self.deadlines.tick, &mut rx).await {
                 Ok(Ok(msg)) => return Ok(msg),
                 Ok(Err(_)) => {
                     self.pending.lock().await.remove(key);
@@ -476,9 +527,9 @@ impl Agent {
                         .map(Instant::elapsed)
                         .unwrap_or_else(|| sent.elapsed());
 
-                    let why = if idle >= IDLE_LIMIT {
+                    let why = if idle >= self.deadlines.idle {
                         format!("said nothing for {} seconds", idle.as_secs())
-                    } else if sent.elapsed() >= HARD_LIMIT {
+                    } else if sent.elapsed() >= self.deadlines.hard {
                         format!("has been at it for {} seconds", sent.elapsed().as_secs())
                     } else {
                         continue;
@@ -520,6 +571,19 @@ impl Agent {
 
     pub async fn shutdown(&self) {
         let _ = self.child.lock().await.kill().await;
+    }
+
+    /// Whether the reader still has an agent on the other end. False is a
+    /// process that is gone, however it went — the registry prunes on it.
+    pub fn alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+
+    /// The process id, so a test can kill the agent from outside — a death this
+    /// client's own `shutdown` has no part in, seen only by the reader.
+    #[cfg(test)]
+    pub(crate) async fn pid(&self) -> Option<u32> {
+        self.child.lock().await.id()
     }
 }
 
@@ -1026,15 +1090,6 @@ mod against_a_real_agent {
         })
     }
 
-    /// A turn the agent finishes on its own, and says something about on the
-    /// way — which is what a sign of life is.
-    pub(super) fn a_turn_that_answers(session: &str) -> Value {
-        json!({
-            "sessionId": session,
-            "prompt": [ { "type": "text", "text": "still here" } ]
-        })
-    }
-
     pub(super) fn permission_granted() -> Value {
         json!({ "outcome": { "outcome": "selected", "optionId": "yes" } })
     }
@@ -1131,12 +1186,30 @@ mod against_a_real_agent {
 /// where the defect lives: a crash nobody notices reads as a turn that says
 /// "working" for ten idle minutes, and nothing assembled by hand in this file
 /// can see it.
+///
+/// And the dying is never this client's own `shutdown`: the process goes down
+/// under the reader, the way a crash arrives — so the only path that can let
+/// the waiters go is the reader running out of stdout. An implementation that
+/// drains only when it does the killing itself has nothing to drain with here.
 #[cfg(test)]
 mod when_the_agent_dies {
     use super::against_a_real_agent::{
         a_turn_that_waits, launched, launched_with, permission_granted, session_on, until, Watcher,
     };
     use super::*;
+
+    /// The process dies from outside — killed the way a crash or an OOM kill
+    /// arrives, with this client an onlooker. Its `shutdown` is never called,
+    /// so nothing on the kill path can be what tells the waiters.
+    async fn died(agent: &Arc<Agent>) {
+        let pid = agent.pid().await.expect("a live agent has a pid");
+        let killed = tokio::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .await
+            .expect("kill must be runnable");
+        assert!(killed.success(), "the process must be there to die");
+    }
 
     /// Long enough that a machine starting node cannot be mistaken for an agent
     /// that has stopped talking, short enough that the suite can wait it out.
@@ -1194,8 +1267,10 @@ mod when_the_agent_dies {
             "both are filed while they wait, or a reply arriving now reaches nobody"
         );
 
-        // The process dies under them: killed, crashed, out of memory.
-        agent.shutdown().await;
+        // The process dies under them: killed, crashed, out of memory — and
+        // not by this client, whose kill path must have no part in what the
+        // waiters hear.
+        died(&agent).await;
 
         for turn in turns {
             let error = tokio::time::timeout(Duration::from_secs(5), turn)
@@ -1240,7 +1315,7 @@ mod when_the_agent_dies {
         let watcher = Watcher::new();
         let agent = launched(&watcher, "claude").await;
         watcher.watching(agent.pending.clone());
-        agent.shutdown().await;
+        died(&agent).await;
 
         // The reader has run out of stdout and finished before anything is
         // asked — so a slot left behind can only be the one this request filed

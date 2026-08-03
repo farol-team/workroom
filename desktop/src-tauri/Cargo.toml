@@ -33,7 +33,9 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
 serde_json = "1"
-tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros"] }
+# `time` is used directly (deadline ticks in acp.rs) and is declared here rather
+# than inherited through feature unification with tauri's own tokio.
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "time"] }
 
 
 [dev-dependencies]
