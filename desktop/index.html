@@ -299,6 +299,15 @@
                               placeholder="opencode" /></label>
         <label>Arguments <input id="agent-editor-args" autocomplete="off"
                                 placeholder="acp" /></label>
+        <!-- What the agent is told and what it starts on (#232). The
+             instruction travels at the top of every turn; the model is applied
+             once when a session is born, and the session options can still
+             change it per room afterwards. -->
+        <label>Instruction
+          <textarea id="agent-editor-instruction" rows="3"
+                    placeholder="You keep the CRM current. Prefer short factual updates."></textarea></label>
+        <label>Model <input id="agent-editor-model" autocomplete="off"
+                            placeholder="the agent's own id, e.g. anthropic/claude-sonnet-5 — blank keeps its default" /></label>
         <label class="vis"><input type="checkbox" id="agent-editor-default" />
           <code>@agent</code> means this one</label>
         <p id="agent-editor-note" class="muted"></p>

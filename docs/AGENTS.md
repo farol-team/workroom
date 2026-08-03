@@ -135,6 +135,13 @@ the common case, and WorkRoom does nothing for it beyond rendering the option th
 sends — wrapping the agent's own mechanism would be an abstraction over something already
 exposed.
 
+A definition may still say where a session *starts* (#232): its `model` is applied once, at
+a session's birth, through the same session option — never wrapped, never re-applied — so
+"this agent always begins on the cheap model" and "in this room, right now, use the big one"
+both stay true at once. A definition's `instruction` travels the same vendor-neutral way: at
+the top of every turn's context, because every ACP agent takes a prompt and only some CLIs
+have a system-prompt flag.
+
 **Several agent runtimes.** opencode and Claude Code are separate processes with their own
 harness, skills and behaviour. For that a person names them:
 

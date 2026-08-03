@@ -316,6 +316,8 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
     $<HTMLInputElement>("agent-editor-name").value = original?.name ?? "";
     $<HTMLInputElement>("agent-editor-command").value = original?.command ?? "";
     $<HTMLInputElement>("agent-editor-args").value = (original?.args ?? []).join(" ");
+    $<HTMLTextAreaElement>("agent-editor-instruction").value = original?.instruction ?? "";
+    $<HTMLInputElement>("agent-editor-model").value = original?.model ?? "";
     $<HTMLInputElement>("agent-editor-default").checked = Boolean(original?.default);
 
     // Said out loud because it is already true and invisible: the baseline
@@ -343,6 +345,8 @@ export function createAgentsPanel(deps: AgentsPanelDeps): AgentsPanel {
       const def: AgentDef = {
         name, command,
         args: splitArgs($<HTMLInputElement>("agent-editor-args").value),
+        ...((v => v ? { instruction: v } : {})($<HTMLTextAreaElement>("agent-editor-instruction").value.trim())),
+        ...((v => v ? { model: v } : {})($<HTMLInputElement>("agent-editor-model").value.trim())),
         ...($<HTMLInputElement>("agent-editor-default").checked ? { default: true } : {}),
       };
       // A rename is a removal and an addition — the old name would otherwise
