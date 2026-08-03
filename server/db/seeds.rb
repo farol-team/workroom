@@ -9,6 +9,16 @@ if Rails.env.production? && ENV["WORKROOM_SEED_ANYWAY"].blank?
   exit
 end
 
+# Never in test, for the opposite reason: not what the rows carry, but that
+# they are there at all. Seeded fixtures in a test database are ambient rows a
+# suite starts trusting by accident — green against a local `db:test:prepare`
+# that never seeds, red against CI's `db:prepare` that did (#227, #261). A
+# test that needs a row builds it.
+if Rails.env.test?
+  puts "Refusing to seed in test: a suite must build the rows it trusts."
+  exit
+end
+
 # The room these rooms are in. A workspace is created by a migration on a
 # database that has content; one built from the schema — a fresh install, or
 # CI — has never run that migration and has none, so the seed makes it.
