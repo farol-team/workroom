@@ -912,6 +912,22 @@ export function channelToCreate(
 
 /// The dialog says which room it is about to make (#256) — before the button
 /// is pressed, because after is a surprise.
+/// The act that brings work predating the channel into the room (#235): a
+/// distillate, never files — spike #45 declined carrying files the other way
+/// and #208/#220 kept the mirror one-way, so what enters the room is what the
+/// work amounts to. It is an ordinary turn on purpose: asked in the open,
+/// attributed to the asker, at the asker's expense, with the conclusions
+/// arriving through the rail like any other — first-class in wording, not in
+/// mechanism.
+export function introductionAsk(): string {
+  return "@agent This room's folder holds work that predates the channel. " +
+    "Read the project and record what the room should know about it with " +
+    "workroom://memory/remember — a handful of entries, in your own words: " +
+    "what it is, how it runs, the decisions already visible in it, and where " +
+    "it stands. Record what the work amounts to, never file listings; the " +
+    "room needs conclusions, not a directory.";
+}
+
 export function visibilityNote(visibility: string): string {
   return visibility === "private"
     ? "Only people added to this room will see it."
