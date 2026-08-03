@@ -24,7 +24,7 @@ export interface Channel {
   memory?: string;
 }
 
-import type { RoomTemplate } from "./rules";
+import type { Cost, RoomTemplate, TurnOutcome } from "./rules";
 
 /// The whole of what this client uses a WebSocket for. Naming it is what lets a
 /// test hand `live()` a socket of its own without impersonating a browser.
@@ -280,15 +280,30 @@ export class Api {
     });
   }
 
-  finishRun(runId: number, status: string) {
-    return this.call(`/runs/${runId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  /// The run's end, with its own summary when the agent gave one (#97).
+  /// Absent fields never travel — a zero and an unknown are different numbers.
+  finishRun(runId: number, status: string, outcome?: TurnOutcome) {
+    const usage = outcome?.usage;
+    return this.call(`/runs/${runId}`, { method: "PATCH", body: JSON.stringify({
+      status,
+      stop_reason: outcome?.stopReason,
+      total_tokens: usage?.totalTokens,
+      input_tokens: usage?.inputTokens,
+      output_tokens: usage?.outputTokens,
+      thought_tokens: usage?.thoughtTokens,
+      cached_read_tokens: usage?.cachedReadTokens,
+      cached_write_tokens: usage?.cachedWriteTokens,
+      metrics: outcome?._meta,
+    }) });
   }
 
-  /// Usage as the agent reports it. It is the only thing that knows.
-  reportUsage(runId: number, used: number, size: number, cost?: number) {
+  /// Usage as the agent reports it. It is the only thing that knows — which is
+  /// also why the currency travels as the agent said it, never assumed (#97).
+  reportUsage(runId: number, used: number, size: number, cost?: Cost) {
     return this.call(`/runs/${runId}`, {
       method: "PATCH",
-      body: JSON.stringify({ context_used: used, context_size: size, cost }),
+      body: JSON.stringify({ context_used: used, context_size: size,
+                             cost: cost?.amount, cost_currency: cost?.currency }),
     });
   }
 
