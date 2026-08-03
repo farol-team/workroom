@@ -38,6 +38,14 @@ class Api::V1::ChannelsControllerTest < ActionDispatch::IntegrationTest
     assert_empty Memory::Store.current.all(created), "somebody else's facts are not this room's"
   end
 
+  test "the template path carries the visibility the request asked for" do
+    post api_v1_channels_path, params: { template: "legal", visibility: "private" }.to_json,
+         headers: auth(@alice).merge(@json)
+
+    assert_response :created
+    assert_equal "private", Channel.find_by!(slug: "legal").visibility
+  end
+
   test "a template nobody defined is refused rather than made empty" do
     post api_v1_channels_path, params: { template: "astrology" }.to_json,
          headers: auth(@alice).merge(@json)

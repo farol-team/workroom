@@ -32,7 +32,7 @@ module Api
           template = ChannelTemplate.find(params[:template])
           return render_error("no template called #{params[:template]}", :not_found) unless template
 
-          channel = template.create!(owner: current_user)
+          channel = template.create!(owner: current_user, visibility: params[:visibility])
           Activity.log(actor: current_user, action: "channel.created", subject: channel)
           return render json: serialize(channel, channel.messages.count), status: :created
         end
