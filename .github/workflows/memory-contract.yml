@@ -1,0 +1,132 @@
+name: memory-contract
+
+# The live half of the store contract (#123). `open_viking_test.rb` skips every
+# case unless a real OpenViking answers, so `server-ci` proves the contract
+# against PostgreSQL and asserts nothing about the store production uses —
+# which is how #1, #47 and #99 each shipped. This runs those cases against the
+# real thing, with no credential: the models come from Ollama on the runner
+# (the setup RUNNING.md documents for a laptop), so nothing spendable lives in
+# CI.
+#
+# Nightly and on demand, never in the required checks: the model pulls and the
+# contract's own retrieval polls put it in a different budget class from the
+# two-minute `server-ci`.
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
+      OPENVIKING_URL: http://127.0.0.1:1933
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The models by content, not by network: ~3 GB that only changes when the
+      # model names below do.
+      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-nomic-embed-text-qwen3-4b
+
+      - name: Ollama, and the two models the store reads with
+        working-directory: .
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve &) 2>/dev/null
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434 >/dev/null && break; sleep 1; done
+          ollama pull nomic-embed-text
+          ollama pull qwen3:4b
+
+      - name: The store, from the pinned image
+        working-directory: .
+        run: |
+          cp ov.conf.ollama.example ov.conf
+          docker compose --profile memory up -d --build openviking
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://127.0.0.1:1933 && break
+            sleep 2
+          done
+
+      # One account per run: created here, dropped at the end. Per-case
+      # accounts are forty create-and-poll round trips; the cross-case leak
+      # this suite exists to catch needs a real store at all, not a fresh
+      # account per assertion.
+      - name: An account of this run's own
+        id: account
+        working-directory: .
+        run: |
+          for i in $(seq 1 10); do
+            RESPONSE=$(curl -s -X POST http://127.0.0.1:1933/api/v1/admin/accounts \
+              -H "X-API-Key: change-me" -H "Content-Type: application/json" \
+              -d "{\"account_id\":\"ci-${GITHUB_RUN_ID}\",\"admin_user_id\":\"ci\"}") && \
+              [ -n "$RESPONSE" ] && break
+            sleep 3
+          done
+          echo "store answered: $RESPONSE"
+          KEY=$(printf '%s' "$RESPONSE" | python3 -c '
+          import json, sys
+          body = json.load(sys.stdin)
+          def find(node):
+              if isinstance(node, dict):
+                  for k, v in node.items():
+                      if k in ("user_key", "api_key", "key") and isinstance(v, str): return v
+                      found = find(v)
+                      if found: return found
+              if isinstance(node, list):
+                  for v in node:
+                      found = find(v)
+                      if found: return found
+          print(find(body) or "")')
+          [ -n "$KEY" ] || { echo "no key in the store answer" >&2; exit 1; }
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          working-directory: server
+          bundler-cache: false
+
+      - run: bundle install --jobs 4
+
+      - name: Prepare database
+        run: bin/rails db:prepare
+
+      - name: Boundary
+        run: bin/rails db:boundary
+
+      - name: The contract, against the store production actually uses
+        env:
+          OPENVIKING_API_KEY: ${{ steps.account.outputs.key }}
+        run: bin/rails test test/services/memory/
+
+      - name: Drop the run's account
+        if: always()
+        working-directory: .
+        run: |
+          curl -s -X DELETE "http://127.0.0.1:1933/api/v1/admin/accounts/ci-${GITHUB_RUN_ID}" \
+            -H "X-API-Key: change-me" || true
+          docker compose --profile memory down -v || true
