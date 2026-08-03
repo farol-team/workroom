@@ -3,6 +3,7 @@ class Workspace < ApplicationRecord
 
   has_many :workspace_memberships, dependent: :destroy
   has_many :users, through: :workspace_memberships
+  has_many :agent_definitions, dependent: :destroy
 
   validates :slug, :name, presence: true
   validates :slug, uniqueness: true

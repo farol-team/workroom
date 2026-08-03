@@ -45,7 +45,10 @@
           <label class="vis" title="Show the steps behind each answer">
             <input type="checkbox" id="show-steps" checked /> steps
           </label>
-          <button id="folder" class="ghost" title="Bind this channel to a folder you already have">Use a folder…</button>
+          <!-- Visible only while a binding exists (#236): the sentence a bound
+               room owes the screen. Binding a folder lives in channel
+               settings, behind the room's name. -->
+          <button id="folder" class="ghost" hidden></button>
           <button id="memory-toggle" class="ghost">What the room knows</button>
         </header>
         <div id="notices"></div>
@@ -318,6 +321,9 @@
           <code>@agent</code> means this one</label>
         <p id="agent-editor-note" class="muted"></p>
         <menu>
+          <!-- An admin's act, refused by the server for anybody else (#233):
+               the description travels, the process and its credential never. -->
+          <button type="button" id="agent-editor-share" class="ghost">Share with workspace</button>
           <button type="button" id="agent-editor-delete" class="ghost" hidden>Remove</button>
           <button value="cancel" formnovalidate>Cancel</button>
           <button value="save">Save</button>

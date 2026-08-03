@@ -1222,6 +1222,7 @@ function aServer(over: Record<string, unknown> = {}) {
     live: vi.fn(() => ({ close: vi.fn() })),
     members: ok([]), workspaceMembers: ok([]), memory: ok([]), skills: ok([]),
     invitations: ok([]), channelTemplates: ok([]), artifacts: ok([]),
+    agentDefinitions: ok([]), shareAgentDefinition: ok(undefined),
     remember: ok({ uri: "mem://meetings/1", title: "t", trust: "human" }),
     post: ok(said),
     context: ok({ context: null, memory_uri: "mem://meetings", boundary: "Stay here.", store: null }),

@@ -1,5 +1,5 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, introductionAsk, memoryToggleLabel, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, introductionAsk, memoryToggleLabel, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
 import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
@@ -76,6 +76,10 @@ const panel = createAgentsPanel({
   },
   onTrouble: (message) => { say(message); },
   currentChannel: () => current,
+  shareDefinition: async (def) => {
+    await api.shareAgentDefinition({ name: def.name, command: def.command, args: def.args,
+                                     instruction: def.instruction, model: def.model });
+  },
 });
 
 /// The room's setting and this machine's folder choice, in one dialog (#203).
@@ -876,15 +880,22 @@ async function offerToAdd(text: string) {
 function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
   const el = $("folder");
-  el.textContent = folder ? folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/") : "Use a folder…";
-  // The gate's count rides the folder button: unreviewed work is about this
-  // folder, so that is where the number belongs (#207).
+  // Hidden until it is a fact (#236): a room leads with its default folder,
+  // and choosing your own lives in channel settings — one click away on the
+  // room's name — because a binding is an entry point for work that predates
+  // the channel, not a co-equal way to work.
+  el.hidden = !folder;
+  if (!folder) return;
+  // The one sentence a bound room owes the screen: where, and that it is
+  // local — the same channel means a different folder for each colleague, and
+  // the room cannot say so. The gate's count still rides here: unreviewed
+  // work is about this folder (#207).
   const pending = humanGate.pending();
-  if (pending) el.textContent += ` · ${pending}`;
-  el.title = folder
-    ? `${folder} — this channel's agent works here. Click to change, shift-click to unbind.`
-    : "Bind this channel to a folder you already have";
-  el.classList.toggle("bound", Boolean(folder));
+  el.textContent = `${folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/")} — yours alone`
+    + (pending ? ` · ${pending}` : "");
+  el.title = `${folder} — this channel's agent works here, for you on this machine only. `
+    + "Click to change in channel settings, shift-click to unbind.";
+  el.classList.add("bound");
 }
 
 /// Binding is deliberate. An agent in somebody's real repository can change
@@ -1080,6 +1091,18 @@ async function boot() {
   // that does not answer costs the toolbar, never the room above it.
   try {
     agents.use(settings.load());
+    // The personas the team agreed on, merged under this person's own (#233):
+    // local wins on a name, the way the baseline three are appended, never
+    // imposed — and a workspace that answers nothing changes nothing.
+    api.agentDefinitions()
+      .then((shared) => {
+        agents.use(normalizeAgents([ ...settings.loadDefined(), ...shared.map((d) => ({
+          name: d.name, command: d.command, args: d.args ?? [],
+          instruction: d.instruction ?? undefined, model: d.model ?? undefined,
+        })) ]));
+        panel.render();
+      })
+      .catch(() => {});
     for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
     prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
     panel.render();
