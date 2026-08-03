@@ -4,7 +4,7 @@
 // from the record and the page is only how much of it fits.
 
 import type { Channel, Message } from "./api";
-import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, transcriptName, worthOffering, githubTreeUrl, type Asked, type PlanEntry, type TurnProduced } from "./rules";
+import { StepLedger, contentTypeFor, preExistingNotice, dayLabel, formatHistory, identity, inTimeline, offerable, onScreen, threadOf, threadSummary, timeLabel, worthOffering, githubTreeUrl, type Asked, type PlanEntry, type TurnProduced } from "./rules";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -25,8 +25,6 @@ export interface TimelineDeps {
   produced: (workspace: string) => Promise<TurnProduced>;
   readFile: (workspace: string, path: string) => Promise<string>;
   attach: (runId: number, path: string, base64: string, contentType: string) => Promise<void>;
-  exportSession: (name: string, sessionId: string) => Promise<string | null>;
-  attachTranscript: (runId: number, name: string, body: string) => Promise<void>;
   /// The room's repository, for the commit row's link (#206). Where the link
   /// would lead nowhere — no url, not GitHub — the control is hidden, not
   /// offered dead.
@@ -58,7 +56,6 @@ export interface Timeline {
   addArtifact(a: { id: number; name: string; kind: string | null }): void;
   askPermission(name: string, asked: Asked, note?: string | null): void;
   offerProduced(runId: number, workspace: string): Promise<void>;
-  offerTranscript(runId: number, name: string, sessionId: string): void;
 }
 
 export const escape = (s: string) =>
@@ -412,26 +409,9 @@ export function createTimeline(deps: TimelineDeps): Timeline {
     box.scrollTop = box.scrollHeight;
   }
 
-  /// Attaching is a decision made with the work in front of you, so it is an
-  /// action on the finished run rather than a setting chosen once in the abstract.
-  function offerTranscript(runId: number, name: string, sessionId: string) {
-    const box = $("messages");
-    const el = document.createElement("div");
-    el.className = "offer";
-
-    el.append(ghostButton("Attach transcript", "Attaching…", async () => {
-      const body = await deps.exportSession(name, sessionId);
-      if (!body) { el.textContent = "This agent keeps no transcript."; return; }
-      await deps.attachTranscript(runId, transcriptName(runId, new Date()), body);
-      el.remove();
-    }));
-    box.append(el);
-    box.scrollTop = box.scrollHeight;
-  }
-
   return {
     open, add, closeThread, addStep, revealSteps, showPlan, addArtifact, askPermission,
-    offerProduced, offerTranscript, recentHistory,
+    offerProduced, recentHistory,
     held: () => held,
     openThread: () => openThread,
   };
