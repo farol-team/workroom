@@ -880,15 +880,22 @@ async function offerToAdd(text: string) {
 function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
   const el = $("folder");
-  el.textContent = folder ? folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/") : "Use a folder…";
-  // The gate's count rides the folder button: unreviewed work is about this
-  // folder, so that is where the number belongs (#207).
+  // Hidden until it is a fact (#236): a room leads with its default folder,
+  // and choosing your own lives in channel settings — one click away on the
+  // room's name — because a binding is an entry point for work that predates
+  // the channel, not a co-equal way to work.
+  el.hidden = !folder;
+  if (!folder) return;
+  // The one sentence a bound room owes the screen: where, and that it is
+  // local — the same channel means a different folder for each colleague, and
+  // the room cannot say so. The gate's count still rides here: unreviewed
+  // work is about this folder (#207).
   const pending = humanGate.pending();
-  if (pending) el.textContent += ` · ${pending}`;
-  el.title = folder
-    ? `${folder} — this channel's agent works here. Click to change, shift-click to unbind.`
-    : "Bind this channel to a folder you already have";
-  el.classList.toggle("bound", Boolean(folder));
+  el.textContent = `${folder.replace(/^.*\/(?=[^/]+\/?[^/]*$)/, "…/")} — yours alone`
+    + (pending ? ` · ${pending}` : "");
+  el.title = `${folder} — this channel's agent works here, for you on this machine only. `
+    + "Click to change in channel settings, shift-click to unbind.";
+  el.classList.add("bound");
 }
 
 /// Binding is deliberate. An agent in somebody's real repository can change
