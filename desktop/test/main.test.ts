@@ -756,6 +756,26 @@ describe("the memory panel, on its own", () => {
     expect(el<HTMLTextAreaElement>("skill-body").value).toBe("");
     expect(deps.skills).toHaveBeenCalled();
   });
+
+  test("a skill the room refused says exactly that, and keeps what was typed", async () => {
+    // The same moved-catch class as the memory wording above: every `.catch`
+    // that crosses the module line keeps its exact sentence.
+    mount();
+    const { deps } = await thePanel({
+      writeSkill: vi.fn(async () => { throw new Error("422 the title is taken"); }),
+    });
+    el<HTMLInputElement>("skill-title").value = "Running a client call";
+    el<HTMLTextAreaElement>("skill-body").value = "Agenda out the day before.";
+
+    submit("skill-form");
+    await settle();
+
+    expect(deps.writeSkill).toHaveBeenCalled();
+    expect(String(deps.say.mock.calls[0]?.[0])).toMatch(/^The skill was not saved\./);
+    expect(String(deps.say.mock.calls[0]?.[0])).toContain("the title is taken");
+    expect(el<HTMLInputElement>("skill-title").value).toBe("Running a client call");
+    expect(el<HTMLTextAreaElement>("skill-body").value).toBe("Agenda out the day before.");
+  });
 });
 
 describe("the people surfaces, on their own", () => {
@@ -784,6 +804,10 @@ describe("the people surfaces, on their own", () => {
         loadChannels: vi.fn(async () => {}),
         open: vi.fn(async () => {}),
         currentChannel: (): Channel | null => meetings,
+        /// The other half of the accessor: entering another room must let go of
+        /// the channel on screen before that room's channels load, or `current`
+        /// keeps pointing at the old room's channel under the new token.
+        leaveChannel: vi.fn(),
         say: vi.fn(() => vi.fn()),
         ...over,
       },
@@ -811,9 +835,14 @@ describe("the people surfaces, on their own", () => {
     expect(rows[1].className).not.toContain("active");
   });
 
-  test("one room is no choice, so the rail stays down", async () => {
+  test("one room is no choice, so the rail comes down", async () => {
     mount();
     const { people } = await thePeople();
+    // Raised first: the markup ships the rail hidden, so leaving it that way
+    // would pass against a renderWorkspaces that does nothing. Lowering it is
+    // the module's decision to prove — a second room left is a rail that has
+    // to come down again.
+    el("rail").hidden = false;
 
     people.renderWorkspaces();
 
@@ -834,8 +863,11 @@ describe("the people surfaces, on their own", () => {
     expect(state.rooms.current).toBe("globex");
     expect(deps.saveRooms).toHaveBeenCalled();
     // Sessions belong to the room that opened them, and everything on screen
-    // belongs to one room: agents stop, channels reload.
+    // belongs to one room: agents stop, the open channel is let go — a
+    // channel-less workspace must not inherit the old room's `current` — and
+    // the channels reload.
     expect(deps.stopAgents).toHaveBeenCalled();
+    expect(deps.leaveChannel).toHaveBeenCalled();
     expect(deps.loadChannels).toHaveBeenCalled();
   });
 
@@ -904,6 +936,31 @@ describe("the people surfaces, on their own", () => {
       .toContain("You are in Globex.");
   });
 
+  test("a code the server refused is put back, and the refusal is said", async () => {
+    // The sequence — cleared on the press, refilled by the refusal — is the
+    // window spec's to hold open; what must survive the move is the branch
+    // itself: the code returns to the field, in its exact words.
+    mount();
+    const { state, deps } = await thePeople({
+      acceptInvitation: vi.fn(async () => { throw new Error("410 that code is spent"); }),
+    });
+
+    el("workspace-join").click();
+    await settle();
+    el<HTMLInputElement>("join-code").value = "abc-123";
+    el<HTMLDialogElement>("join").close("go");
+    await settle();
+
+    expect(deps.acceptInvitation).toHaveBeenCalledWith("abc-123");
+    expect(el<HTMLInputElement>("join-code").value).toBe("abc-123");
+    const said = deps.say.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(said).toMatch(/That code did not get you in\./);
+    expect(said).toContain("that code is spent");
+    // Nothing was entered: the tokens, the place and the channels all stand.
+    expect(state.rooms.current).toBe("acme");
+    expect(deps.loadChannels).not.toHaveBeenCalled();
+  });
+
   test("somebody named who is not here is offered, in the room's words", async () => {
     mount();
     const { deps, people } = await thePeople();
@@ -936,6 +993,10 @@ describe("the people surfaces, on their own", () => {
     await people.offerToAdd("@bob and @claude, can you look at this");
     await settle();
 
+    // The room was asked and the silence is its answer — without these two,
+    // an offerToAdd that does nothing at all would read as correctly quiet.
+    expect(deps.members).toHaveBeenCalledWith("meetings");
+    expect(deps.workspaceMembers).toHaveBeenCalled();
     expect(deps.say).not.toHaveBeenCalled();
     expect(deps.addMember).not.toHaveBeenCalled();
   });
