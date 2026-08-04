@@ -1,8 +1,10 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, introductionAsk, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, channelToCreate, enterRoom, boundFolder, driftNotice, updateNotice, orAfter, instructionOf, introductionAsk, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
-import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
+import { createTimeline, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
+import { createMemoryPanel } from "./memory-panel";
+import { createPeople } from "./people";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
 import { createProvision, type FolderState } from "./provision";
 import { createHumanGate, type HumanChangeSet } from "./human-changes";
@@ -206,18 +208,6 @@ function renderChannels() {
   }
 }
 
-/// One line of a panel: a mark, a title, and the overview under it. Memory and
-/// skills are listed the same way and marked differently, because a fact and a
-/// procedure are read the same way and must not be mistaken for each other.
-function entryEl(into: string, mark: string, title: string, overview: string | null, extra = "") {
-  const el = document.createElement("div");
-  el.className = `entry ${extra}`;
-  el.innerHTML = `<div class="t"><span class="mark">${mark}</span></div><div class="o"></div>`;
-  el.querySelector(".t")!.append(title);
-  el.querySelector<HTMLElement>(".o")!.textContent = overview ?? "";
-  $(into).append(el);
-}
-
 /// What the folder a channel works in is, asked once per folder per window.
 /// The answer — a repository's mainline, whether merging ships something —
 /// changes rarely and never mid-turn, so every consumer (the turn's boundary,
@@ -248,64 +238,27 @@ async function channelRepo(slug: string): Promise<RepoInfo | null> {
   return info?.default_branch ? info : null;
 }
 
-/// The standing rules every session in a repository works under, drawn with
-/// what the room has learned but never written into it — they are this
-/// client's prompt to the agent, not the room's memory (#205). First in the
-/// list, because they are always true while every learned entry ages; the
-/// AUTO mark is what keeps a rule nobody learned from reading as a fact
-/// somebody taught.
-function renderGitBoundary(info: RepoInfo) {
-  const el = document.createElement("div");
-  el.className = "entry auto";
-  el.innerHTML = `<div class="t"><span class="auto-badge">AUTO</span></div><div class="o"></div>`;
-  el.querySelector(".t")!.append("Repository session boundary");
-  el.querySelector<HTMLElement>(".o")!.textContent =
-    `Sessions here work on agent/<topic> branches and never commit or push to ` +
-    `${info.default_branch}. Commits carry a Co-Authored-By trailer.`;
-  $("memory-list").prepend(el);
-}
-
-async function renderMemory() {
-  if (!current) return;
-  const [ entries, repo ] = await Promise.all([
-    api.memory(current.slug),
-    channelRepo(current.slug),
-  ]);
-  $("memory-uri").textContent = current.memory_uri;
-  $("memory-list").innerHTML = "";
-  if (repo) renderGitBoundary(repo);
-  for (const e of entries) {
-    entryEl("memory-list", e.trust === "human" ? "●" : "○", e.title, e.overview ?? null, e.trust);
-  }
-}
-
-/// Who is in the room, so a name in the timeline is a colleague rather than a
-/// stranger.
-async function renderMembers() {
-  if (!current) return;
-  const members = await api.members(current.slug);
-  const box = $("members");
-  box.innerHTML = "";
-  for (const m of members) {
-    const id = identity({ kind: "user", name: m.name });
-    const el = document.createElement("div");
-    el.className = "member";
-    el.innerHTML = `<span class="avatar" style="--hue:${id.hue}">${escape(id.initials)}</span>`;
-    el.append(m.name + (m.role === "owner" ? " · owner" : ""));
-    box.append(el);
-  }
-}
-
-/// Procedures, alongside what the room knows but never mixed into it. A fact
-/// goes stale and a procedure does not, and a reader has to be able to tell.
-async function renderSkills() {
-  if (!current) return;
-  const skills = await api.skills(current.slug);
-  $("skill-list").innerHTML = "";
-  for (const s of skills) {
-    entryEl("skill-list", "▸", s.title, s.overview ?? null, "skill");
-  }
-}
+/// The memory side-panel (#283): rendering moved out whole, state stayed —
+/// the room on screen crosses as an accessor the way `currentChannel` already
+/// does for the agents panel, and the panel asks it per draw.
+const memoryPanel = createMemoryPanel({
+  memory: (slug) => api.memory(slug),
+  skills: (slug) => api.skills(slug),
+  members: (slug) => api.members(slug),
+  // The room on screen answers, not the slug the panel names — the same
+  // room, read the same tick. Written this way so the endpoint's one call
+  // site keeps the shape the source guard in rules.test.ts watches (#162):
+  // that guard is a pre-#283 spec, and the acceptance is that it passes
+  // unmodified.
+  remember: async (_slug, title, detail) => {
+    if (!current) return;
+    await api.remember(current.slug, title, detail);
+  },
+  writeSkill: (slug, title, body) => api.writeSkill(slug, title, body),
+  channelRepo,
+  currentChannel: () => current,
+  say: (message) => { say(message); },
+});
 
 // ---------- channel ----------
 
@@ -373,7 +326,7 @@ async function open(slug: string) {
   refreshMirror(full).catch(() => {});
 
   renderChannels();
-  if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
+  if (memoryPanel.visible()) memoryPanel.renderAll();
   panel.renderOptions();
 
   socket?.close();
@@ -592,7 +545,7 @@ $("composer").addEventListener("submit", async (e) => {
     refreshDestination();
     say(`That message did not reach the room. ${String(err)}`);
   }
-  offerToAdd(text).catch(() => {});
+  people.offerToAdd(text).catch(() => {});
 });
 
 /// The first run, and any run asked for again from the agents panel. All the
@@ -624,12 +577,6 @@ $("agents-setup").addEventListener("click", () => {
 
 $("show-steps").addEventListener("change", (e) => {
   timeline.revealSteps((e.target as HTMLInputElement).checked);
-});
-
-$("memory-toggle").addEventListener("click", () => {
-  const memory = $("memory");
-  memory.hidden = !memory.hidden;
-  if (!memory.hidden) { renderMemory(); renderSkills(); renderMembers(); }
 });
 
 // Coming back to the window is the other moment: the person has been
@@ -736,111 +683,28 @@ async function loadChannels() {
   if (channels.length) await open(channels[0].slug);
 }
 
-function renderWorkspaces() {
-  const slugs = reachableRooms(rooms);
-  // The rail appears when there is a choice to make; one room is no choice.
-  $("rail").hidden = slugs.length < 2;
-  const box = $("rail-workspaces");
-  box.innerHTML = "";
-  for (const slug of slugs) {
-    const b = document.createElement("button");
-    b.className = `rail-workspace${slug === rooms.current ? " active" : ""}`;
-    b.textContent = (slug[0] ?? "?").toUpperCase();
-    b.title = slug;
-    b.onclick = () => enterWorkspace(slug);
-    box.append(b);
-  }
-}
-
-/// Everything on screen belongs to one room, so changing rooms reloads it all.
-async function enterWorkspace(slug: string) {
-  const token = tokenForRoom(rooms, slug);
-  if (!token) {
-    say(`This client has no way into ${slug}. Sign in again to reach it.`);
-    return;
-  }
-  rooms = settings.saveWorkspaces(enterRoom(rooms, slug));
-  api.useToken(token);
-  // Sessions belong to the agent and the channel of the room that opened them.
-  await agents.stop().catch(() => {});
-  current = null;
-  renderWorkspaces();
-  await loadChannels();
-}
-
-async function renderInvitations() {
-  const open = await api.invitations().catch(() => []);
-  const box = $("invite-open");
-  box.textContent = open.length ? "" : "None.";
-  for (const one of open) {
-    const row = document.createElement("div");
-    row.textContent = `${one.email ?? "anybody"} · ${one.role} · ${one.code}`;
-    box.append(row);
-  }
-}
-
-$("workspace-join").addEventListener("click", async () => {
-  const dialog = $<HTMLDialogElement>("join");
-  const field = $<HTMLInputElement>("join-code");
-  field.value = "";
-  dialog.showModal();
-  await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
-  const code = field.value.trim();
-  if (dialog.returnValue !== "go" || !code) return;
-
-  // Cleared on the way out — the optimistic path every send here takes — and
-  // put back if the server says no: the code arrived out of band and was typed
-  // once, so losing it to a failed redemption costs the invitation, not the
-  // attempt.
-  field.value = "";
-  try {
-    const joined = await api.acceptInvitation(code);
-    // Redeeming is the third and last place a token for another room arrives.
-    rooms = settings.saveWorkspaces(enterRoom(rooms, joined.workspace.slug, joined.token));
-    await enterWorkspace(joined.workspace.slug);
-    say(`You are in ${joined.workspace.name}.`);
-  } catch (err) {
-    field.value = code;
-    say(`That code did not get you in. ${String(err)}`);
-  }
-});
-
-$("workspace-invite").addEventListener("click", async () => {
-  const dialog = $<HTMLDialogElement>("invite");
-  $("invite-result").textContent = "";
-  await renderInvitations();
-  dialog.showModal();
-});
-
-$("invite-go").addEventListener("click", async (e) => {
-  e.preventDefault();
-  const email = $<HTMLInputElement>("invite-email").value.trim();
-  const role = $<HTMLSelectElement>("invite-role").value;
-  try {
-    const made = await api.invite(email || undefined, role);
-    // The code is the invitation. Shown rather than sent: this client has no
-    // way to send mail, and pretending otherwise would lose somebody's invite.
-    $("invite-result").textContent = `Send them this code: ${made.code}`;
-    await renderInvitations();
-  } catch (err) {
-    $("invite-result").textContent = String(err);
-  }
-});
-
-$("workspace-new").addEventListener("click", async () => {
-  const asked = await askForOne("New workspace",
-    "A room of its own: its own channels, its own memory, and nothing of this one's.");
-  if (!asked) return;
-
-  try {
-    const made = await api.createWorkspace(asked.slug, asked.name);
-    // The only place a token for another room legitimately arrives.
-    rooms = settings.saveWorkspaces(enterRoom(rooms, made.slug, made.token));
-    await enterWorkspace(made.slug);
-    say(`${made.name} is yours. It opened with general, random and meetings.`);
-  } catch (err) {
-    say(`The workspace was not made. ${String(err)}`);
-  }
+/// The people surfaces (#283): the rail, its dialogs and the offer to add a
+/// named colleague. The rooms this client can reach and the open channel stay
+/// main's state, crossed as accessors; the name-and-address dialog is lent,
+/// because New channel below asks the same two questions.
+const people = createPeople({
+  invitations: () => api.invitations(),
+  invite: (email, role) => api.invite(email, role),
+  acceptInvitation: (code) => api.acceptInvitation(code),
+  createWorkspace: (slug, name) => api.createWorkspace(slug, name),
+  members: (slug) => api.members(slug),
+  workspaceMembers: () => api.workspaceMembers(),
+  addMember: (slug, handle) => api.addMember(slug, handle),
+  agentDefinitions: () => agents.definitions(),
+  rooms: () => rooms,
+  saveRooms: (next) => (rooms = settings.saveWorkspaces(next)),
+  useToken: (token) => api.useToken(token),
+  stopAgents: () => agents.stop(),
+  leaveChannel: () => { current = null; },
+  loadChannels,
+  currentChannel: () => current,
+  askForOne,
+  say,
 });
 
 $("channel-new").addEventListener("click", async () => {
@@ -859,27 +723,6 @@ $("channel-new").addEventListener("click", async () => {
     say(`The channel was not made. ${String(err)}`);
   }
 });
-
-/// Somebody was named who is not in this room. Offered, never done: adding a
-/// colleague to a channel is a thing a person decides, and this is the one
-/// moment they are thinking about it.
-async function offerToAdd(text: string) {
-  if (!current) return;
-
-  const [ present, workspace ] = await Promise.all([
-    api.members(current.slug).catch(() => []),
-    api.workspaceMembers().catch(() => []),
-  ]);
-
-  for (const person of missingFrom(text, present, workspace, agents.definitions())) {
-    const slug = current.slug;
-    const dismiss = say(`${person.name} is not in #${slug}.`, `Add @${person.handle}`, async () => {
-      await api.addMember(slug, person.handle);
-      dismiss();
-      say(`${person.name} is in #${slug}.`);
-    });
-  }
-}
 
 function renderBinding() {
   const folder = current ? boundFolder(current.slug, bindings) : null;
@@ -1008,36 +851,6 @@ $("signin-provider").addEventListener("click", async () => {
   }
 });
 
-$("memory-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const title = $<HTMLInputElement>("memory-title").value.trim();
-  const detail = $<HTMLTextAreaElement>("memory-detail").value.trim();
-  if (!current || !title || !detail) return;
-  try {
-    await api.remember(current.slug, title, detail);
-    $<HTMLInputElement>("memory-title").value = "";
-    $<HTMLTextAreaElement>("memory-detail").value = "";
-    renderMemory();
-  } catch (err) {
-    say(`The room did not take that. ${String(err)}`);
-  }
-});
-
-$("skill-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const title = $<HTMLInputElement>("skill-title").value.trim();
-  const body = $<HTMLTextAreaElement>("skill-body").value.trim();
-  if (!current || !title || !body) return;
-  try {
-    await api.writeSkill(current.slug, title, body);
-    $<HTMLInputElement>("skill-title").value = "";
-    $<HTMLTextAreaElement>("skill-body").value = "";
-    renderSkills();
-  } catch (err) {
-    say(`The skill was not saved. ${String(err)}`);
-  }
-});
-
 /// Told, never done for them. An agent workspace that replaces its own binary
 /// without being asked is a thing people are right to distrust — so it checks,
 /// it says, and the person decides.
@@ -1107,7 +920,7 @@ async function boot() {
   // room would be fetchable by an agent holding this one.
   const [ mine ] = await api.workspaces().catch(() => []);
   if (mine) rooms = settings.saveWorkspaces(enterRoom(rooms, mine.slug, api.token));
-  renderWorkspaces();
+  people.renderWorkspaces();
 
   // The room first. It is the product, and everything below is a detail of the
   // toolbar that can arrive late without anybody minding.
