@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // ---------- the client, driven ----------
 //
 // What follows drives main.ts itself — the real composer, the real boot chain,
@@ -10,6 +11,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { aBridge, aServer, aShell, blockingDialog, el, notices, openTheClient, settle, submit } from "./harness";
 import type { Edges } from "./harness";
+import indexHtml from "../index.html?raw";
+import type { Channel } from "../src/api";
+import type { Rooms } from "../src/rules";
 
 /// A request this test holds open, so what the window does *while* one is in
 /// flight can be measured at all. `settle()` drains everything pending, and
@@ -556,5 +560,383 @@ describe("a turn that fails at the end", () => {
     // run that reads as still going to everybody looking at the room.
     expect(notices()).toContain("500 status not recorded");
     expect(blockingDialog).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- the two clusters, extracted (#283) ----------
+//
+// The memory side-panel and the people surfaces leave main.ts for modules of
+// the shape `createTimeline` set: a factory over deps, listeners wired at
+// construction, state staying in main and crossing as accessor closures. The
+// describes below drive the modules directly, against the same markup the
+// window ships — the window specs above keep proving the whole; these prove
+// the seam. Imported dynamically on purpose: while the modules do not exist,
+// these examples fail on the missing module and the window above stays green.
+
+/// The document as the window ships it, mounted fresh per example — the same
+/// strip the harness makes, unshared because the harness's copy belongs to
+/// `openTheClient` and these examples deliberately never open the client.
+const shippedMarkup = indexHtml
+  .replace(/[\s\S]*?<body>/, "").replace(/<\/body>[\s\S]*/, "")
+  .replace(/<script[\s\S]*?<\/script>/g, "");
+
+const mount = () => { document.body.innerHTML = shippedMarkup; };
+
+/// The specifier is computed and marked `@vite-ignore` deliberately: a literal
+/// path to a module that does not exist yet fails the whole file at transform
+/// time, taking the window specs above down with it. Resolved at runtime, the
+/// missing module fails exactly the examples that need it — the right red for
+/// phase A — and resolves like any import once the module exists.
+const drawer = (module: string) => import(/* @vite-ignore */ `../src/${module}`);
+
+const meetings: Channel = {
+  id: 1, slug: "meetings", name: "Meetings", purpose: "What we decided",
+  visibility: "workspace", memory_uri: "mem://meetings", message_count: 1,
+};
+
+describe("the memory panel, on its own", () => {
+  const aPanelDeps = (over: Record<string, unknown> = {}) => ({
+    memory: vi.fn(async () => [
+      { uri: "mem://meetings/1", title: "Acme reports monthly",
+        overview: "Decided on the June call.", trust: "human" },
+      { uri: "mem://meetings/2", title: "Weekly rollups were noise",
+        overview: "", trust: "agent" },
+    ]),
+    skills: vi.fn(async () => [
+      { uri: "mem://meetings/s1", title: "Running a client call",
+        overview: "Agenda out the day before." },
+    ]),
+    members: vi.fn(async () => [
+      { id: 1, name: "Alice", handle: "alice", role: "owner" },
+      { id: 2, name: "Bob", handle: "bob", role: "member" },
+    ]),
+    remember: vi.fn(async () => ({ uri: "mem://meetings/3", title: "t", trust: "human" })),
+    writeSkill: vi.fn(async () => undefined),
+    channelRepo: vi.fn(async () => null),
+    currentChannel: (): Channel | null => meetings,
+    say: vi.fn(),
+    ...over,
+  });
+
+  const thePanel = async (over: Record<string, unknown> = {}) => {
+    const { createMemoryPanel } = await drawer("memory-panel");
+    const deps = aPanelDeps(over);
+    return { deps, panel: createMemoryPanel(deps) };
+  };
+
+  test("renderAll draws what the room knows: entries, members, skills", async () => {
+    mount();
+    const { panel } = await thePanel();
+
+    panel.renderAll();
+    await settle();
+
+    expect(el("memory-uri").textContent).toBe("mem://meetings");
+
+    // A fact somebody taught and a fact an agent wrote are read the same way
+    // and must not be mistaken for each other: the mark differs.
+    const entries = [ ...document.querySelectorAll<HTMLElement>("#memory-list .entry") ];
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toContain("Acme reports monthly");
+    expect(entries[0].textContent).toContain("Decided on the June call.");
+    expect(entries[0].querySelector(".mark")!.textContent).toBe("●");
+    expect(entries[1].textContent).toContain("Weekly rollups were noise");
+    expect(entries[1].querySelector(".mark")!.textContent).toBe("○");
+
+    const members = [ ...document.querySelectorAll<HTMLElement>("#members .member") ];
+    expect(members).toHaveLength(2);
+    expect(members[0].textContent).toContain("Alice · owner");
+    expect(members[1].textContent).toContain("Bob");
+    expect(members[1].textContent).not.toContain("owner");
+
+    const skills = [ ...document.querySelectorAll<HTMLElement>("#skill-list .entry") ];
+    expect(skills).toHaveLength(1);
+    expect(skills[0].textContent).toContain("Running a client call");
+    expect(skills[0].querySelector(".mark")!.textContent).toBe("▸");
+  });
+
+  test("a repository room leads with the standing boundary, marked AUTO", async () => {
+    // The rules every session works under come first and carry the AUTO mark —
+    // a rule nobody learned must not read as a fact somebody taught (#205).
+    mount();
+    const { panel } = await thePanel({
+      channelRepo: vi.fn(async () =>
+        ({ remote: "git@farol:acme.git", default_branch: "trunk", deploys_on_push: false })),
+    });
+
+    panel.renderAll();
+    await settle();
+
+    const first = document.querySelector<HTMLElement>("#memory-list .entry")!;
+    expect(first.querySelector(".auto-badge")!.textContent).toBe("AUTO");
+    expect(first.textContent).toContain("trunk");
+    // The learned entries follow it, none lost to the prepend.
+    expect(document.querySelectorAll("#memory-list .entry")).toHaveLength(3);
+  });
+
+  test("the toggle shows the panel and draws it, and visible() says which", async () => {
+    // `open()` and the socket handler redraw only a panel that is on screen;
+    // `visible()` is how they ask without reaching into the markup themselves.
+    mount();
+    const { deps, panel } = await thePanel();
+    expect(panel.visible()).toBe(false);
+    expect(deps.memory).not.toHaveBeenCalled();
+
+    el("memory-toggle").click();
+    await settle();
+
+    expect(panel.visible()).toBe(true);
+    expect(el("memory").hidden).toBe(false);
+    expect(deps.memory).toHaveBeenCalledWith("meetings");
+    expect(deps.skills).toHaveBeenCalledWith("meetings");
+    expect(deps.members).toHaveBeenCalledWith("meetings");
+    expect(document.querySelectorAll("#memory-list .entry").length).toBeGreaterThan(0);
+
+    el("memory-toggle").click();
+    await settle();
+
+    expect(panel.visible()).toBe(false);
+    expect(el("memory").hidden).toBe(true);
+  });
+
+  test("a remembered fact is sent, the form clears, and the list redraws", async () => {
+    mount();
+    const { deps } = await thePanel();
+
+    // Nothing typed is nothing sent — the guard, kept across the move.
+    submit("memory-form");
+    await settle();
+    expect(deps.remember).not.toHaveBeenCalled();
+
+    el<HTMLInputElement>("memory-title").value = "Acme reports monthly";
+    el<HTMLTextAreaElement>("memory-detail").value = "Decided on the June call.";
+    submit("memory-form");
+    await settle();
+
+    expect(deps.remember).toHaveBeenCalledWith(
+      "meetings", "Acme reports monthly", "Decided on the June call.");
+    expect(el<HTMLInputElement>("memory-title").value).toBe("");
+    expect(el<HTMLTextAreaElement>("memory-detail").value).toBe("");
+    // Redrawn from the room, not appended locally: the store's answer is the list.
+    expect(deps.memory).toHaveBeenCalled();
+    expect(document.querySelectorAll("#memory-list .entry").length).toBeGreaterThan(0);
+  });
+
+  test("a memory the room refused says exactly that, and keeps what was typed", async () => {
+    mount();
+    const { deps } = await thePanel({
+      remember: vi.fn(async () => { throw new Error("500 the store is away"); }),
+    });
+    el<HTMLInputElement>("memory-title").value = "Acme reports monthly";
+    el<HTMLTextAreaElement>("memory-detail").value = "Decided on the June call.";
+
+    submit("memory-form");
+    await settle();
+
+    expect(deps.remember).toHaveBeenCalled();
+    // The wording is the acceptance: it must survive the move to the word.
+    expect(String(deps.say.mock.calls[0]?.[0])).toMatch(/^The room did not take that\./);
+    expect(String(deps.say.mock.calls[0]?.[0])).toContain("the store is away");
+    expect(el<HTMLInputElement>("memory-title").value).toBe("Acme reports monthly");
+    expect(el<HTMLTextAreaElement>("memory-detail").value).toBe("Decided on the June call.");
+  });
+
+  test("a skill is written, the form clears, and the skills redraw", async () => {
+    mount();
+    const { deps } = await thePanel();
+    el<HTMLInputElement>("skill-title").value = "Running a client call";
+    el<HTMLTextAreaElement>("skill-body").value = "Agenda out the day before.";
+
+    submit("skill-form");
+    await settle();
+
+    expect(deps.writeSkill).toHaveBeenCalledWith(
+      "meetings", "Running a client call", "Agenda out the day before.");
+    expect(el<HTMLInputElement>("skill-title").value).toBe("");
+    expect(el<HTMLTextAreaElement>("skill-body").value).toBe("");
+    expect(deps.skills).toHaveBeenCalled();
+  });
+});
+
+describe("the people surfaces, on their own", () => {
+  const aPeopleDeps = (over: Record<string, unknown> = {}) => {
+    const state: { rooms: Rooms } = { rooms: { current: "acme", tokens: { acme: "tok" } } };
+    return {
+      state,
+      deps: {
+        invitations: vi.fn(async () => [
+          { id: 1, code: "abc", email: null, role: "member", invited_by: "Alice" },
+        ]),
+        invite: vi.fn(async () => ({ code: "xyz", email: null, role: "member" })),
+        acceptInvitation: vi.fn(async () =>
+          ({ workspace: { slug: "globex", name: "Globex" }, role: "member", token: "t2" })),
+        members: vi.fn(async () => [] as Array<{ id: number; name: string; handle: string;
+                                                 role: string }>),
+        workspaceMembers: vi.fn(async () => [
+          { id: 2, name: "Bob", handle: "bob", role: "member" },
+        ]),
+        addMember: vi.fn(async () => ({ id: 2, name: "Bob", handle: "bob" })),
+        agentDefinitions: () => [ { name: "claude", command: "claude", args: [] as string[] } ],
+        rooms: () => state.rooms,
+        saveRooms: vi.fn((next: Rooms) => { state.rooms = next; return state.rooms; }),
+        useToken: vi.fn(),
+        stopAgents: vi.fn(async () => {}),
+        loadChannels: vi.fn(async () => {}),
+        open: vi.fn(async () => {}),
+        currentChannel: (): Channel | null => meetings,
+        say: vi.fn(() => vi.fn()),
+        ...over,
+      },
+    };
+  };
+
+  const thePeople = async (over: Record<string, unknown> = {}) => {
+    const { createPeople } = await drawer("people");
+    const { state, deps } = aPeopleDeps(over);
+    return { state, deps, people: createPeople(deps) };
+  };
+
+  test("the rail draws a room per token, and marks the one this is", async () => {
+    mount();
+    const { state, people } = await thePeople();
+    state.rooms = { current: "acme", tokens: { acme: "tok", globex: "t2" } };
+
+    people.renderWorkspaces();
+
+    expect(el("rail").hidden).toBe(false);
+    const rows = [ ...document.querySelectorAll<HTMLButtonElement>("#rail-workspaces button") ];
+    expect(rows).toHaveLength(2);
+    expect(rows.map((b) => b.title)).toEqual([ "acme", "globex" ]);
+    expect(rows[0].className).toContain("active");
+    expect(rows[1].className).not.toContain("active");
+  });
+
+  test("one room is no choice, so the rail stays down", async () => {
+    mount();
+    const { people } = await thePeople();
+
+    people.renderWorkspaces();
+
+    expect(el("rail").hidden).toBe(true);
+  });
+
+  test("clicking another room switches token, place and channels", async () => {
+    mount();
+    const { state, deps, people } = await thePeople();
+    state.rooms = { current: "acme", tokens: { acme: "tok", globex: "t2" } };
+    people.renderWorkspaces();
+
+    [ ...document.querySelectorAll<HTMLButtonElement>("#rail-workspaces button") ]
+      .find((b) => b.title === "globex")!.click();
+    await settle();
+
+    expect(deps.useToken).toHaveBeenCalledWith("t2");
+    expect(state.rooms.current).toBe("globex");
+    expect(deps.saveRooms).toHaveBeenCalled();
+    // Sessions belong to the room that opened them, and everything on screen
+    // belongs to one room: agents stop, channels reload.
+    expect(deps.stopAgents).toHaveBeenCalled();
+    expect(deps.loadChannels).toHaveBeenCalled();
+  });
+
+  test("Invite opens with the open invitations listed", async () => {
+    mount();
+    const { deps } = await thePeople();
+
+    el("workspace-invite").click();
+    await settle();
+
+    expect(el<HTMLDialogElement>("invite").open).toBe(true);
+    expect(deps.invitations).toHaveBeenCalled();
+    expect(el("invite-open").textContent).toContain("anybody · member · abc");
+    expect(el("invite-result").textContent).toBe("");
+  });
+
+  test("making an invitation shows the code to send, and relists", async () => {
+    mount();
+    const { deps } = await thePeople();
+    el("workspace-invite").click();
+    await settle();
+    el<HTMLInputElement>("invite-email").value = "bob@farol.run";
+    el<HTMLSelectElement>("invite-role").value = "member";
+
+    el("invite-go").click();
+    await settle();
+
+    expect(deps.invite).toHaveBeenCalledWith("bob@farol.run", "member");
+    // Shown rather than sent: this client has no way to send mail.
+    expect(el("invite-result").textContent).toBe("Send them this code: xyz");
+    expect(deps.invitations).toHaveBeenCalledTimes(2);
+  });
+
+  test("an invitation the server refused is said in the dialog", async () => {
+    mount();
+    const { deps } = await thePeople({
+      invite: vi.fn(async () => { throw new Error("403 not yours to give"); }),
+    });
+    el("workspace-invite").click();
+    await settle();
+
+    el("invite-go").click();
+    await settle();
+
+    expect(deps.invite).toHaveBeenCalled();
+    expect(el("invite-result").textContent).toContain("not yours to give");
+  });
+
+  test("a code joins its workspace: token saved, room entered, and said", async () => {
+    mount();
+    const { state, deps } = await thePeople();
+
+    el("workspace-join").click();
+    await settle();
+    el<HTMLInputElement>("join-code").value = "abc-123";
+    el<HTMLDialogElement>("join").close("go");
+    await settle();
+
+    expect(deps.acceptInvitation).toHaveBeenCalledWith("abc-123");
+    // Redeeming is the third and last place a token for another room arrives.
+    expect(state.rooms.tokens["globex"]).toBe("t2");
+    expect(state.rooms.current).toBe("globex");
+    expect(deps.useToken).toHaveBeenCalledWith("t2");
+    expect(deps.loadChannels).toHaveBeenCalled();
+    expect(deps.say.mock.calls.map((c) => String(c[0])).join("\n"))
+      .toContain("You are in Globex.");
+  });
+
+  test("somebody named who is not here is offered, in the room's words", async () => {
+    mount();
+    const { deps, people } = await thePeople();
+
+    await people.offerToAdd("@bob can you look at this");
+    await settle();
+
+    // The wording is the acceptance: the same offer, after the move.
+    const offer = deps.say.mock.calls.find((c) => /is not in/.test(String(c[0])))!;
+    expect(offer[0]).toBe("Bob is not in #meetings.");
+    expect(offer[1]).toBe("Add @bob");
+
+    // Offered, never done: adding is the press, and the offer leaves with it.
+    const dismiss = deps.say.mock.results[deps.say.mock.calls.indexOf(offer)].value;
+    await (offer[2] as () => Promise<void>)();
+    await settle();
+
+    expect(deps.addMember).toHaveBeenCalledWith("meetings", "bob");
+    expect(dismiss).toHaveBeenCalled();
+    expect(deps.say.mock.calls.map((c) => String(c[0])).join("\n"))
+      .toContain("Bob is in #meetings.");
+  });
+
+  test("nobody present, and no agent, is ever offered", async () => {
+    mount();
+    const { deps, people } = await thePeople({
+      members: vi.fn(async () => [ { id: 2, name: "Bob", handle: "bob", role: "member" } ]),
+    });
+
+    await people.offerToAdd("@bob and @claude, can you look at this");
+    await settle();
+
+    expect(deps.say).not.toHaveBeenCalled();
+    expect(deps.addMember).not.toHaveBeenCalled();
   });
 });
