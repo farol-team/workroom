@@ -808,7 +808,9 @@ describe("the people surfaces, on their own", () => {
         /// the channel on screen before that room's channels load, or `current`
         /// keeps pointing at the old room's channel under the new token.
         leaveChannel: vi.fn(),
-        say: vi.fn(() => vi.fn()),
+        // Typed with say's real signature, or every c[0]/offer[1] read is a
+        // TS2493 no implementation can clear (critic round 2).
+        say: vi.fn((_msg: string, _label?: string, _act?: () => Promise<void>) => vi.fn()),
         ...over,
       },
     };
