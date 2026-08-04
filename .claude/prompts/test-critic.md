@@ -79,6 +79,11 @@ Final response — exactly one line of JSON:
   `rejected` on their own.
 - `approved` allows nit-level findings in `findings` (worker sees them
   in phase B but is not forced to address them).
+- Inside JSON strings, quote code as it is — never backslash-escape
+  backticks, dollars, or anything beyond the legal JSON escapes
+  (`\" \\ \/ \b \f \n \r \t \uXXXX`): an invalid escape makes the whole
+  verdict unparseable (agent-flow#13; the reader repairs the common case,
+  but a contract nobody bends is better than a repair).
 - `learnings` — OPTIONAL (omit when none; most runs have none). At most
   1 entry: a genuine, non-obvious spec-level discovery about THIS
   project (a factory/fixture trap, a test-harness quirk, a pattern that

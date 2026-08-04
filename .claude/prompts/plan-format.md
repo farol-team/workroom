@@ -78,7 +78,10 @@ worker doesn't drift and scope stays cut to one PR>
   Why: <one line>
 - Expected iterations: <1|2|3> — your estimate of worker passes needed
 - Estimated size: <S|M|L>. S = <300 LOC, M = 300-800, L = 800-1500.
-  If L → reconsider SPLIT.
+  If L → reconsider SPLIT. LOC means AUTHORED lines: a pure move counts
+  what it writes (facade lines, wiring), not what it relocates — sizing
+  relocation as authorship is what sent two move-only cards into a TDD
+  gate with no red to write (agent-flow#12).
 
 ## Constitution gate
 One line per article from `.claude/constitution.md` that applies to this

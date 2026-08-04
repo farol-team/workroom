@@ -466,6 +466,16 @@ carries inline test-first discipline for ungated cards).
    way as Step 2.1). Expected `result`: first line
    `SPECS_READY` (+ a `failing:` line). `BLOCKED:` / crash → handle
    exactly as Step 2.2. Store `session_id`.
+
+   A phase-A `BLOCKED` that indicts the PLAN rather than the code —
+   "cannot write any runnable failing spec for this card" on a move-only
+   plan is the field case (agent-flow#12) — is not a terminal state.
+   The sanctioned loop after the protocol Blocked: amend the PLAN (a
+   fresh `[meta] PLAN` comment — correct the authored-delta size so the
+   gate no longer applies, or name phase A's red per card-eval's
+   move-only row), remove the worktree and branch, move the card back to
+   `Ready for AI`, and re-enter Phase 1. Both field cases resolved in
+   one pass this way; neither needed a third.
 2. **Spawn test critic** — same mechanics as the acceptance check
    (Step 2.3: versatile+formatting roles, edit tools disallowed, fresh
    session, `acceptance.model` if set) with body

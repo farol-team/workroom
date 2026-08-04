@@ -71,6 +71,10 @@ Finish with `BLOCKED: <reason>` per the formatting role.
 # What you must NOT do
 
 - No production code. None. Not even a stub "to make specs loadable" —
-  a spec failing on a missing constant IS the right red state.
+  a spec failing on a missing constant IS the right red state. For an
+  extraction card the same applies one level up: specs that import the
+  module phase B creates and pin its factory's behavior, red on
+  `Cannot find module`, ARE the right red — do not BLOCK just because
+  the plan's behavior already exists elsewhere.
 - Do NOT spawn sub-agents, move the card, or post to the tracker.
 - Do NOT force-push, rebase, or amend.

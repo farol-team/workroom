@@ -57,6 +57,17 @@ else
   REQUIRED='(.verdict? | type) == "string" and (.findings? | type) == "array"'
 fi
 
+# Invalid JSON escapes are the one malformation seen in the field
+# (agent-flow#13): a model quoting source code emits \` or \$ — template
+# literals — and a substantively fine verdict fails every strict parser,
+# which by contract would Block an approved card. Repair drops the
+# backslash before any character that is not a legal JSON escape
+# (legal: " \ / b f n r t u); the repaired line must still pass the
+# required-keys check, so this never launders garbage into a verdict.
+repair_escapes() {
+  printf '%s' "$1" | sed -E 's/\\([^"\\/bfnrtu])/\1/g'
+}
+
 # Last verdict-shaped line wins (the prompts require the FINAL response to
 # be the verdict). Deliberate trade-off, pinned by test: if a model echoes
 # a contract example AFTER its real verdict, the example wins — the
@@ -66,6 +77,12 @@ while IFS= read -r line; do
   [ -z "$line" ] && continue
   if printf '%s' "$line" | jq -e "(type == \"object\") and ($REQUIRED)" >/dev/null 2>&1; then
     VERDICT="$line"
+    continue
+  fi
+  repaired="$(repair_escapes "$line")"
+  if [ "$repaired" != "$line" ] \
+     && printf '%s' "$repaired" | jq -e "(type == \"object\") and ($REQUIRED)" >/dev/null 2>&1; then
+    VERDICT="$repaired"
   fi
 done <<EOF
 $RESULT
