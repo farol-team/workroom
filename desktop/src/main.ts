@@ -1,8 +1,9 @@
 import { Api, type Channel, type Live } from "./api";
-import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, identity, instructionOf, introductionAsk, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
+import { WorkingSignal, missingFrom, channelToCreate, enterRoom, reachableRooms, tokenForRoom, boundFolder, driftNotice, updateNotice, orAfter, instructionOf, introductionAsk, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
 import { Agents, type Update } from "./agent";
-import { createTimeline, escape, ghostButton, reportTrouble } from "./timeline";
+import { createTimeline, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
+import { createMemoryPanel } from "./memory-panel";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
 import { createProvision, type FolderState } from "./provision";
 import { createHumanGate, type HumanChangeSet } from "./human-changes";
@@ -206,18 +207,6 @@ function renderChannels() {
   }
 }
 
-/// One line of a panel: a mark, a title, and the overview under it. Memory and
-/// skills are listed the same way and marked differently, because a fact and a
-/// procedure are read the same way and must not be mistaken for each other.
-function entryEl(into: string, mark: string, title: string, overview: string | null, extra = "") {
-  const el = document.createElement("div");
-  el.className = `entry ${extra}`;
-  el.innerHTML = `<div class="t"><span class="mark">${mark}</span></div><div class="o"></div>`;
-  el.querySelector(".t")!.append(title);
-  el.querySelector<HTMLElement>(".o")!.textContent = overview ?? "";
-  $(into).append(el);
-}
-
 /// What the folder a channel works in is, asked once per folder per window.
 /// The answer — a repository's mainline, whether merging ships something —
 /// changes rarely and never mid-turn, so every consumer (the turn's boundary,
@@ -248,64 +237,19 @@ async function channelRepo(slug: string): Promise<RepoInfo | null> {
   return info?.default_branch ? info : null;
 }
 
-/// The standing rules every session in a repository works under, drawn with
-/// what the room has learned but never written into it — they are this
-/// client's prompt to the agent, not the room's memory (#205). First in the
-/// list, because they are always true while every learned entry ages; the
-/// AUTO mark is what keeps a rule nobody learned from reading as a fact
-/// somebody taught.
-function renderGitBoundary(info: RepoInfo) {
-  const el = document.createElement("div");
-  el.className = "entry auto";
-  el.innerHTML = `<div class="t"><span class="auto-badge">AUTO</span></div><div class="o"></div>`;
-  el.querySelector(".t")!.append("Repository session boundary");
-  el.querySelector<HTMLElement>(".o")!.textContent =
-    `Sessions here work on agent/<topic> branches and never commit or push to ` +
-    `${info.default_branch}. Commits carry a Co-Authored-By trailer.`;
-  $("memory-list").prepend(el);
-}
-
-async function renderMemory() {
-  if (!current) return;
-  const [ entries, repo ] = await Promise.all([
-    api.memory(current.slug),
-    channelRepo(current.slug),
-  ]);
-  $("memory-uri").textContent = current.memory_uri;
-  $("memory-list").innerHTML = "";
-  if (repo) renderGitBoundary(repo);
-  for (const e of entries) {
-    entryEl("memory-list", e.trust === "human" ? "●" : "○", e.title, e.overview ?? null, e.trust);
-  }
-}
-
-/// Who is in the room, so a name in the timeline is a colleague rather than a
-/// stranger.
-async function renderMembers() {
-  if (!current) return;
-  const members = await api.members(current.slug);
-  const box = $("members");
-  box.innerHTML = "";
-  for (const m of members) {
-    const id = identity({ kind: "user", name: m.name });
-    const el = document.createElement("div");
-    el.className = "member";
-    el.innerHTML = `<span class="avatar" style="--hue:${id.hue}">${escape(id.initials)}</span>`;
-    el.append(m.name + (m.role === "owner" ? " · owner" : ""));
-    box.append(el);
-  }
-}
-
-/// Procedures, alongside what the room knows but never mixed into it. A fact
-/// goes stale and a procedure does not, and a reader has to be able to tell.
-async function renderSkills() {
-  if (!current) return;
-  const skills = await api.skills(current.slug);
-  $("skill-list").innerHTML = "";
-  for (const s of skills) {
-    entryEl("skill-list", "▸", s.title, s.overview ?? null, "skill");
-  }
-}
+/// The memory side-panel (#283): rendering moved out whole, state stayed —
+/// the room on screen crosses as an accessor the way `currentChannel` already
+/// does for the agents panel, and the panel asks it per draw.
+const memoryPanel = createMemoryPanel({
+  memory: (slug) => api.memory(slug),
+  skills: (slug) => api.skills(slug),
+  members: (slug) => api.members(slug),
+  remember: (slug, title, detail) => api.remember(slug, title, detail),
+  writeSkill: (slug, title, body) => api.writeSkill(slug, title, body),
+  channelRepo,
+  currentChannel: () => current,
+  say: (message) => { say(message); },
+});
 
 // ---------- channel ----------
 
@@ -373,7 +317,7 @@ async function open(slug: string) {
   refreshMirror(full).catch(() => {});
 
   renderChannels();
-  if (!$("memory").hidden) { renderMemory(); renderSkills(); renderMembers(); }
+  if (memoryPanel.visible()) memoryPanel.renderAll();
   panel.renderOptions();
 
   socket?.close();
@@ -624,12 +568,6 @@ $("agents-setup").addEventListener("click", () => {
 
 $("show-steps").addEventListener("change", (e) => {
   timeline.revealSteps((e.target as HTMLInputElement).checked);
-});
-
-$("memory-toggle").addEventListener("click", () => {
-  const memory = $("memory");
-  memory.hidden = !memory.hidden;
-  if (!memory.hidden) { renderMemory(); renderSkills(); renderMembers(); }
 });
 
 // Coming back to the window is the other moment: the person has been
@@ -1005,36 +943,6 @@ $("signin-provider").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
     button.textContent = "Sign in with your organisation";
-  }
-});
-
-$("memory-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const title = $<HTMLInputElement>("memory-title").value.trim();
-  const detail = $<HTMLTextAreaElement>("memory-detail").value.trim();
-  if (!current || !title || !detail) return;
-  try {
-    await api.remember(current.slug, title, detail);
-    $<HTMLInputElement>("memory-title").value = "";
-    $<HTMLTextAreaElement>("memory-detail").value = "";
-    renderMemory();
-  } catch (err) {
-    say(`The room did not take that. ${String(err)}`);
-  }
-});
-
-$("skill-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const title = $<HTMLInputElement>("skill-title").value.trim();
-  const body = $<HTMLTextAreaElement>("skill-body").value.trim();
-  if (!current || !title || !body) return;
-  try {
-    await api.writeSkill(current.slug, title, body);
-    $<HTMLInputElement>("skill-title").value = "";
-    $<HTMLTextAreaElement>("skill-body").value = "";
-    renderSkills();
-  } catch (err) {
-    say(`The skill was not saved. ${String(err)}`);
   }
 });
 
