@@ -117,7 +117,12 @@ In `desktop/src-tauri` (the Rust bridge — CI compiles it on every change):
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+UPDATE_CATALOG=1 cargo test   # after the shared agent table changes
 ```
+
+`src/agents/generated.ts` is the window's copy of the agent catalogue, rendered
+from `acp_agents::HARNESSES` — never edit it by hand. A spec in the bridge fails
+when the file drifts from the crate, and the line above regenerates it.
 
 `pnpm bench:capabilities` asks the bundled agent what it says about itself and
 regenerates the measured-capabilities table in `docs/AGENTS.md` — never edit
