@@ -17,13 +17,13 @@ Rails.application.routes.draw do
   # an API.
   namespace :api do
     namespace :v1 do
-    post "auth", to: "auth#create"
-    get  "auth/methods", to: "auth#methods_available", as: :auth_methods
+    post   "auth", to: "auth#create"
+    get    "auth/methods", to: "auth#methods_available", as: :auth_methods
     # A page in a browser asking what its httpOnly cookie carries (#306), and
     # giving it up again.
     get    "auth/session", to: "auth#session", as: :auth_session
     delete "auth/session", to: "auth#destroy_session"
-    get  "me", to: "auth#me", as: :me
+    get    "me", to: "auth#me", as: :me
 
     # Where this person's turns run, and what pays for them (#304). Singular and
     # unparameterised: it is always the caller's own.
