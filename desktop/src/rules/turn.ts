@@ -55,30 +55,29 @@ export interface Asked {
   options: Array<{ id: string; name: string; kind?: string }>;
 }
 
-/// Which session an ACP message belongs to. Both `session/update` and
-/// `session/request_permission` carry it and neither was read, so what an agent
-/// said was routed by who happened to be listening.
+/// Which session an event belongs to. Without it a dialog for one channel's
+/// agent is shown as though this channel's agent had asked, and the person
+/// authorises a call they were never shown (#91).
+///
+/// The bridge says it now: the wire is read by the shared client, which tags
+/// every event with the session it came from (#312).
 export function sessionOf(event: unknown): string | undefined {
-  const e = event as { sessionId?: unknown; params?: { sessionId?: unknown };
-                       request?: { params?: { sessionId?: unknown } } };
-  const found = e?.params?.sessionId ?? e?.request?.params?.sessionId ?? e?.sessionId;
+  const found = (event as { session?: unknown })?.session;
   return typeof found === "string" && found ? found : undefined;
 }
 
 export function permissionAsked(event: unknown): Asked | null {
-  const e = event as { id?: unknown; request?: { method?: string; params?: any } };
-  if (e?.request?.method !== "session/request_permission") return null;
+  const e = event as { kind?: string; request?: any };
+  if (e?.kind !== "permission" || !e.request) return null;
 
-  const params = e.request.params ?? {};
+  const request = e.request;
   return {
     // Passed through untouched, all the way back to the agent's stdin.
-    id: e.id,
+    id: request.id,
     sessionId: sessionOf(event),
-    title: params.toolCall?.title ?? "The agent is asking to do something",
-    command: typeof params.toolCall?.rawInput?.command === "string"
-      ? params.toolCall.rawInput.command
-      : undefined,
-    options: (params.options ?? []).map((o: any) => ({
+    title: request.title ?? "The agent is asking to do something",
+    command: typeof request.command === "string" ? request.command : undefined,
+    options: (request.options ?? []).map((o: any) => ({
       id: String(o.optionId), name: String(o.name ?? o.optionId), kind: o.kind,
     })),
   };
@@ -171,15 +170,6 @@ export type Update =
 /// totals become one wrong number (#97).
 export interface Cost { amount: number; currency?: string }
 
-function costOf(raw: unknown): Cost | undefined {
-  if (typeof raw === "number") return Number.isFinite(raw) ? { amount: raw } : undefined;
-  const c = raw as { amount?: unknown; currency?: unknown } | null | undefined;
-  const amount = Number(c?.amount);
-  if (!Number.isFinite(amount)) return undefined;
-  return { amount,
-           ...(typeof c?.currency === "string" && c.currency ? { currency: c.currency } : {}) };
-}
-
 /// The reply to session/prompt — the run's own summary, which this client used
 /// to discard entirely: a turn that stopped at max_tokens was recorded exactly
 /// like one that finished (#97). `usage` fields stay absent where the agent
@@ -191,43 +181,41 @@ export interface TurnOutcome {
   _meta?: Record<string, unknown>;
 }
 
-export function translateAcp(msg: unknown): Update | null {
-  const m = msg as { method?: string; params?: { update?: Record<string, unknown> } };
-  if (m?.method !== "session/update") return null;
-  const u = m.params?.update ?? {};
-  const t = u.sessionUpdate as string | undefined;
-
-  if (t === "agent_message_chunk") {
-    const text = (u.content as { text?: string } | undefined)?.text ?? "";
-    return text ? { kind: "text", text } : null;
+/// What the room shows for one event. Unknown kinds surface as themselves
+/// rather than vanishing — the protocol is young, and a silent gap reads as a
+/// bug in the room.
+///
+/// This is a view, not a parser: the frames are read by the shared client, and
+/// what arrives here is already `text`, `thought`, `tool` … (#312).
+export function updateOf(event: unknown): Update | null {
+  const e = event as any;
+  switch (e?.kind) {
+    case "text":
+      return e.text ? { kind: "text", text: String(e.text) } : null;
+    // Process, and the rule already says process is recorded and never pushed
+    // at the room. It is what lets somebody reconstruct why a turn went the
+    // way it did.
+    case "thought":
+      return e.text ? { kind: "thought", text: String(e.text) } : null;
+    // Named by what it is, or not recorded. An id is not a name, and an update
+    // to a call already shown is not a second step.
+    case "tool":
+      return e.title ? { kind: "tool", label: String(e.title) } : null;
+    case "plan":
+      return e.entries?.length ? { kind: "plan", entries: e.entries } : null;
+    case "usage":
+      return { kind: "usage", used: Number(e.used), size: Number(e.size),
+               cost: e.cost ?? undefined };
+    case "config":
+      return e.options?.length ? { kind: "config", options: e.options } : null;
+    // Neither is an update: one is a question waiting for a person, the other
+    // is the process ending. Both are routed on their own.
+    case "permission":
+    case "closed":
+      return null;
+    default:
+      return e?.kind ? { kind: "other", label: String(e.label ?? e.kind) } : null;
   }
-  // Process, and the rule already says process is recorded and never pushed at
-  // the room. It is what lets somebody reconstruct why a turn went the way it
-  // did, and it was being discarded.
-  if (t === "agent_thought_chunk") {
-    const text = (u.content as { text?: string } | undefined)?.text ?? "";
-    return text ? { kind: "thought", text } : null;
-  }
-  if (t === "config_option_update") {
-    const options = (u.configOptions as ConfigOption[] | undefined) ?? [];
-    return options.length ? { kind: "config", options } : null;
-  }
-  if (t === "usage_update") {
-    return { kind: "usage", used: Number(u.used), size: Number(u.size), cost: costOf(u.cost) };
-  }
-  if (t === "plan") {
-    const entries = (u.entries as PlanEntry[] | undefined) ?? [];
-    return entries.length ? { kind: "plan", entries } : null;
-  }
-  if (t === "tool_call" || t === "tool_call_update") {
-    // Named by what it is, or not recorded. An id is not a name: a step reading
-    // `call_00_hWMqa5NQZWoHwgQfxDg70485` tells a colleague nothing and crowds
-    // out the ones that do. A `tool_call_update` without a title is refining a
-    // call that was already recorded.
-    const label = (u.title ?? u.kind) as string | undefined;
-    return label ? { kind: "tool", label } : null;
-  }
-  return t ? { kind: "other", label: t } : null;
 }
 
 /// What an attached transcript is called. Named after the session, because the

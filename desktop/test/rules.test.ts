@@ -7,7 +7,7 @@ import { describe, expect, test } from "vitest";
 import mainSource from "../src/main.ts?raw";
 import apiSource from "../src/api.ts?raw";
 import acpTurnSource from "../../bin/acp-turn?raw";
-import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, mirrorEntryOf, MIRROR_README, introductionAsk, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, translateAcp, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
+import { StepLedger, WorkingSignal, channelToCreate, enterRoom, mentionsIn, pickable, templateNote, missingFrom, loadRooms, reachableRooms, tokenForRoom, activeAgent, anyReady, boundFolder, closingInstruction, driftNotice, forget, gitAskNote, gitBoundary, githubTreeUrl, keysOf, recall, remember, mcpServersFor, memoryToggleLabel, onboardingCards, orAfter, permissionAsked, preExistingNotice, timeLabel, updateNotice, identity, inTimeline, instructionOf, mirrorEntryOf, MIRROR_README, introductionAsk, offerable, onScreen, contentTypeFor, dayLabel, defaultAgent, formatHistory, normalizeAgents, parseAddress, selectable, sessionKey, sessionOf, threadOf, threadSummary, removeDefinition, splitArgs, transcriptName, transcriptOf, updateOf, unreadCount, upsertDefinition, visibilityNote, withClosing, worthOffering } from "../src/rules";
 
 describe("mentioning somebody who is not here", () => {
   const here = [ { handle: "alice", name: "Alice" } ];
@@ -78,19 +78,16 @@ describe("the rooms this client can reach", () => {
 });
 
 describe("routing by session", () => {
-  test("both inbound shapes say which session they belong to", () => {
-    // session/update carries it in params; a permission request carries it in
-    // the request it wraps. Neither was read, so what an agent said was routed
-    // by whoever happened to be listening (#91).
-    expect(sessionOf({ method: "session/update", params: { sessionId: "s1", update: {} } })).toBe("s1");
-    expect(sessionOf({ id: 3, request: { method: "session/request_permission",
-                                         params: { sessionId: "s2" } } })).toBe("s2");
-    expect(sessionOf({ sessionId: "s3" })).toBe("s3");
+  test("every event says which session it belongs to", () => {
+    // Read from neither shape once, so what an agent said was routed by
+    // whoever happened to be listening (#91). The bridge tags it now (#312).
+    expect(sessionOf({ kind: "text", session: "s1", text: "hi" })).toBe("s1");
+    expect(sessionOf({ kind: "permission", session: "s2", request: {} })).toBe("s2");
   });
 
-  test("a message that names no session belongs to no turn", () => {
-    expect(sessionOf({ method: "session/update", params: { update: {} } })).toBeUndefined();
-    expect(sessionOf({ params: { sessionId: "" } })).toBeUndefined();
+  test("an event that names no session belongs to no turn", () => {
+    expect(sessionOf({ kind: "closed", diagnostics: [] })).toBeUndefined();
+    expect(sessionOf({ kind: "text", session: "" })).toBeUndefined();
     expect(sessionOf(null)).toBeUndefined();
   });
 });
@@ -167,83 +164,73 @@ describe("step ledger", () => {
   });
 });
 
-describe("acp translation", () => {
-  const update = (u: Record<string, unknown>) => ({ method: "session/update", params: { update: u } });
+describe("what the room shows for one event", () => {
+  // The frames are read by the shared client; what arrives here is already in
+  // the room's vocabulary, and this is the view that renders it (#312).
 
   test("agent text becomes text", () => {
-    expect(translateAcp(update({ sessionUpdate: "agent_message_chunk", content: { text: "hi" } })))
+    expect(updateOf({ kind: "text", session: "s1", text: "hi" }))
       .toEqual({ kind: "text", text: "hi" });
   });
 
   test("an empty chunk is not an update", () => {
-    expect(translateAcp(update({ sessionUpdate: "agent_message_chunk", content: { text: "" } })))
-      .toBeNull();
+    expect(updateOf({ kind: "text", text: "" })).toBeNull();
+  });
+
+  test("reasoning is kept apart from the answer", () => {
+    // Process is recorded and never pushed at the room; shown as an answer it
+    // would be the agent thinking out loud at everybody.
+    expect(updateOf({ kind: "thought", text: "let me look" }))
+      .toEqual({ kind: "thought", text: "let me look" });
   });
 
   test("a tool call becomes a step label", () => {
-    expect(translateAcp(update({ sessionUpdate: "tool_call", title: "search memory" })))
+    expect(updateOf({ kind: "tool", title: "search memory", toolKind: "other", update: false }))
       .toEqual({ kind: "tool", label: "search memory" });
   });
 
   test("a plan becomes a plan, with its entries", () => {
-    const out = translateAcp(update({
-      sessionUpdate: "plan",
-      entries: [ { content: "Read the deck", priority: "high", status: "in_progress" } ],
-    }));
-    expect(out).toEqual({
-      kind: "plan",
-      entries: [ { content: "Read the deck", priority: "high", status: "in_progress" } ],
-    });
+    const entries = [ { content: "Read the deck", priority: "high", status: "in_progress" } ];
+    expect(updateOf({ kind: "plan", entries })).toEqual({ kind: "plan", entries });
   });
 
   test("a plan with no entries is not an update", () => {
-    expect(translateAcp(update({ sessionUpdate: "plan", entries: [] }))).toBeNull();
+    expect(updateOf({ kind: "plan", entries: [] })).toBeNull();
   });
 
-  test("usage becomes usage, and cost is the object the protocol sends", () => {
+  test("usage carries the cost as the protocol sends it", () => {
     // { amount, currency: ISO 4217 } — read as a bare number it was NaN, and
     // the column stayed empty for every agent that followed the schema (#97).
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 84000, size: 200000,
-                                 cost: { amount: 0.42, currency: "EUR" } })))
+    expect(updateOf({ kind: "usage", used: 84000, size: 200000,
+                      cost: { amount: 0.42, currency: "EUR" } }))
       .toEqual({ kind: "usage", used: 84000, size: 200000,
                  cost: { amount: 0.42, currency: "EUR" } });
   });
 
-  test("a bare-number cost is an amount with no currency — never USD", () => {
-    // Inventing a currency for an agent that named none is how two rooms'
-    // totals become one wrong number.
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100, cost: 0.42 })))
-      .toEqual({ kind: "usage", used: 10, size: 100, cost: { amount: 0.42 } });
-  });
-
-  test("cost is optional, and a malformed one is no cost", () => {
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100 })))
-      .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
-    expect(translateAcp(update({ sessionUpdate: "usage_update", used: 10, size: 100,
-                                 cost: { currency: "USD" } })))
+  test("cost is optional", () => {
+    expect(updateOf({ kind: "usage", used: 10, size: 100 }))
       .toEqual({ kind: "usage", used: 10, size: 100, cost: undefined });
   });
 
   test("a config update carries the whole option list", () => {
     const options = [ { id: "model", name: "Model", type: "select",
                         currentValue: "a", options: [ { value: "a", name: "A" } ] } ];
-    expect(translateAcp(update({ sessionUpdate: "config_option_update", configOptions: options })))
-      .toEqual({ kind: "config", options });
+    expect(updateOf({ kind: "config", options })).toEqual({ kind: "config", options });
   });
 
   test("a config update with no options is not an update", () => {
-    expect(translateAcp(update({ sessionUpdate: "config_option_update", configOptions: [] })))
-      .toBeNull();
+    expect(updateOf({ kind: "config", options: [] })).toBeNull();
   });
 
-  test("an unknown update surfaces rather than vanishing", () => {
-    expect(translateAcp(update({ sessionUpdate: "plan_changed" })))
+  test("an unknown kind surfaces rather than vanishing", () => {
+    expect(updateOf({ kind: "other", label: "plan_changed" }))
       .toEqual({ kind: "other", label: "plan_changed" });
   });
 
-  test("anything that is not a session update is ignored", () => {
-    expect(translateAcp({ method: "something/else" })).toBeNull();
-    expect(translateAcp(null)).toBeNull();
+  test("a question and a closed process are routed on their own, not shown", () => {
+    expect(updateOf({ kind: "permission", request: {} })).toBeNull();
+    expect(updateOf({ kind: "closed", diagnostics: [ "not logged in" ] })).toBeNull();
+    expect(updateOf(null)).toBeNull();
   });
 });
 
@@ -929,18 +916,18 @@ describe("the rail, as the protocol describes it", () => {
 
 describe("the agent asking to do something", () => {
   const ask = {
-    id: 7,
+    kind: "permission",
+    session: "ses_1",
     request: {
-      method: "session/request_permission",
-      params: {
-        sessionId: "ses_1",
-        toolCall: { toolCallId: "call_1", title: "Run the migration" },
-        options: [
-          { optionId: "yes", name: "Allow once", kind: "allow_once" },
-          { optionId: "always", name: "Always allow", kind: "allow_always" },
-          { optionId: "no", name: "Reject", kind: "reject_once" },
-        ],
-      },
+      id: 7,
+      session: "ses_1",
+      title: "Run the migration",
+      toolKind: "execute",
+      options: [
+        { optionId: "yes", name: "Allow once", kind: "allow_once" },
+        { optionId: "always", name: "Always allow", kind: "allow_always" },
+        { optionId: "no", name: "Reject", kind: "reject_once" },
+      ],
     },
   };
 
@@ -956,34 +943,46 @@ describe("the agent asking to do something", () => {
   test("the options are the agent's, not ours", () => {
     // An agent that offers one way to say yes must not be given two, and one
     // that offers none must not have one invented for it.
-    const spare = { id: 1, request: { method: "session/request_permission",
-      params: { options: [ { optionId: "only", name: "Fine", kind: "allow_once" } ] } } };
+    const spare = { kind: "permission", request: { id: 1,
+      options: [ { optionId: "only", name: "Fine", kind: "allow_once" } ] } };
 
     expect(permissionAsked(spare)!.options).toHaveLength(1);
   });
 
   test("a question with no title still says something", () => {
-    const bare = { id: 1, request: { method: "session/request_permission", params: { options: [] } } };
+    const bare = { kind: "permission", request: { id: 1, options: [] } };
 
     expect(permissionAsked(bare)!.title).toBe("The agent is asking to do something");
   });
 
   test("anything that is not a permission request is not one", () => {
-    expect(permissionAsked({ id: 1, request: { method: "fs/read_text_file", params: {} } })).toBeNull();
-    expect(permissionAsked({ id: 1, request: {} })).toBeNull();
+    expect(permissionAsked({ kind: "text", text: "hi" })).toBeNull();
+    expect(permissionAsked({ kind: "permission" })).toBeNull();
+    expect(permissionAsked(null)).toBeNull();
   });
 
   test("a question says which turn is asking", () => {
     // Without it, a dialog for one channel's agent is shown as though this
     // channel's agent had asked — and `agent_permit` answers by request id, so
     // the person authorises a call they were never shown (#91).
-    const asked = permissionAsked({
-      id: 7,
-      request: { method: "session/request_permission",
-                 params: { sessionId: "s-meetings", options: [] } },
-    })!;
+    const asked = permissionAsked({ kind: "permission", session: "s-meetings",
+                                    request: { id: 7, options: [] } })!;
 
     expect(asked.sessionId).toBe("s-meetings");
+  });
+
+  test("a string id survives, because Number(\"perm-1\") answers nobody", () => {
+    // JSON-RPC allows a string id. Coerced to a number it becomes NaN, the
+    // answer quotes null, and the agent waits for the rest of the session (#96).
+    const stringy = { kind: "permission", request: { id: "perm-1",
+      options: [ { optionId: "yes", name: "Allow once" } ] } };
+
+    expect(permissionAsked(stringy)!.id).toBe("perm-1");
+  });
+
+  test("the id goes back exactly as it came, whatever it was", () => {
+    expect(permissionAsked({ ...ask, request: { ...ask.request, id: 0 } })!.id).toBe(0);
+    expect(permissionAsked({ ...ask, request: { ...ask.request, id: "0" } })!.id).toBe("0");
   });
 
   test("forgetting one agent does not forget the one whose name starts the same", () => {
@@ -997,40 +996,24 @@ describe("the agent asking to do something", () => {
     expect(keysOf("nobody", keys)).toEqual([]);
   });
 
-  test("a string id survives, because Number(\"perm-1\") answers nobody", () => {
-    // JSON-RPC allows a string id. Coerced to a number it becomes NaN, the
-    // answer quotes null, and the agent waits for the rest of the session (#96).
-    const stringy = { id: "perm-1", request: { method: "session/request_permission",
-      params: { options: [ { optionId: "yes", name: "Allow once" } ] } } };
-
-    expect(permissionAsked(stringy)!.id).toBe("perm-1");
-  });
-
-  test("the id goes back exactly as it came, whatever it was", () => {
-    expect(permissionAsked({ ...ask, id: 0 })!.id).toBe(0);
-    expect(permissionAsked({ ...ask, id: "0" })!.id).toBe("0");
-  });
 });
 
 describe("a step somebody will read", () => {
   test("a tool call is named by what it is", () => {
-    expect(translateAcp({ method: "session/update", params: { update: {
-      sessionUpdate: "tool_call", toolCallId: "call_00_hWMqa5NQ", title: "Search the room" } } }))
+    expect(updateOf({ kind: "tool", title: "Search the room", toolKind: "other", update: false }))
       .toEqual({ kind: "tool", label: "Search the room" });
   });
 
   test("an update with nothing to say is not a step", () => {
-    // `tool_call_update` refines a call already recorded. Falling back to its id
-    // puts `call_00_hWMqa5NQZWoHwgQfxDg70485` in front of a colleague, which
-    // tells them nothing and crowds out what does.
-    expect(translateAcp({ method: "session/update", params: { update: {
-      sessionUpdate: "tool_call_update", toolCallId: "call_00_hWMqa5NQ", status: "completed" } } }))
-      .toBeNull();
+    // A change to a call already recorded arrives without a title, and the
+    // client does not invent one: falling back to an id would put
+    // `call_00_hWMqa5NQZWoHwgQfxDg70485` in front of a colleague, which tells
+    // them nothing and crowds out what does.
+    expect(updateOf({ kind: "tool", title: "", update: true })).toBeNull();
   });
 
   test("an update that does have something to say is kept", () => {
-    expect(translateAcp({ method: "session/update", params: { update: {
-      sessionUpdate: "tool_call_update", toolCallId: "call_1", title: "Read the entry" } } }))
+    expect(updateOf({ kind: "tool", title: "Read the entry", update: true }))
       .toEqual({ kind: "tool", label: "Read the entry" });
   });
 });
@@ -1091,14 +1074,12 @@ describe("a session that survives a restart", () => {
   test("what the agent was thinking is process, and it is kept", () => {
     // The one update kind that lets somebody reconstruct why a turn went the way
     // it did. Recorded against the run, never pushed at the room.
-    expect(translateAcp({ method: "session/update", params: { update: {
-      sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "checking the rail first" } } } }))
+    expect(updateOf({ kind: "thought", text: "checking the rail first" }))
       .toEqual({ kind: "thought", text: "checking the rail first" });
   });
 
   test("a thought with nothing in it is nothing", () => {
-    expect(translateAcp({ method: "session/update", params: { update: {
-      sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "" } } } })).toBeNull();
+    expect(updateOf({ kind: "thought", text: "" })).toBeNull();
   });
 
   test("a session is remembered per agent and channel, and survives the app", () => {

@@ -24,11 +24,7 @@ import { Agents } from "../src/agent";
 
 /// What the bridge would emit for one line of an agent's answer.
 const said = (sessionId: string, text: string) =>
-  handlers.get("acp://notify")?.({ payload: {
-    method: "session/update",
-    params: { sessionId, update: { sessionUpdate: "agent_message_chunk",
-                                   content: { type: "text", text } } },
-  } });
+  handlers.get("acp://event")?.({ payload: { kind: "text", session: sessionId, text } });
 
 beforeEach(() => {
   handlers.clear();

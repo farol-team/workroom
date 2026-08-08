@@ -21,6 +21,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Speaking ACP, and knowing which agents do, is shared with the other products
+# that run a local agent the same way. Pinned by tag: three repositories with
+# three release rhythms must not break on each other.
+acp-client = { git = "https://github.com/farol-team/acp-agents", tag = "v0.2.2" }
+acp-agents = { git = "https://github.com/farol-team/acp-agents", tag = "v0.2.2" }
+
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # The folder a person binds a channel to is chosen with their own file dialog,

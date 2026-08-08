@@ -70,6 +70,7 @@ Load-bearing design rules to keep in mind when changing code:
 | Database | PostgreSQL 17 (local dev binds **5433**, not 5432) |
 | Desktop frontend | TypeScript (strict) + Vite 8, pnpm 11.18.0, Node 24 |
 | Desktop bridge | Rust, Tauri 2 (`desktop/src-tauri`) |
+| ACP itself | [`farol-team/acp-agents`](https://github.com/farol-team/acp-agents) — `acp-client` (spawn, JSON-RPC, sessions, process groups) and `acp-agents` (which agents speak ACP, and where their binaries are), pinned by tag and shared with OpenTag and gilb. A protocol-level fix belongs there, with its spec; the bridge keeps a window's bookkeeping |
 | Local agent | any ACP-speaking agent; the Claude adapter (`@agentclientprotocol/claude-agent-acp`) is pinned in `desktop/package.json` and ships in the bundle |
 | Context database | OpenViking (optional; `Memory::Local` on PostgreSQL is the default) |
 
