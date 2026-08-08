@@ -1,26 +1,24 @@
 import { Api, type Channel, type Live } from "./api";
 import { WorkingSignal, channelToCreate, enterRoom, boundFolder, driftNotice, updateNotice, orAfter, instructionOf, introductionAsk, memoryToggleLabel, mirrorEntryOf, normalizeAgents, pickable, templateNote, defaultAgent, occupancyLabel, parseAddress, unreadCount, visibilityNote, withClosing, gitBoundary, gitAskNote, type RoomTemplate, type RunSignal, type TurnOutcome } from "./rules";
-import { Agents, type Update } from "./agent";
+import { type Update } from "./agent";
 import { createTimeline, ghostButton, reportTrouble } from "./timeline";
 import { createAgentsPanel } from "./agents-panel";
 import { createMemoryPanel } from "./memory-panel";
 import { createPeople } from "./people";
 import { createChannelSettings, type RepoInfo } from "./channel-settings";
-import { createProvision, type FolderState } from "./provision";
-import { createHumanGate, type HumanChangeSet } from "./human-changes";
+import { createProvision } from "./provision";
+import { createHumanGate } from "./human-changes";
 import { createReviewDialog } from "./review-changes";
 import { showOnboarding } from "./onboarding";
-import { invoke } from "@tauri-apps/api/core";
-import { appDataDir, join } from "@tauri-apps/api/path";
-import { check } from "@tauri-apps/plugin-updater";
-import { getVersion } from "@tauri-apps/api/app";
 import * as settings from "./settings";
-import { open as chooseFolder } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { platform } from "./platform";
 
 const api = new Api(import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
-const agents = new Agents(settings.load());
+const agents = platform.agents(settings.load());
+/// The channel's folder on this machine, where this build has one. Named in full
+/// because `folder` is already a path in half the functions below, and a seam that
+/// shadows a local is a seam somebody will call by accident.
+const workingFolder = platform.folder();
 // When a session ends its transcript is kept, automatically — a record of what
 // already happened in the room, not a reach into somebody's folder (#124).
 agents.attachTranscript = async (runId, name, body) => { await api.attachArtifact(runId, name, body); };
@@ -58,7 +56,7 @@ const timeline = createTimeline({
   },
   repositoryUrl: () => current?.repository_url ?? null,
   copyText: (text) => navigator.clipboard.writeText(text),
-  openUrl: (url) => openUrl(url),
+  openUrl: (url) => platform.openLink(url),
 });
 
 // The preview photographs states that have no natural trigger — a turn's
@@ -91,10 +89,10 @@ const channelSettings = createChannelSettings({
   updateChannel: (slug, url) => api.updateChannel(slug, url),
   bindings: () => bindings,
   bind: (slug, folder) => { bindings = settings.bind(slug, folder); },
-  chooseFolder: (title) => chooseFolder({ directory: true, title }) as Promise<string | null>,
+  chooseFolder: (title) => platform.chooseFolder(title),
   derivedFolder: () => agents.workspace(rooms.current!, current!.slug),
-  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
-  repoInfo: (path) => invoke<RepoInfo>("agent_repo_info", { path }),
+  clone: (url, dir) => workingFolder.clone(url, dir),
+  repoInfo: (path) => workingFolder.repoInfo(path),
   releaseChannel: (slug) => agents.releaseChannel(slug),
   applied: (updated) => {
     current = current ? { ...current, ...updated } : updated;
@@ -108,10 +106,9 @@ const channelSettings = createChannelSettings({
 /// process, never said to the room.
 const provision = createProvision({
   bindings: () => bindings,
-  derivedPath: (slug) => invoke<string>("agent_derived_path",
-    { workspace: rooms.current!, channel: slug }),
-  folderState: (dir) => invoke<FolderState>("agent_folder_state", { dir }),
-  clone: (url, dir) => invoke<void>("agent_clone", { url, dir }),
+  derivedPath: (slug) => workingFolder.derivedPath(rooms.current!, slug),
+  folderState: (dir) => workingFolder.folderState(dir),
+  clone: (url, dir) => workingFolder.clone(url, dir),
   isOpen: (slug) => current?.slug === slug,
   openSettings: () => channelSettings.open(),
 });
@@ -151,10 +148,10 @@ function localQuestion(): ((question: string, context: string) => Promise<string
 
 /// The review dialog: the gate's Review and Commit buttons lead here.
 const reviewDialog = createReviewDialog({
-  fileDiff: (dir, path) => invoke<string>("agent_file_diff", { dir, path }),
-  commit: (dir, paths, message) => invoke<string>("agent_commit", { dir, paths, message }),
-  gitInit: (dir) => invoke<void>("agent_git_init", { dir }),
-  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
+  fileDiff: (dir, path) => workingFolder.fileDiff(dir, path),
+  commit: (dir, paths, message) => workingFolder.commit(dir, paths, message),
+  gitInit: (dir) => workingFolder.gitInit(dir),
+  humanChanges: (dir) => workingFolder.humanChanges(dir),
   personName: () => $("who").textContent || "you",
   askAgent: localQuestion,
   resolve: (how, sha) => humanGate.resolve(how, sha),
@@ -164,11 +161,10 @@ const reviewDialog = createReviewDialog({
 /// Work the person wrote outside any run pauses runs until it is reviewed.
 /// The banner and the feed row are this machine's; the room is never told.
 const humanGate = createHumanGate({
-  humanChanges: (dir) => invoke<HumanChangeSet>("agent_human_changes", { dir }),
-  stash: (dir) => invoke<void>("agent_stash", { dir }),
+  humanChanges: (dir) => workingFolder.humanChanges(dir),
+  stash: (dir) => workingFolder.stash(dir),
   folderFor: async (channel) => boundFolder(channel.slug, bindings)
-    ?? await invoke<string>("agent_derived_path",
-      { workspace: rooms.current!, channel: channel.slug }),
+    ?? await workingFolder.derivedPath(rooms.current!, channel.slug),
   runActive: () => activeRuns > 0,
   isOpen: (slug) => current?.slug === slug,
   // Every Review and Commit button lands in the dialog; the resolutions
@@ -218,7 +214,7 @@ const repoInfoCache = new Map<string, Promise<RepoInfo | null>>();
 function repoInfoFor(folder: string): Promise<RepoInfo | null> {
   let pending = repoInfoCache.get(folder);
   if (!pending) {
-    pending = invoke<RepoInfo>("agent_repo_info", { path: folder }).catch(() => null);
+    pending = workingFolder.repoInfo(folder);
     repoInfoCache.set(folder, pending);
   }
   return pending;
@@ -231,8 +227,7 @@ function repoInfoFor(folder: string): Promise<RepoInfo | null> {
 /// standing here to say.
 async function channelRepo(slug: string): Promise<RepoInfo | null> {
   const folder = boundFolder(slug, bindings)
-    ?? await invoke<string>("agent_derived_path",
-      { workspace: rooms.current!, channel: slug }).catch(() => null);
+    ?? await workingFolder.derivedPath(rooms.current!, slug);
   if (!folder) return null;
   const info = await repoInfoFor(folder);
   return info?.default_branch ? info : null;
@@ -786,7 +781,7 @@ async function refreshMirror(channel: Channel) {
     const body = await api.recordBytes(channel.slug, p.sha256).catch(() => null);
     if (body) files.push({ path: `artifacts/${p.name.replace(/[/\\]/g, "_")}`, body, base64: true });
   }
-  await invoke("workspace_write_mirror", { dir, files });
+  await platform.writeMirror(dir, files);
 }
 
 $("cs-mirror").addEventListener("change", async (e) => {
@@ -835,8 +830,9 @@ $("signin-provider").addEventListener("click", async () => {
   button.disabled = true;
   button.textContent = "Waiting for your browser…";
   try {
-    const token = await invoke<string>("sign_in_with_provider",
-      { server: import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000" });
+    const token = await platform.signIn(
+      import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
+    if (!token) throw new Error("this build signs in through the browser it is already in.");
     api.useToken(token);
     signedInThroughBrowser = true;
     $<HTMLDialogElement>("signin").close();
@@ -855,17 +851,14 @@ $("signin-provider").addEventListener("click", async () => {
 /// without being asked is a thing people are right to distrust — so it checks,
 /// it says, and the person decides.
 async function offerUpdate() {
-  const update = await orAfter(check().catch(() => null), 8000, null);
-  if (!update?.available) return;
+  const update = await orAfter(platform.update().catch(() => null), 8000, null);
+  if (!update) return;
 
-  const current = await getVersion().catch(() => "");
+  const current = await platform.version().catch(() => "");
   const notice = updateNotice({ current, available: update.version });
   if (!notice) return;
 
-  say(notice, "Install and restart", async () => {
-    await update.downloadAndInstall();
-    await relaunch();
-  });
+  say(notice, "Install and restart", () => update.install());
 }
 
 /// A client and a workspace that have drifted apart do not fail loudly. They
@@ -948,7 +941,11 @@ async function boot() {
       })
       .catch(() => {});
     for (const name of await orAfter(agents.listRunning(), 2000, [])) agents.markRunning(name);
-    prefix = await orAfter(join(await appDataDir(), "npm"), 2000, "");
+    // Not raced against a timer. It used to be, but only the `join` was inside the
+    // race — the call that can actually hang was awaited outside it, so the timeout
+    // guarded a string concatenation. A shell that does not answer belongs to the
+    // catch below, which names the bridge rather than blaming the server (#299).
+    prefix = await platform.dataDir("npm") ?? "";
     panel.render();
     // What each of them is on this machine, said once the room is up. Until it
     // answers a row reads as missing, which is what it was before this existed.
@@ -973,7 +970,7 @@ async function boot() {
     say(`Your agents are out of reach — the bridge did not answer. ${String(err)}`);
   }
 
-  const version = await getVersion().catch(() => "");
+  const version = await platform.version().catch(() => "");
   noticeDrift(version, how.version);
   offerUpdate().catch(() => {});
 }

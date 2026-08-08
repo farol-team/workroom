@@ -3,16 +3,16 @@
 // same room, so the drawing of one agent lives here and is lent to the overlay
 // — an install running behind one door must not be offered again behind the other.
 
-import type { Agents } from "./agent";
 import type { Channel } from "./api";
 import { installCommand, profileFor } from "./agents/catalog";
+import type { AgentRuntime } from "./agent-runtime";
 import { activeAgent, onboardingCards, removeDefinition, selectable, splitArgs, upsertDefinition, type AgentDef, type OnboardingCard } from "./rules";
 import * as settings from "./settings";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export interface AgentsPanelDeps {
-  agents: Agents;
+  agents: AgentRuntime;
   /// Where installs go: a directory this application owns, and the same one the
   /// bridge looks in. Asked for each time because it arrives after the room.
   prefix: () => string;

@@ -13,6 +13,8 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 
 import { Agents } from "../agent";
+import { folder } from "./desktop-folder";
+import type { WorkingFolder } from "../working-folder";
 import type { AgentDef } from "../rules";
 import type { AgentRuntime } from "../agent-runtime";
 import type { Platform } from "../platform";
@@ -50,6 +52,12 @@ export const platform: Platform = {
       },
     };
   },
+
+  // A native window has no address a provider can redirect to, so the shell opens
+  // the person's own browser and catches the return. The token comes back here.
+  signIn: (server: string) => invoke<string>("sign_in_with_provider", { server }),
+
+  folder: (): WorkingFolder => folder,
 
   agents: (defs: AgentDef[]): AgentRuntime => new Agents(defs),
 };

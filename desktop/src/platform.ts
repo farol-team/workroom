@@ -11,6 +11,7 @@
 
 import type { AgentDef } from "./rules";
 import type { AgentRuntime } from "./agent-runtime";
+import type { WorkingFolder } from "./working-folder";
 
 export interface Platform {
   readonly kind: "desktop" | "web";
@@ -39,6 +40,16 @@ export interface Platform {
   /// updating is not a thing this build does. Installing it restarts the
   /// application, because half an update is not one.
   update(): Promise<{ version: string; install(): Promise<void> } | null>;
+
+  /// A token, obtained the way this shell obtains one. A native window has no
+  /// address for a provider to redirect back to, so the shell opens the browser and
+  /// catches the return itself; a browser is the thing redirects were invented for
+  /// and needs no help. Null therefore means "not through me" rather than "refused"
+  /// — the caller falls back to a redirect, which in a browser is the normal path.
+  signIn(server: string): Promise<string | null>;
+
+  /// The channel's folder on this machine, where there is one.
+  folder(): WorkingFolder;
 
   /// Whatever runs this person's agents. Never null: a window with no agent is a
   /// state the room already draws, and null would be the same check at every call

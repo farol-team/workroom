@@ -5,6 +5,12 @@
     "module": "ESNext",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
+    /* Empty on purpose. `@types/node` is a devDependency for the one test that
+       reads the built bundle off disk; without this it would also put `process`
+       and `Buffer` in scope everywhere in `src`, which is a browser program.
+       Explicit `node:` imports still resolve — this controls globals, not
+       modules. */
+    "types": [],
 
     /* Bundler mode */
     "moduleResolution": "bundler",

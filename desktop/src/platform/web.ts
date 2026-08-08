@@ -11,6 +11,8 @@ import type { AgentDef } from "../rules";
 import type { AgentRuntime } from "../agent-runtime";
 import type { Platform } from "../platform";
 import { NoAgents } from "./web-agents";
+import { folder } from "./web-folder";
+import type { WorkingFolder } from "../working-folder";
 
 const BROWSER = "this runs in a browser, which has no access to the machine";
 
@@ -37,6 +39,13 @@ export const platform: Platform = {
   async writeMirror(_dir: string, _files: Array<{ path: string; body: string }>): Promise<void> {
     throw new Error(`the workspace mirror is written to disk, and ${BROWSER}`);
   },
+
+  // Not through the shell — there is no shell. Null rather than a rejection,
+  // because a browser signs in by being redirected and coming back, which is the
+  // normal path here and not a fallback from a failure.
+  async signIn(_server: string) { return null; },
+
+  folder: (): WorkingFolder => folder,
 
   agents(_defs: AgentDef[]): AgentRuntime {
     return new NoAgents();

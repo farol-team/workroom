@@ -37,6 +37,39 @@ describe("the web platform", () => {
     await expect(platform.writeMirror("/tmp/x", [ { path: "a.md", body: "hi" } ]))
       .rejects.toThrow(/browser/i);
   });
+
+  // Signing in natively hands the window back a token through the shell, because a
+  // native window has no redirect to come back to. A browser does — it is the thing
+  // redirects were invented for — so the honest answer here is not a refusal but
+  // "not this way".
+  test("there is no shell to sign in through, and the browser does not need one", async () => {
+    await expect(platform.signIn("https://rooms.test")).resolves.toBeNull();
+  });
+});
+
+// The channel's folder on this machine: a clone, its git state, and what a person
+// changed in it by hand. One seam rather than nine loose calls, because they are one
+// thing — and a browser has none of it.
+describe("the web platform's working folder", () => {
+  const folder = platform.folder();
+
+  test("there is no folder here, and every question about one says so", async () => {
+    await expect(folder.clone("https://git.test/r.git", "/tmp/r")).rejects.toThrow(/browser/i);
+    await expect(folder.gitInit("/tmp/r")).rejects.toThrow(/browser/i);
+    await expect(folder.commit("/tmp/r", [ "a.md" ], "why")).rejects.toThrow(/browser/i);
+    await expect(folder.stash("/tmp/r")).rejects.toThrow(/browser/i);
+    await expect(folder.fileDiff("/tmp/r", "a.md")).rejects.toThrow(/browser/i);
+  });
+
+  // Asking about a folder is not the same as acting on one. The window asks these
+  // while drawing, before anybody has chosen anything, and a rejection there would
+  // be an error dialog for a question nobody asked.
+  test("asking after a folder that cannot exist is answered, not refused", async () => {
+    await expect(folder.repoInfo("/tmp/r")).resolves.toBeNull();
+    await expect(folder.folderState("/tmp/r")).resolves.toBeNull();
+    await expect(folder.humanChanges("/tmp/r")).resolves.toBeNull();
+    await expect(folder.derivedPath("acme", "sales")).resolves.toBeNull();
+  });
 });
 
 describe("the web platform's agent runtime", () => {
