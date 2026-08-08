@@ -66,6 +66,12 @@ module Broadcast
   # room would hear a different description than the caller just read back.
   def channel(c, serialized) = to_room(c, { type: "channel", channel: serialized })
 
+  # A proposal, and every answer to it. To the room rather than to the owner: an
+  # agent's steps are its own business, but an effect on a system the whole team
+  # shares is the whole team's — and whoever is at their desk can answer it, not
+  # only whoever happened to start the turn.
+  def decision(d) = to_room(d.channel, { type: "decision", decision: d.describe })
+
   # Work product. The room came for this.
   def artifact(a)
     to_room(a.channel, { type: "artifact",
