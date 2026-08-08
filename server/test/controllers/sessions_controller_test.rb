@@ -112,6 +112,46 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_response :unauthorized
   end
+
+  # The third ending (#306). A browser has an address to come back to — that is what
+  # redirects are — but the token must not land where a browser leaves things lying
+  # around, so it goes into a cookie script cannot read and the page asks for it.
+  test "a browser sign-in lands back in the room, carrying nothing in the url" do
+    get "/auth/openid_connect", params: { return_to: "web" }
+    get "/auth/openid_connect/callback"
+
+    assert_redirected_to "/"
+    token = User.find_by!(email: "dana@farol.run").workspace_memberships.sole.api_token
+    assert_not_includes response.location, token, "a token in a url is a token in a log"
+    assert_equal token, cookies[:workroom_token]
+  end
+
+  test "the cookie the browser gets back cannot be read by script" do
+    get "/auth/openid_connect", params: { return_to: "web" }
+    get "/auth/openid_connect/callback"
+
+    # This cookie's own attributes, not any cookie's. Rails' session cookie is
+    # already httponly and SameSite=Lax, so a test that greps the whole header
+    # passes whether or not this card did anything.
+    set = Array(response.headers["Set-Cookie"]).flat_map { |h| h.to_s.split("\n") }
+                                               .find { |c| c.start_with?("workroom_token=") }
+    assert set, "the token cookie is set"
+    assert_match(/httponly/i, set, "script that gets injected must not be able to read it")
+    assert_match(/samesite=lax/i, set, "another site must not make the browser send it")
+  end
+
+  # Three endings, and each client asks for its own. Not sniffed from a header: a
+  # guess about a user agent is a guess, and this one would hand a token to the
+  # wrong place.
+  test "a desktop sign-in is untouched by the browser path existing" do
+    get "/auth/openid_connect", params: { return_port: 51_732, state: "abc123" }
+    get "/auth/openid_connect/callback"
+
+    assert_response :redirect
+    assert_equal "127.0.0.1", URI.parse(response.location).host
+    assert_nil cookies[:workroom_token].presence,
+               "the desktop carries its token itself and needs no cookie here"
+  end
 end
 
 # Signing up is not the same act as signing in (#227). Against a public issuer
