@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_08_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_08_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -278,10 +278,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_08_140000) do
     t.index ["workspace_id"], name: "index_run_steps_on_workspace_id"
   end
 
+  create_table "user_credentials", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "provider", null: false
+    t.text "secret", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "provider"], name: "index_user_credentials_on_user_id_and_provider", unique: true
+    t.index ["user_id"], name: "index_user_credentials_on_user_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.string "avatar_url"
     t.datetime "created_at", null: false
     t.string "email", null: false
+    t.string "execution_mode", default: "own", null: false
     t.string "handle", null: false
     t.string "name"
     t.string "provider", null: false
@@ -356,6 +367,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_08_140000) do
   add_foreign_key "run_steps", "agent_runs"
   add_foreign_key "run_steps", "agent_runs", column: ["agent_run_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "run_steps", "workspaces"
+  add_foreign_key "user_credentials", "users"
   add_foreign_key "workspace_memberships", "users"
   add_foreign_key "workspace_memberships", "workspaces"
 end

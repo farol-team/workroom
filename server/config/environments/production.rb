@@ -97,4 +97,11 @@ Rails.application.configure do
   #
   # Skip DNS rebinding protection for the default health check endpoint.
   # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+
+  # A turn that runs on this server is minutes long and a request is not (#304).
+  # Its own database, named here rather than in an initializer so that an
+  # environment without one — test, where jobs are asserted rather than run — does
+  # not have to be told to ignore it.
+  config.active_job.queue_adapter = :solid_queue
+  config.solid_queue.connects_to = { database: { writing: :queue } }
 end
