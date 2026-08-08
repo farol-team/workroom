@@ -19,9 +19,10 @@ export interface FolderState {
 
 export interface ProvisionDeps {
   bindings: () => Bindings;
-  /// Where the channel would work. Answered without creating anything.
-  derivedPath: (slug: string) => Promise<string>;
-  folderState: (dir: string) => Promise<FolderState>;
+  /// Where the channel would work. Answered without creating anything, and null
+  /// where there is no disk to derive a path on (#299).
+  derivedPath: (slug: string) => Promise<string | null>;
+  folderState: (dir: string) => Promise<FolderState | null>;
   clone: (url: string, dir: string) => Promise<void>;
   /// Rows are this room's: whether the channel they belong to is still the
   /// one on screen. Checked before every draw, never before the work — a
@@ -85,6 +86,9 @@ export function createProvision(deps: ProvisionDeps): Provision {
     if (cloning.has(slug)) return;
 
     const dir = await deps.derivedPath(slug);
+    // No path to derive means no folder to make ready. Nothing is wrong; there is
+    // simply nowhere here for the room's repository to go.
+    if (!dir) return;
     // A probe that cannot answer is answered by attempting the clone:
     // agent_clone refuses a non-empty directory itself, so the destructive
     // case is impossible either way, and the common one — the folder simply

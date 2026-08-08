@@ -20,10 +20,10 @@ export interface HumanChangeSet {
 }
 
 export interface HumanGateDeps {
-  humanChanges: (dir: string) => Promise<HumanChangeSet>;
+  humanChanges: (dir: string) => Promise<HumanChangeSet | null>;
   stash: (dir: string) => Promise<void>;
   /// Where the open channel works. Asked per check: a binding can change.
-  folderFor: (channel: Channel) => Promise<string>;
+  folderFor: (channel: Channel) => Promise<string | null>;
   /// A run is executing — measuring then would read the run's own work as
   /// the person's.
   runActive: () => boolean;
@@ -158,6 +158,9 @@ export function createHumanGate(deps: HumanGateDeps): HumanGate {
 
     (async () => {
       const folder = await deps.folderFor(channel);
+      // Nowhere for the person to have changed anything is the same news as nothing
+      // changed: the gate stays down and says nothing.
+      if (!folder) return;
       const changes = await deps.humanChanges(folder).catch(() => null);
       if (mine !== checking || !deps.isOpen(channel.slug)) return;
       if (!changes || changes.files.length === 0) return;

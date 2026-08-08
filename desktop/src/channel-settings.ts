@@ -33,7 +33,7 @@ export interface ChannelSettingsDeps {
   /// only displays the pattern.
   derivedFolder: () => Promise<string>;
   clone: (url: string, dir: string) => Promise<void>;
-  repoInfo: (path: string) => Promise<RepoInfo>;
+  repoInfo: (path: string) => Promise<RepoInfo | null>;
   /// The agent's session was opened against the old directory and cannot
   /// follow the folder to a new one.
   releaseChannel: (slug: string) => Promise<void>;

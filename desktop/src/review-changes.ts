@@ -16,7 +16,7 @@ export interface ReviewDialogDeps {
   fileDiff: (dir: string, path: string) => Promise<string>;
   commit: (dir: string, paths: string[], message: string) => Promise<string>;
   gitInit: (dir: string) => Promise<void>;
-  humanChanges: (dir: string) => Promise<HumanChangeSet>;
+  humanChanges: (dir: string) => Promise<HumanChangeSet | null>;
   /// Whose name pre-fills the commit message — the commit's author is the
   /// machine's git identity; the message says whose hands did the work.
   personName: () => string;
@@ -198,7 +198,9 @@ export function createReviewDialog(deps: ReviewDialogDeps): ReviewDialog {
       await deps.gitInit(folder);
       const fresh = await deps.humanChanges(folder);
       deps.recheck();
-      open(fresh, folder);
+      // The dialog was opened from a folder that had changes, so a null here is the
+      // folder having gone away underneath it — closing is the honest redraw.
+      if (fresh) open(fresh, folder); else dialog().close();
     })().catch((err) => error(String(err)))
       .finally(() => { button.disabled = false; });
   });
