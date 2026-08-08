@@ -4,13 +4,13 @@ version = 4
 
 [[package]]
 name = "acp-agents"
-version = "0.2.2"
-source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.2#7b332c6e870895ef69714ebf996117ac88fb4850"
+version = "0.2.3"
+source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.3#0fbcb466401c70f33afeddf789ecfc2f86df3ff6"
 
 [[package]]
 name = "acp-client"
-version = "0.2.2"
-source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.2#7b332c6e870895ef69714ebf996117ac88fb4850"
+version = "0.2.3"
+source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.3#0fbcb466401c70f33afeddf789ecfc2f86df3ff6"
 dependencies = [
  "libc",
  "serde_json",

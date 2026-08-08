@@ -21,31 +21,16 @@ export interface AgentProfile {
 /// guess: either the command is on this machine or it is not.
 export type AgentState = "ready" | "missing";
 
-/// The three, in the order they are shown. Claude leads because it is the one
-/// `@agent` addresses when nobody has said otherwise — not because it is more
-/// present than the others. None of them is: this application carries no agent,
-/// and each arrives the same way, on a press.
+/// The agents this application offers, generated from the table the client
+/// itself uses (`acp-agents::HARNESSES`) rather than written twice.
 ///
-/// Commands and packages verified against the registry on 2026-08-01 — the
-/// command is the one `npm view <package> bin` reports, which is what ends up
-/// on the machine. `desktop/test/catalog.test.ts` pins them by value, and
-/// #111's bench is what keeps them honest as the vendors move.
-export const BASELINE: AgentProfile[] = [
-  {
-    name: "claude", label: "Claude", command: "claude-agent-acp", args: [],
-    package: "@agentclientprotocol/claude-agent-acp",
-    docsUrl: "https://docs.claude.com/en/docs/claude-code/overview",
-  },
-  {
-    name: "codex", label: "Codex", command: "codex-acp", args: [],
-    package: "@agentclientprotocol/codex-acp",
-    docsUrl: "https://developers.openai.com/codex/cli/",
-  },
-  {
-    name: "opencode", label: "OpenCode", command: "opencode", args: [ "acp" ],
-    package: "opencode-ai", docsUrl: "https://opencode.ai/docs/",
-  },
-];
+/// The panel is drawn before anything has been invoked, so this stays a plain
+/// constant; a spec on the Rust side fails when the two drift apart, and
+/// `UPDATE_CATALOG=1 cargo test` in `desktop/src-tauri` regenerates it. Agents
+/// with nothing to fetch — Cursor, today — are in the shared table and not
+/// here: the panel's whole job is a button.
+export { BASELINE } from "./generated";
+import { BASELINE } from "./generated";
 
 /// The profile for a name, when this project pinned one. An agent nobody
 /// pinned is not an error — it is somebody's own, and belongs beside these.

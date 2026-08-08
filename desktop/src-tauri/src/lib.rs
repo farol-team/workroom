@@ -17,6 +17,11 @@
 )]
 
 mod acp;
+// The generator for the window's copy of the agent catalogue, and the spec that
+// fails when the two drift. Nothing at run time reads it: the generated module
+// is TypeScript.
+#[cfg(test)]
+mod catalog;
 mod signin;
 mod workspace;
 
