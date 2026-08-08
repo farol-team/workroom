@@ -52,12 +52,17 @@ reaching it speaks the seam's protocol rather than around it. What is given up
 is replaceability — the store's tool vocabulary becomes part of the agent's
 contract — and that is accepted while WorkRoom serves one workspace and a team
 that trusts each other. docs/spikes/openviking-isolation.md is the measurement
-this rests on.)*
+this rests on. Amended 2026-08-08 (#297): the store is now reached through the
+server's memory gateway, which speaks the same MCP and refuses what falls outside
+the channel. The 2026-08-01 concession is withdrawn — the agent still speaks the
+seam's protocol, and it no longer speaks it to somewhere the server cannot see.
+Replaceability comes back with it: the store's vocabulary is now the gateway's
+problem rather than the agent's contract.)*
 
 Control crosses as **ACP**, capability as **MCP**, record as **HTTP/WebSocket**.
 No component reaches past a boundary by another route — no SQL from the desktop,
-and nothing from the agent to the context store except that store's MCP
-endpoint.
+and nothing from the agent to the context store except through the server's
+memory gateway.
 
 ### Article P2 — Agent inference is paid for by the person
 *(Rationale: a central credential for agent work would recreate the shared bill
@@ -125,18 +130,22 @@ scope, and unit of conversation; splitting them means reconciling four models of
 who can see what. Amended 2026-08-01: an agent reaching the context store
 directly retrieves across every channel of the workspace, because that store
 isolates accounts and knows nothing of channels — measured, not assumed. For
-people the channel is still the scope; for agents it is not. This holds only
-while one workspace and one trusted team make "every channel" and "the channels
-we are all in" the same set, and it is the first thing to revisit when they stop
-being the same.)*
+people the channel is still the scope; for agents it is not. Amended 2026-08-08
+(#297): it is again, and by a mechanism rather than by a request. The agent is no
+longer given the account's key; it is given the server's gateway and a signed
+token naming this channel's prefixes, and a call outside them is refused before
+the store hears it. The store still isolates accounts and still knows nothing of
+channels — what changed is that nothing depends on it knowing.)*
 
 Memory, permissions, retrieval, and agent sessions are scoped by channel.
 Cross-channel reads and any write to `viking://org/` are separate, explicit
 operations — never a side effect of working in a channel.
 
-For an agent holding a context-store key this article describes an intention the
-store cannot enforce. Nothing in the server may rely on it to keep one channel
-from another.
+This holds for agents as well as people, and the server may rely on it. The scope
+travels in the token the gateway issues, so an agent that ignores the intention
+meets a refusal rather than another room. What must not be relied on is the store
+itself: it enforces nothing about channels, and any future path that reaches it
+without passing the gateway puts this article back where it was.
 
 ### Article P6 — Append-only tables are never updated
 *(Rationale: `activities` and `run_steps` are the audit surface; a mutable audit

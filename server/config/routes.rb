@@ -24,6 +24,10 @@ Rails.application.routes.draw do
     # One MCP endpoint per channel — the channel in the url is the scope.
     post "rail/:slug", to: "rail#call", as: :rail
 
+    # The store, one channel wide. No slug: the scope travels in the token, so a
+    # url cannot address a room the token does not name.
+    post "memory/mcp", to: "memory_gateway#call", as: :memory_gateway
+
     resources :workspaces, only: %i[index create]
     get "workspace/members", to: "workspaces#members", as: :workspace_members
 

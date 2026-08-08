@@ -149,10 +149,18 @@ module Api
       # workspace has no account of its own, which is every workspace until one is
       # provisioned — and then the agent gets no store, rather than somebody
       # else's.
+      #
+      # The address is ours, not the store's, and the key names one channel rather
+      # than the account. Handing over the account's own key made the sentence in
+      # `Memory::Boundary` the only thing between one room and the next, because the
+      # store isolates accounts and knows nothing of channels (#115, Article P5).
+      # The shape is unchanged, so the client hands it to the agent as before.
       def store_for(room)
         return nil if room&.openviking_url.blank? || room.openviking_api_key.blank?
 
-        { url: "#{room.openviking_url.chomp("/")}/mcp", key: room.openviking_api_key }
+        { url: api_v1_memory_gateway_url,
+          key: Memory::ScopeToken.mint(account: room.id, user_id: current_user.id,
+                                       prefixes: [ channel!.memory_uri ]) }
       end
 
       # No memory count here. It was read straight off `memory_entries`, which is
