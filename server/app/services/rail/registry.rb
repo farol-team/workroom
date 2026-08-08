@@ -128,12 +128,12 @@ module Rail
     # know whether the answer is a fact this room learned, a way this team works, or
     # a door out.
     #
-    # Only what the operator judged read-only is listed. Offering something that
-    # would then be refused is worse than not offering it — the agent plans around a
-    # capability it cannot have.
+    # Everything configured is listed, including what changes the world outside —
+    # that is proposed rather than run (#302), and a capability nobody can find is a
+    # capability nobody can decide about.
     def matching_bound(query)
       terms = Memory::Store.terms_in(query)
-      BoundCapability.offered.filter_map do |capability|
+      BoundCapability.all.filter_map do |capability|
         text = "#{capability.uri} #{capability.title} #{capability.summary}".downcase
         next if terms.any? && terms.none? { |t| text.include?(t) }
 
@@ -141,17 +141,21 @@ module Rail
       end
     end
 
-    # A uri an agent saw yesterday is a uri an agent can send today, so read-only is
-    # checked here and not only where the listing is built.
+    # Read-only runs; everything else is proposed. The check is here rather than only
+    # where the listing is built, because a uri an agent saw yesterday is a uri an
+    # agent can send today.
+    #
+    # A proposal is not an error: the agent is told the thing is waiting on a person
+    # and can carry on with whatever does not depend on the answer. Told it had
+    # failed, it would retry, or undo work it had already done correctly.
     def run_bound(uri, args)
       capability = BoundCapability.find_by_uri(uri)
       return [ :error, "no capability at #{uri}" ] unless capability
-      unless capability.read_only
-        return [ :error, "#{capability.key}: this changes something outside this room, " \
-                         "which needs a person's decision — and that step is not built yet" ]
-      end
+      return Bound.new(capability:).call(args) if capability.read_only
 
-      Bound.new(capability:).call(args)
+      decision = Decision.propose(capability:, args:, run: working_run, channel: @channel)
+      Broadcast.decision(decision)
+      [ :ok, "#{capability.key}: proposed, and waiting for somebody in this room to decide" ]
     end
 
     # Read the same way knowledge is read: by terms, so an agent describing what

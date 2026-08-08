@@ -64,6 +64,11 @@ Rails.application.routes.draw do
     post  "runs/:id/steps",    to: "runs#step",    as: :run_steps
     post  "runs/:id/plan",     to: "runs#plan",    as: :run_plan
 
+    # What is waiting on a person, and the answer to one. The channel is in both
+    # urls because a decision belongs to a room, and the room is who may answer.
+    get  "channels/:channel_slug/decisions",     to: "decisions#index",  as: :channel_decisions
+    post "channels/:channel_slug/decisions/:id", to: "decisions#answer", as: :channel_decision
+
     get  "channels/:channel_slug/artifacts", to: "artifacts#index",  as: :channel_artifacts
     post "runs/:run_id/artifacts",           to: "artifacts#create", as: :run_artifacts
 

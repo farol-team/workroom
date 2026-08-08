@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_08_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_08_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -180,6 +180,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_08_120000) do
     t.index ["workspace_id"], name: "index_channels_on_workspace_id"
   end
 
+  create_table "decisions", force: :cascade do |t|
+    t.bigint "agent_run_id"
+    t.jsonb "arguments", default: {}, null: false
+    t.bigint "bound_capability_id", null: false
+    t.bigint "channel_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "decided_at"
+    t.bigint "decided_by_id"
+    t.text "reason"
+    t.text "result"
+    t.string "state", default: "pending", null: false
+    t.bigint "supersedes_id"
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["channel_id", "state"], name: "index_decisions_on_channel_id_and_state"
+  end
+
   create_table "invitations", force: :cascade do |t|
     t.datetime "accepted_at"
     t.bigint "accepted_by_id"
@@ -319,6 +336,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_08_120000) do
   add_foreign_key "channel_records", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "channel_records", "workspaces"
   add_foreign_key "channels", "workspaces"
+  add_foreign_key "decisions", "bound_capabilities"
+  add_foreign_key "decisions", "channels"
+  add_foreign_key "decisions", "workspaces"
   add_foreign_key "invitations", "users", column: "accepted_by_id"
   add_foreign_key "invitations", "users", column: "invited_by_id"
   add_foreign_key "invitations", "workspaces"

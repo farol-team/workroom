@@ -367,19 +367,29 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert_not_includes journal.map { |e| payload_of(e).to_json }.join, "a-secret"
   end
 
-  test "a capability nobody judged safe is neither offered nor runnable" do
+  # A capability that changes something outside this room is proposed rather than
+  # run — and rather than refused, which is what #300 left. Refusing it meant an
+  # agent could never ask, and a capability nobody can ask for is one nobody can
+  # decide about.
+  test "a capability with side effects is proposed, and the agent is told so" do
     bind_capability(key: "close-deal", read_only: false)
-    stub_far_end { |*| raise "the far end must not be reached" }
+    stub_far_end { |*| raise "the far end is not called before somebody says yes" }
 
     found = JSON.parse(rpc("tools/call", { name: "search_capabilities",
                                            arguments: { query: "close a deal" } })
                          .dig("result", "content", 0, "text"))
     out = rpc("tools/call", { name: "execute_capability",
-                              arguments: { uri: "workroom://systems/close-deal" } })
+                              arguments: { uri: "workroom://systems/close-deal",
+                                           args: { id: "4821" } } })
 
-    assert_empty found.select { |f| f["uri"] == "workroom://systems/close-deal" }
-    assert out.dig("result", "isError")
-    assert_includes out.dig("result", "content", 0, "text"), "decision"
+    assert found.any? { |f| f["uri"] == "workroom://systems/close-deal" },
+           "an agent cannot propose what it cannot find"
+    assert_not out.dig("result", "isError"), "a proposal is not a failure"
+    assert_includes out.dig("result", "content", 0, "text"), "waiting"
+
+    decision = @channel.decisions.pending.last
+    assert decision, "the proposal is a row somebody can answer"
+    assert_equal({ "id" => "4821" }, decision.arguments)
   end
 
   # The rail witnessed the write, so the store learns the journal lineage of
