@@ -304,6 +304,84 @@ class Api::V1::RailControllerTest < ActionDispatch::IntegrationTest
     assert out.dig("result", "isError"), "a bad uri is a tool error, not a protocol error"
   end
 
+  # A capability answered by a system that is not ours. It is found the same way
+  # everything else is — an agent describing what it wants to do should not have to
+  # know which of these is a fact, a procedure or a door.
+  #
+  # The far end is an external HTTP API and is the only thing stubbed (Article V).
+  def bind_capability(key: "deal-status", read_only: true)
+    BoundCapability.create!(
+      workspace: Current.workspace, key:, title: "Deal status",
+      summary: "What stage a deal is at right now, from the CRM.",
+      endpoint: "https://crm.test/mcp", tool: "get_deal", credential: "a-secret", read_only:
+    )
+  end
+
+  def stub_far_end(&answer)
+    Rail::Bound.http = answer || ->(*) {
+      { status: 200, body: { "result" => { "content" => [ { "text" => "Negotiation" } ] } } }
+    }
+  end
+
+  teardown { Rail::Bound.http = nil }
+
+  test "a bound capability is found beside what the room knows and how it works" do
+    bind_capability
+
+    found = JSON.parse(rpc("tools/call", { name: "search_capabilities",
+                                           arguments: { query: "stage of a deal" } })
+                         .dig("result", "content", 0, "text"))
+
+    bound = found.find { |f| f["uri"] == "workroom://systems/deal-status" }
+    assert bound, "an agent asking about a deal's stage must be shown the door to it"
+    assert_equal "action", bound["kind"]
+  end
+
+  test "running one calls the far end and returns what it said" do
+    bind_capability
+    sent = []
+    stub_far_end { |endpoint, rpc, credential|
+      sent << [ endpoint, rpc, credential ]
+      { status: 200, body: { "result" => { "content" => [ { "text" => "Negotiation" } ] } } }
+    }
+
+    out = rpc("tools/call", { name: "execute_capability",
+                              arguments: { uri: "workroom://systems/deal-status",
+                                           args: { id: "4821" } } })
+
+    assert_not out.dig("result", "isError")
+    assert_equal "Negotiation", out.dig("result", "content", 0, "text")
+    assert_equal "get_deal", sent.first[1].dig(:params, :name)
+  end
+
+  test "the credential is in nothing the agent can see" do
+    bind_capability
+    stub_far_end
+
+    listed = rpc("tools/call", { name: "search_capabilities", arguments: { query: "deal" } })
+    ran = rpc("tools/call", { name: "execute_capability",
+                              arguments: { uri: "workroom://systems/deal-status" } })
+
+    assert_not_includes listed.to_json, "a-secret"
+    assert_not_includes ran.to_json, "a-secret"
+    assert_not_includes journal.map { |e| payload_of(e).to_json }.join, "a-secret"
+  end
+
+  test "a capability nobody judged safe is neither offered nor runnable" do
+    bind_capability(key: "close-deal", read_only: false)
+    stub_far_end { |*| raise "the far end must not be reached" }
+
+    found = JSON.parse(rpc("tools/call", { name: "search_capabilities",
+                                           arguments: { query: "close a deal" } })
+                         .dig("result", "content", 0, "text"))
+    out = rpc("tools/call", { name: "execute_capability",
+                              arguments: { uri: "workroom://systems/close-deal" } })
+
+    assert_empty found.select { |f| f["uri"] == "workroom://systems/close-deal" }
+    assert out.dig("result", "isError")
+    assert_includes out.dig("result", "content", 0, "text"), "decision"
+  end
+
   # The rail witnessed the write, so the store learns the journal lineage of
   # what it now holds: the sidecar is how a reader of the entry finds the
   # record of it (#213). The wire is the subject, so the adapter is the real
