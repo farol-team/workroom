@@ -2,11 +2,36 @@ require "test_helper"
 
 # What a session is opened with. Two things travel here that the room's own
 # knowledge does not: how to reach the context store, and the sentence asking
-# the agent to stay inside its channel — which the store cannot enforce (#115).
+# the agent to stay inside its channel.
+#
+# The store still cannot enforce that sentence (#115) — it isolates accounts and
+# knows nothing of channels. What changed is that it no longer has to: the address
+# handed over is the server's gateway and the key is a token naming this channel,
+# so an agent that ignores the request reaches a refusal rather than another room.
 class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
   setup do
     @channel = channel(name: "Meetings")
     @alice = user(name: "Alice")
+  end
+
+  test "the memory endpoint is ours and the key names this channel" do
+    Current.workspace.update!(openviking_url: "https://store.test", openviking_api_key: "root-key")
+    elsewhere = channel(slug: "support", name: "Support")
+
+    store = context_for["store"]
+
+    assert_not_includes store.to_s, "root-key", "the store's own key does not leave the server"
+    assert_includes store["url"], "/memory/mcp", "the agent is pointed at the gateway"
+    claims = Memory::ScopeToken.verify(store["key"])
+    assert claims, "what is handed over is a scope token"
+    assert_includes claims[:prefixes], @channel.memory_uri
+    assert_not_includes claims[:prefixes], elsewhere.memory_uri
+  end
+
+  test "a workspace without a store of its own is given nothing rather than somebody else's" do
+    Current.workspace.update!(openviking_url: nil, openviking_api_key: nil)
+
+    assert_nil context_for["store"]
   end
 
   teardown { Memory::Store.current = nil }
@@ -49,7 +74,7 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
                "no store is right; somebody else's store is the thing to avoid"
   end
 
-  test "a workspace with an account is told where it is and how to reach it" do
+  test "a workspace with an account is told how to reach it, through us" do
     Current.workspace.update!(openviking_url: "https://context.example",
                               openviking_api_key: "a-key")
     # What the room knows is read from the store, and this one does not exist.
@@ -58,9 +83,10 @@ class Api::V1::ChannelContextTest < ActionDispatch::IntegrationTest
 
     store = context_for["store"]
 
-    assert_equal "https://context.example/mcp", store["url"],
-                 "the store's surface for agents is mounted at /mcp"
-    assert_equal "a-key", store["key"]
+    # The store's own surface is still MCP and still at /mcp — it is simply not
+    # the address handed out. Where it lives stays on the server, with the key.
+    assert_equal api_v1_memory_gateway_url, store["url"]
+    assert_not_equal "a-key", store["key"]
   end
 
   # A room whose memory is away is still a room. It opens, and it is told which
