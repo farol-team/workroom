@@ -68,14 +68,28 @@ memory gateway.
 *(Rationale: a central credential for agent work would recreate the shared bill
 and the shared rate limit the design exists to avoid. Amended 2026-07-31: the
 context store computes tiers and embeddings and cannot do so per user, because
-what one person's agent writes another person's agent later reads.)*
+what one person's agent writes another person's agent later reads. Amended
+2026-08-08 (#304): local execution was the mechanism, not the principle — a
+credential belonging to exactly one person does not recreate a shared bill or a
+shared rate limit wherever the process holding it happens to sit, and requiring
+a laptop made the product unavailable to the companies it is for.)*
 
-Two categories, and only the first is forbidden to the server.
+Two categories, and only the first is constrained.
 
-**Agent inference** — the model that answers a turn. Its API keys, provider
-tokens and agent auth live on the user's machine and never reach the server, its
-configuration, its database, or a server-side proxy. The server records token
-**counts** as reporting, never as billing.
+**Agent inference** — the model that answers a turn. The credential belongs to
+the person whose turn it is. A server may hold it **only** when every one of
+these holds:
+
+- one credential per user, never a workspace-wide or vendor one — that is the
+  shared bill and the shared rate limit this article exists to prevent, and it
+  is the whole of the prohibition;
+- encrypted at rest, and never readable back through any endpoint;
+- used only for turns belonging to the person it came from.
+
+A credential that fails any of these is refused at the door rather than
+discovered later. Where a person runs their own agent the credential does not
+reach the server at all, and that remains the default a fresh install has. The
+server records token **counts** as reporting, never as billing.
 
 **Infrastructure inference** — embedding and tiering performed by the context
 store on the organization's shared knowledge. This is workspace-level, not
@@ -192,11 +206,14 @@ never heard of. Memory still belongs to the channel, so switching agents loses
 nothing: what the room knows is pushed into whichever one is summoned.
 
 ### Article D2 — The agent is a child process, never a service
-*(Rationale: local execution is the mechanism behind Article P2; a hosted agent
-would need delegated credentials.)*
+*(Rationale: a native window that showed a remote agent's work as its own would
+be lying about what it owns. Clarified 2026-08-08 (#304): this is and was a rule
+about the desktop build, which is the section it lives in. The hosted runner P2
+now permits belongs to the web build, which spawns nothing and claims nothing.)*
 
-The client spawns and owns the agent process. No code path may point the client
-at a remote agent endpoint that the user does not control.
+In the desktop client, the client spawns and owns the agent process. No code
+path may point the desktop client at a remote agent endpoint that the user does
+not control.
 
 ### Article D3 — Artifacts belong to the channel
 *(Rationale: docs/AGENTS.md — work left on one laptop makes the channel a

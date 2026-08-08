@@ -20,6 +20,11 @@ module Api
           started_at: Time.current, model: params[:model]
         )
         Broadcast.run(run)
+        # Where this person's turns run (#304). Enqueued rather than performed: a turn
+        # is minutes and a request is not, and a browser tab that closes must not take
+        # the turn with it. A person running their own agent is left alone — their
+        # client is already holding this run open and posting back to `update`.
+        HostedTurnJob.perform_later(run.id) if current_user.execution_mode == "hosted"
         render json: { id: run.id, agent_session_id: session.id }, status: :created
       end
 

@@ -21,6 +21,11 @@ Rails.application.routes.draw do
     get  "auth/methods", to: "auth#methods_available", as: :auth_methods
     get  "me", to: "auth#me", as: :me
 
+    # Where this person's turns run, and what pays for them (#304). Singular and
+    # unparameterised: it is always the caller's own.
+    get   "execution", to: "execution#show", as: :execution
+    patch "execution", to: "execution#update"
+
     # One MCP endpoint per channel — the channel in the url is the scope.
     post "rail/:slug", to: "rail#call", as: :rail
 

@@ -167,4 +167,25 @@ class Api::V1::RunsControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
   end
+
+  # #304. A run belonging to somebody whose turns run here is enqueued; a run
+  # belonging to somebody running their own agent is not, and behaves exactly as it
+  # did before this existed.
+  test "a hosted person's run is picked up by this server" do
+    @alice.update!(execution_mode: "hosted")
+
+    assert_enqueued_with(job: HostedTurnJob) do
+      post api_v1_channel_runs_path(@channel.slug), headers: auth(@alice)
+    end
+
+    assert_response :created
+  end
+
+  test "a person running their own agent is left alone" do
+    assert_no_enqueued_jobs(only: HostedTurnJob) do
+      post api_v1_channel_runs_path(@channel.slug), headers: auth(@alice)
+    end
+
+    assert_response :created
+  end
 end

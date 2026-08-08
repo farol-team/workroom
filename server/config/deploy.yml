@@ -44,11 +44,11 @@ registry:
 
 env:
   clear:
-    # No SOLID_QUEUE_IN_PUMA. Since #55 the agent distils its own memory and
-    # nothing in this application enqueues anything, so starting a worker only
-    # gave Puma a supervisor that queries tables no schema defines — which took
-    # the whole server down on boot. When something needs a queue again, it
-    # arrives with its own database and schema; see test/config/queue_config_test.rb.
+    # Something needs a queue again (#304): a turn that runs on this server is
+    # minutes long and a request is not. It arrives with its own database and its
+    # own schema, which is exactly what the note here used to ask for — the boot
+    # failure this replaced was Puma supervising tables no schema defined.
+    SOLID_QUEUE_IN_PUMA: true
     RAILS_ENV: production
     STORAGE_REGION: ru-central1
   secret:

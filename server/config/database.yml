@@ -13,6 +13,11 @@ development:
     database: workroom_development_cable
     # No app migrations here — the cable database is defined by db/cable_schema.rb.
     migrations_paths: db/cable_migrate
+  queue:
+    <<: *default
+    database: workroom_development_queue
+    # No app migrations here — the queue database is defined by db/queue_schema.rb.
+    migrations_paths: db/queue_migrate
 
 test:
   <<: *default
@@ -27,3 +32,8 @@ production:
     database: workroom_production_cable
     # No app migrations here — the cable database is defined by db/cable_schema.rb.
     migrations_paths: db/cable_migrate
+  queue:
+    <<: *default
+    database: workroom_production_queue
+    # No app migrations here — the queue database is defined by db/queue_schema.rb.
+    migrations_paths: db/queue_migrate

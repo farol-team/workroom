@@ -20,12 +20,23 @@ class QueueConfigTest < ActiveSupport::TestCase
       "Puma is told to run Solid Queue, but production has no queue database for it to use"
   end
 
-  test "nothing enqueues work, which is why there is no queue" do
+  # This used to assert that nothing enqueues anything, which was the honest state
+  # until #304: a turn that runs on this server is minutes long and a request is not.
+  # The question the gate exists to ask has not changed — it is still "does the queue
+  # this application relies on actually exist" — only the direction it is asked from.
+  test "what enqueues work has a queue to enqueue into" do
     enqueuing = Dir[ROOT.join("app/**/*.rb"), ROOT.join("lib/**/*.rb")]
       .reject { |f| f.end_with?("application_job.rb") }
       .select { |f| File.read(f).match?(/\bperform_later\b|\bdeliver_later\b/) }
+    return if enqueuing.empty?
 
-    assert_empty enqueuing.map { |f| Pathname(f).relative_path_from(ROOT).to_s },
-      "something now enqueues background work — it needs a queue database and schema before it can run"
+    assert ROOT.join("db/queue_schema.rb").exist?,
+      "#{enqueuing.size} file(s) enqueue work, but no db/queue_schema.rb defines the tables for it"
+
+    db = YAML.load_file(ROOT.join("config/database.yml"), aliases: true)
+    %w[development production].each do |env|
+      assert db.fetch(env).key?("queue"),
+        "#{env} enqueues work and has no queue database for it to go into"
+    end
   end
 end
