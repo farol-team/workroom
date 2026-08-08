@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_210001) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_08_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -132,6 +132,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_210001) do
     t.index ["channel_id"], name: "index_artifacts_on_channel_id"
     t.index ["sha256"], name: "index_artifacts_on_sha256"
     t.index ["workspace_id"], name: "index_artifacts_on_workspace_id"
+  end
+
+  create_table "bound_capabilities", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "credential"
+    t.string "endpoint", null: false
+    t.string "key", null: false
+    t.boolean "read_only", default: false, null: false
+    t.text "summary"
+    t.string "title", null: false
+    t.string "tool", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["workspace_id", "key"], name: "index_bound_capabilities_on_workspace_id_and_key", unique: true
   end
 
   create_table "channel_records", force: :cascade do |t|
@@ -300,6 +314,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_210001) do
   add_foreign_key "artifacts", "channels"
   add_foreign_key "artifacts", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "artifacts", "workspaces"
+  add_foreign_key "bound_capabilities", "workspaces"
   add_foreign_key "channel_records", "channels"
   add_foreign_key "channel_records", "channels", column: ["channel_id", "workspace_id"], primary_key: ["id", "workspace_id"]
   add_foreign_key "channel_records", "workspaces"

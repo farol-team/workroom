@@ -51,11 +51,12 @@ module Rail
         { uri: e.uri, title: e.title, summary: e.abstract.presence || e.overview,
           kind: skill?(e.uri) ? "skill" : "knowledge", trust: e.trust }
       end
-      found + matching_actions(query)
+      found + matching_actions(query) + matching_bound(query)
     end
 
     def execute(uri, args = {})
       return run_action(uri, args) if actions.key?(uri)
+      return run_bound(uri, args) if uri.to_s.start_with?(BoundCapability::PREFIX)
 
       # Through the store, not the table: search returns uris from whichever
       # store is configured, and the rail must be able to read what it found.
@@ -120,6 +121,37 @@ module Rail
         If any step needs a permission you do not have, stop and say what you
         would have done. The call is the person's, not yours.
       TEXT
+    end
+
+    # Capabilities answered by a system that is not ours, read by the same terms as
+    # everything else: an agent describing what it wants to do should not have to
+    # know whether the answer is a fact this room learned, a way this team works, or
+    # a door out.
+    #
+    # Only what the operator judged read-only is listed. Offering something that
+    # would then be refused is worse than not offering it — the agent plans around a
+    # capability it cannot have.
+    def matching_bound(query)
+      terms = Memory::Store.terms_in(query)
+      BoundCapability.offered.filter_map do |capability|
+        text = "#{capability.uri} #{capability.title} #{capability.summary}".downcase
+        next if terms.any? && terms.none? { |t| text.include?(t) }
+
+        Bound.new(capability:).descriptor
+      end
+    end
+
+    # A uri an agent saw yesterday is a uri an agent can send today, so read-only is
+    # checked here and not only where the listing is built.
+    def run_bound(uri, args)
+      capability = BoundCapability.find_by_uri(uri)
+      return [ :error, "no capability at #{uri}" ] unless capability
+      unless capability.read_only
+        return [ :error, "#{capability.key}: this changes something outside this room, " \
+                         "which needs a person's decision — and that step is not built yet" ]
+      end
+
+      Bound.new(capability:).call(args)
     end
 
     # Read the same way knowledge is read: by terms, so an agent describing what
