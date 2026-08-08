@@ -347,7 +347,10 @@ describe("the setup and the agents panel, one answer", () => {
     expect(cards().map((el) => actionIn(el).textContent))
       .toEqual(rows().map((el) => actionIn(el).textContent));
     // And the footer of the sidebar carries the same answer in one line.
-    expect($("agents-open").textContent).toBe("Claude · ready");
+    // "Claude Code" rather than "Claude": the label is the shared catalogue's
+    // now, and it is the vendor's own name for the CLI — "Claude" alone is the
+    // model family (#312).
+    expect($("agents-open").textContent).toBe("Claude Code · ready");
   });
 
   test("an agent that is running is running in both", async () => {

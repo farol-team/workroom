@@ -48,3 +48,9 @@ wildcards = "deny"            # a wildcard version is an update nobody reviewed
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+# The ACP client, shared with the other products that run a local agent the same
+# way (#312). Named here rather than left to `unknown-git`, and pinned by tag in
+# the manifest — the point of the allowance is that it is one repository we
+# publish ourselves, not that git sources are fine.
+allow-git = ["https://github.com/farol-team/acp-agents"]

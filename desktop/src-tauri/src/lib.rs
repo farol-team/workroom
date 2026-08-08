@@ -17,16 +17,21 @@
 )]
 
 mod acp;
-mod path;
+// The generator for the window's copy of the agent catalogue, and the spec that
+// fails when the two drift. Nothing at run time reads it: the generated module
+// is TypeScript.
+#[cfg(test)]
+mod catalog;
 mod signin;
 mod workspace;
 
 use std::sync::Arc;
 
-use acp::{auth_hint, closes_sessions, mounts_http_mcp, Agent, AgentState, Deadlines};
+use acp::{AgentState, Running};
+use acp_agents::path::{candidates, directories, found, located, path_env, user_path};
+use acp_client::SessionOpts;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use path::{candidates, directories, found, located, path_env, user_path};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -50,7 +55,7 @@ async fn agent_start(
     let command = resolve(&app, &command);
     // The bridge takes what to emit rather than the handle itself, so its tests
     // can launch a real process without a window. This closure is the window.
-    let agent = Agent::launch(&name, &command, &args, Deadlines::default(), {
+    let agent = Running::launch(&name, &command, &args, {
         move |event: &str, payload: Value| {
             let _ = app.emit(event, payload);
         }
@@ -59,7 +64,7 @@ async fn agent_start(
     // Starting again under the same name is a restart. The process it replaces
     // is shut down here, or it lingers unaddressable with the user's session open.
     if let Some(previous) = state.insert(&name, agent).await {
-        previous.shutdown().await;
+        previous.shutdown();
     }
     Ok(json!({ "ok": true, "name": name, "command": command }))
 }
@@ -72,14 +77,13 @@ async fn agent_start(
 /// which is why `npx` appears nowhere in this application (#120).
 fn resolve(app: &AppHandle, command: &str) -> String {
     located(command, &places(app, command))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Everywhere a command might be, for the machine this is running on.
 fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
-    candidates(
-        command,
-        directories(app.path().app_data_dir().ok(), user_path().clone()),
-    )
+    candidates(command, directories(app.path().app_data_dir().ok()))
 }
 
 /// Which of these commands this machine has, and where. Null for one it does
@@ -89,7 +93,9 @@ fn places(app: &AppHandle, command: &str) -> Vec<std::path::PathBuf> {
 async fn agent_probe(app: AppHandle, commands: Vec<String>) -> Result<Vec<Option<String>>, String> {
     Ok(commands
         .iter()
-        .map(|command| found(&places(&app, command)))
+        .map(|command| {
+            found(&places(&app, command)).map(|path| path.to_string_lossy().into_owned())
+        })
         .collect())
 }
 
@@ -399,13 +405,9 @@ async fn agent_permit(
     request_id: Value,
     option_id: Option<String>,
 ) -> Result<(), String> {
-    let agent = running(&state, name).await?;
-    let outcome = match option_id {
-        Some(id) => json!({ "outcome": "selected", "optionId": id }),
-        None => json!({ "outcome": "cancelled" }),
-    };
-    agent
-        .answer(&request_id, json!({ "outcome": outcome }))
+    running(&state, name)
+        .await?
+        .answer(&request_id, option_id)
         .await
 }
 
@@ -423,14 +425,15 @@ async fn agent_close_session(
     session_id: String,
 ) -> Result<bool, String> {
     let agent = running(&state, name).await?;
-    if !closes_sessions(&agent.handshake().await) {
-        return Ok(false);
-    }
-
-    agent
-        .request("session/close", json!({ "sessionId": session_id }))
-        .await?;
-    Ok(true)
+    let closes = agent.agent().handshake().closes_sessions();
+    let closed = agent
+        .session(&session_id)
+        .await?
+        .close(closes)
+        .await
+        .map_err(|e| e.to_string())?;
+    agent.forget(&session_id).await;
+    Ok(closed)
 }
 
 /// Ask the agent to give up the turn it is on. The person's to ask for: a run
@@ -445,7 +448,13 @@ async fn agent_cancel(
     name: Option<String>,
     session_id: String,
 ) -> Result<(), String> {
-    running(&state, name).await?.cancel(&session_id).await
+    running(&state, name)
+        .await?
+        .session(&session_id)
+        .await?
+        .cancel()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Which of this person's agents are running — asked of the processes, not of
@@ -474,13 +483,12 @@ async fn agent_list(state: State<'_, AgentState>) -> Result<Vec<String>, String>
 ///
 /// Nothing to mount is nothing to check: a session opened without a rail is a
 /// session that was not promised one.
-async fn rail_would_reach(
-    agent: &Arc<Agent>,
+fn rail_would_reach(
+    agent: &Arc<Running>,
     name: &Option<String>,
-    mcp_servers: &Value,
+    mcp_servers: &[Value],
 ) -> Result<(), String> {
-    let nothing_to_mount = mcp_servers.as_array().is_none_or(|s| s.is_empty());
-    if nothing_to_mount || mounts_http_mcp(&agent.handshake().await) {
+    if mcp_servers.is_empty() || agent.agent().handshake().mounts_http_mcp() {
         return Ok(());
     }
 
@@ -495,8 +503,8 @@ async fn rail_would_reach(
 /// Whatever went wrong, plus the one actionable thing the agent said at the
 /// handshake. A logged-out agent answers `session/new` with an internal error
 /// and puts the instruction in `authMethods`, where nobody was looking.
-async fn with_auth_hint(agent: &Arc<Agent>, error: String) -> String {
-    match auth_hint(&agent.handshake().await) {
+fn with_auth_hint(agent: &Arc<Running>, error: String) -> String {
+    match agent.agent().handshake().auth_hint() {
         Some(hint) => format!("{error} — this agent offers: {hint}"),
         None => error,
     }
@@ -511,18 +519,32 @@ async fn agent_load_session(
     name: Option<String>,
     session_id: String,
     cwd: String,
-    mcp_servers: Option<Value>,
+    mcp_servers: Option<Vec<Value>>,
+    // Whether the history the agent replays is wanted. It is not, for a resume
+    // — the room already shows it — and it is the whole point when a
+    // transcript is being taken (#124).
+    replay: Option<bool>,
 ) -> Result<Value, String> {
     let agent = running(&state, name.clone()).await?;
-    let mcp_servers = mcp_servers.unwrap_or(json!([]));
-    rail_would_reach(&agent, &name, &mcp_servers).await?;
+    let mcp_servers = mcp_servers.unwrap_or_default();
+    rail_would_reach(&agent, &name, &mcp_servers)?;
 
-    agent
-        .request(
-            "session/load",
-            json!({ "sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers }),
-        )
+    let mut opts = SessionOpts::default().cwd(&cwd);
+    opts.mcp_servers = mcp_servers;
+    if replay.unwrap_or(false) {
+        opts = opts.replaying();
+    }
+    let session = agent
+        .agent()
+        .load_session(&session_id, opts)
         .await
+        .map_err(|e| with_auth_hint(&agent, e.to_string()))?;
+    let options = session.options().await;
+    agent.remember(session).await;
+    Ok(json!({
+        "sessionId": session_id,
+        "configOptions": options.iter().map(|o| o.to_json()).collect::<Vec<_>>(),
+    }))
 }
 
 #[tauri::command]
@@ -530,22 +552,26 @@ async fn agent_new_session(
     state: State<'_, AgentState>,
     name: Option<String>,
     cwd: String,
-    mcp_servers: Option<Value>,
+    mcp_servers: Option<Vec<Value>>,
 ) -> Result<Value, String> {
     let agent = running(&state, name.clone()).await?;
-    let mcp_servers = mcp_servers.unwrap_or(json!([]));
-    rail_would_reach(&agent, &name, &mcp_servers).await?;
+    let mcp_servers = mcp_servers.unwrap_or_default();
+    rail_would_reach(&agent, &name, &mcp_servers)?;
 
-    match agent
-        .request(
-            "session/new",
-            json!({ "cwd": cwd, "mcpServers": mcp_servers }),
-        )
+    let mut opts = SessionOpts::default().cwd(&cwd);
+    opts.mcp_servers = mcp_servers;
+    let session = agent
+        .agent()
+        .new_session(opts)
         .await
-    {
-        Ok(result) => Ok(result),
-        Err(error) => Err(with_auth_hint(&agent, error).await),
-    }
+        .map_err(|e| with_auth_hint(&agent, e.to_string()))?;
+    let id = session.id().to_string();
+    let options = session.options().await;
+    agent.remember(session).await;
+    Ok(json!({
+        "sessionId": id,
+        "configOptions": options.iter().map(|o| o.to_json()).collect::<Vec<_>>(),
+    }))
 }
 
 /// Change one of the session's options — the model, the mode, whatever the
@@ -560,12 +586,15 @@ async fn agent_set_config(
     value: String,
 ) -> Result<Value, String> {
     let agent = running(&state, name).await?;
-    agent
-        .request(
-            "session/set_config_option",
-            json!({ "sessionId": session_id, "configId": config_id, "value": value }),
-        )
+    let options = agent
+        .session(&session_id)
+        .await?
+        .set_config(&config_id, &value)
         .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({
+        "configOptions": options.iter().map(|o| o.to_json()).collect::<Vec<_>>(),
+    }))
 }
 
 /// Send a turn. What the room knows, and what was just said in it, are prepended
@@ -589,12 +618,16 @@ async fn agent_prompt(
         }
     }
     body.push_str(&text);
+    // The run's own summary — stop reason, token usage, vendor extras — is
+    // handed back verbatim: it is the caller's to record, not this bridge's to
+    // drop (#97).
     agent
-        .request(
-            "session/prompt",
-            json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": body }] }),
-        )
+        .session(&session_id)
+        .await?
+        .prompt(&body)
         .await
+        .map(|outcome| outcome.raw)
+        .map_err(|e| e.to_string())
 }
 
 /// Ask the agent for its own record of a session.
@@ -647,12 +680,12 @@ async fn agent_stop(state: State<'_, AgentState>, name: Option<String>) -> Resul
     match name {
         Some(name) => {
             if let Some(agent) = state.take(&name).await {
-                agent.shutdown().await;
+                agent.shutdown();
             }
         }
         None => {
             for agent in state.drain().await {
-                agent.shutdown().await;
+                agent.shutdown();
             }
         }
     }
@@ -664,7 +697,7 @@ async fn agent_stop(state: State<'_, AgentState>, name: Option<String>) -> Resul
 async fn running(
     state: &State<'_, AgentState>,
     name: Option<String>,
-) -> Result<Arc<Agent>, String> {
+) -> Result<Arc<Running>, String> {
     let name = match name {
         Some(name) => name,
         None => match state.names().await.as_slice() {
@@ -988,19 +1021,15 @@ mod the_agents_panel {
     use super::*;
     use std::time::{Duration, Instant};
 
-    async fn launched(name: &str) -> Arc<Agent> {
+    async fn launched(name: &str) -> Arc<Running> {
         let script =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-agent/agent.mjs");
-        Agent::launch(
+        Running::launch(
             name,
             "node",
             &[script.to_string_lossy().into_owned()],
-            // The clocks a person's agent is really given: nothing here waits
-            // on one, and a panel measured against a test's clock is a panel
-            // nobody has seen.
-            acp::Deadlines::default(),
-            // Nothing is listening in a test either; what these agents emit is
-            // asserted where the bridge is, not here.
+            // Nothing is listening in a test; what these agents emit is
+            // asserted where the client is, not here.
             |_event: &str, _payload: Value| {},
         )
         .await
@@ -1027,7 +1056,7 @@ mod the_agents_panel {
 
         // The process dies from outside — a crash, not this client's own stop —
         // so the only thing that can tell the panel is the reader noticing.
-        let pid = claude.pid().await.expect("a live agent has a pid");
+        let pid = claude.agent().pid().expect("a live agent has a pid");
         let killed = tokio::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .status()
@@ -1055,58 +1084,40 @@ mod the_agents_panel {
              second one nobody can address"
         );
 
-        opencode.shutdown().await;
+        opencode.shutdown();
     }
 }
 
 #[cfg(test)]
-mod the_path_logic_is_its_own_module {
-    //! The PATH-resolution subsystem lives in `src/path.rs`, and this file
-    //! keeps only its command surface (#279).
+mod the_protocol_is_not_spoken_here {
+    //! ACP itself is no longer this application's to speak (#312).
     //!
-    //! Read off the source, the way `what_the_commands_delegate` already
-    //! reads it: a module boundary is not behaviour a test can call — the
-    //! behaviour is pinned by the suites that travel with the functions —
-    //! and the source is the only place the boundary is written down. Every
+    //! The client, the process-group bookkeeping and the agent catalogue live
+    //! in `acp-client` / `acp-agents`, shared with the other products that
+    //! reach a local agent the same way, and the specs that pin every lesson
+    //! travel with them. What is left here is a window's bookkeeping.
+    //!
+    //! Read off the source, the way `what_the_commands_delegate` already reads
+    //! it: a dependency boundary is not behaviour a test can call, and a
+    //! second copy of a frame is exactly the thing that would not fail. Every
     //! needle is assembled at run time, because this module lives in one of
-    //! the files it scans: written out literally, the names below would read
-    //! as the very definitions the tests say must be gone.
+    //! the files it scans — written out literally, the strings below would
+    //! read as the very definitions they say must be gone.
 
-    /// The functions of the subsystem, every one of them.
-    const FUNCTIONS: &[&str] = &[
-        "user_path",
-        "asked_of_the_persons_shell",
-        "merged_path",
-        "path_env",
-        "directories",
-        "candidates",
-        "found",
-        "located",
-    ];
+    /// Fragments of the wire. One of these in this crate means a frame is
+    /// being built or read somewhere other than the client.
+    fn wire_fragments() -> Vec<String> {
+        vec![
+            ["json", "rpc"].concat(),
+            ["session", "/prompt"].concat(),
+            ["session", "/new"].concat(),
+            ["session", "/request_permission"].concat(),
+            ["protocol", "Version"].concat(),
+        ]
+    }
 
-    /// Its one constant: how long the person's shell has to answer.
-    const TIMEOUT_NAME: &str = "SHELL_ANSWERS_WITHIN";
-
-    /// The suites that pin the subsystem's behaviour, and every spec in
-    /// them. A move that loses one loses the reason some branch is shaped
-    /// the way it is.
-    const SUITES: &[&str] = &["resolution", "the_path_a_person_has"];
-    const SPECS: &[&str] = &[
-        "our_own_prefix_is_looked_in_before_the_path_and_is_the_only_one_we_add",
-        "an_agent_in_our_own_prefix_is_found_though_it_is_not_on_path",
-        "the_default_adapter_is_found_the_same_way_as_any_other",
-        "an_agent_the_person_already_has_is_theirs_and_not_ours",
-        "a_command_nobody_has_is_left_as_it_was_typed",
-        "a_command_given_as_a_path_is_that_path_and_nothing_else",
-        "a_failed_install_is_reported_with_the_end_of_what_it_said",
-        "what_an_install_said_is_not_cut_through_a_character",
-        "what_this_process_was_given_keeps_its_place_and_the_shell_only_adds",
-        "a_directory_this_process_already_had_is_not_added_twice",
-        "a_shell_that_said_nothing_leaves_the_path_exactly_as_it_was",
-        "the_answer_is_the_last_line_because_a_profile_prints_its_own",
-        "what_a_shell_says_is_only_believed_when_it_looks_like_a_path",
-        "an_install_runs_with_the_path_the_person_has",
-    ];
+    /// The resolution subsystem, which moved out whole.
+    const RESOLUTION: &[&str] = &["merged_path", "asked_of_the_persons_shell", "user_path"];
 
     fn source(file: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1116,8 +1127,8 @@ mod the_path_logic_is_its_own_module {
             .unwrap_or_else(|error| panic!("src/{file} should be part of this crate: {error}"))
     }
 
-    /// The commentary taken out — a name mentioned in a doc comment is not
-    /// a definition that stayed behind.
+    /// The commentary taken out — a name mentioned in a doc comment is not a
+    /// definition that stayed behind.
     fn code(file: &str) -> String {
         source(file)
             .lines()
@@ -1126,66 +1137,54 @@ mod the_path_logic_is_its_own_module {
             .join("\n")
     }
 
-    fn a_fn(name: &str) -> String {
-        format!("fn {name}(")
-    }
-
     #[test]
-    fn the_subsystem_lives_in_a_module_of_its_own() {
-        let module = code("path.rs");
-
-        for name in FUNCTIONS {
-            assert!(
-                module.contains(&a_fn(name)),
-                "`{name}` has not moved into src/path.rs"
-            );
+    fn no_frame_is_built_or_read_in_this_crate() {
+        for file in ["lib.rs", "acp.rs"] {
+            let text = code(file);
+            for fragment in wire_fragments() {
+                assert!(
+                    !text.contains(&fragment),
+                    "src/{file} still speaks the protocol (`{fragment}`) — a second copy of a \
+                     frame is what drifts from the one the client's specs pin"
+                );
+            }
         }
-        assert!(
-            module.contains(&format!("const {TIMEOUT_NAME}")),
-            "`{TIMEOUT_NAME}` has not moved into src/path.rs"
-        );
-        assert!(
-            code("lib.rs").contains(&format!("mod {};", "path")),
-            "lib.rs does not declare the module, so nothing in it is compiled"
-        );
     }
 
     #[test]
-    fn nothing_of_it_stayed_behind() {
+    fn the_resolution_subsystem_left_with_its_specs() {
         let lib = code("lib.rs");
-
-        for name in FUNCTIONS {
+        for name in RESOLUTION {
             assert!(
-                !lib.contains(&a_fn(name)),
-                "`{name}` is still defined in lib.rs — a move that copies leaves two of them to \
-                 drift apart"
+                !lib.contains(&format!("fn {name}(")),
+                "`{name}` is still defined here — the crate answers where a command lives now"
             );
         }
         assert!(
-            !lib.contains(&format!("const {TIMEOUT_NAME}")),
-            "`{TIMEOUT_NAME}` is still defined in lib.rs"
+            !std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/path.rs")
+                .exists(),
+            "src/path.rs is still here, so there are two answers to where a binary is"
         );
     }
 
     #[test]
-    fn the_specs_travel_with_the_functions_they_pin() {
-        let module = code("path.rs");
-        let lib = code("lib.rs");
+    fn both_crates_are_depended_on_by_tag() {
+        // By tag, not by branch: three repositories with three release rhythms
+        // must not break on each other.
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+        )
+        .expect("this crate has a manifest");
 
-        for suite in SUITES {
+        for crate_name in ["acp-client", "acp-agents"] {
+            let line = manifest
+                .lines()
+                .find(|line| line.starts_with(crate_name))
+                .unwrap_or_else(|| panic!("{crate_name} should be a dependency"));
             assert!(
-                module.contains(&format!("mod {suite}")),
-                "`{suite}` did not move with what it pins"
-            );
-            assert!(
-                !lib.contains(&format!("mod {suite}")),
-                "`{suite}` is still in lib.rs"
-            );
-        }
-        for spec in SPECS {
-            assert!(
-                module.contains(&a_fn(spec)),
-                "the move lost `{spec}` — none are rewritten, none deleted"
+                line.contains("tag = "),
+                "{crate_name} must be pinned by tag, not tracked on a branch: {line}"
             );
         }
     }
@@ -1194,43 +1193,16 @@ mod the_path_logic_is_its_own_module {
     fn the_handle_stays_at_the_door() {
         // `tauri` here has no `test` feature, so there is no mock app: a
         // function that takes the handle is one no spec can reach. The two
-        // wrappers keep the handle in this file, and the module they call
-        // into never sees it.
+        // wrappers keep the handle in this file, and the crate they call into
+        // never sees it.
         let lib = code("lib.rs");
         assert!(
-            lib.contains(&a_fn("resolve")),
-            "`resolve` should stay in lib.rs as the thin wrapper over the module"
+            lib.contains("fn resolve("),
+            "`resolve` should stay in lib.rs as the thin wrapper over the crate"
         );
         assert!(
-            lib.contains(&a_fn("places")),
-            "`places` should stay in lib.rs as the thin wrapper over the module"
-        );
-
-        let module = code("path.rs");
-        assert!(
-            !module.contains("AppHandle"),
-            "path.rs takes an `AppHandle`, which makes it exactly as unreachable for a spec as \
-             the file it left"
-        );
-        assert!(
-            !module.contains(&format!("{}::", "tauri")),
-            "path.rs consumes std only — anything of tauri's belongs in lib.rs"
-        );
-    }
-
-    #[test]
-    fn the_reasoning_moved_with_the_code() {
-        // Raw source, comments included, because the reasoning IS the
-        // comments: why our own prefix is looked in first (#120) and why the
-        // person's shell is asked for their PATH (#240).
-        let module = source("path.rs");
-        assert!(
-            module.contains("#120"),
-            "the #120 reasoning did not move with the code it explains"
-        );
-        assert!(
-            module.contains("#240"),
-            "the #240 reasoning did not move with the code it explains"
+            lib.contains("fn places("),
+            "`places` should stay in lib.rs as the thin wrapper over the crate"
         );
     }
 }

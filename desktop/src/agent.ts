@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, translateAcp, type AgentDef, type Asked, type ConfigOption, type TurnOutcome, type TurnProduced, type Update } from "./rules";
+import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, updateOf, type AgentDef, type Asked, type ConfigOption, type TurnOutcome, type TurnProduced, type Update } from "./rules";
 import { stateOf as stateOfCommand, type AgentState } from "./agents/catalog";
 export type { Update };
 
@@ -198,7 +198,7 @@ export class Agents {
     if (!cwd) return null;
     const collector = await this.collect(sessionId);
     try {
-      await invoke("agent_load_session", { name, sessionId, cwd, mcpServers: [] });
+      await invoke("agent_load_session", { name, sessionId, cwd, mcpServers: [], replay: true });
       const heard = collector.stop();
       return heard.length ? transcriptOf(sessionId, new Date().toISOString(), heard) : null;
     } catch {
@@ -330,23 +330,38 @@ export class Agents {
 
   private async dispatch() {
     this.dispatching ??= (async () => {
-      await listen<any>("acp://notify", (ev) => {
-        const update = translateAcp(ev.payload);
+      // One stream, three destinations. The bridge tags every event with its
+      // session and its agent, so the routing that used to need two listeners
+      // and a parser is a switch (#312).
+      await listen<any>("acp://event", (ev) => {
+        const payload = ev.payload;
+
+        if (payload?.kind === "closed") {
+          const name = typeof payload.agent === "string" ? payload.agent : undefined;
+          if (name) this.dropped(name);
+          for (const handler of this.closing) {
+            handler({ name, diagnostics: payload.diagnostics ?? [] });
+          }
+          return;
+        }
+
+        if (payload?.kind === "permission") {
+          const asked = permissionAsked(payload);
+          if (!asked) return;
+          const to = asked.sessionId ? this.asking.get(asked.sessionId) : undefined;
+          if (to) to(asked);
+          // Not dropped. The agent is blocked on this and always will be, and
+          // a question nobody can see is the hang #92 exists to make visible.
+          else this.unclaimed("permission request", asked.sessionId, payload);
+          return;
+        }
+
+        const update = updateOf(payload);
         if (!update) return;
-        const session = sessionOf(ev.payload);
+        const session = sessionOf(payload);
         const to = session ? this.updating.get(session) : undefined;
         if (to) to(update);
-        else this.unclaimed("update", session, ev.payload);
-      });
-
-      await listen<any>("acp://ask", (ev) => {
-        const asked = permissionAsked(ev.payload);
-        if (!asked) return;
-        const to = asked.sessionId ? this.asking.get(asked.sessionId) : undefined;
-        if (to) to(asked);
-        // Not dropped. The agent is blocked on this and always will be, and a
-        // question nobody can see is the hang #92 exists to make visible.
-        else this.unclaimed("permission request", asked.sessionId, ev.payload);
+        else this.unclaimed("update", session, payload);
       });
     })();
     return this.dispatching;
@@ -391,13 +406,18 @@ export class Agents {
   /// Restarting is the person's to ask for. An agent that respawns itself under
   /// somebody's credentials without being asked is what #69 was careful not to
   /// do with updates.
-  onClosed(handler: (e: { name?: string; diagnostics: string[] }) => void) {
-    return listen<any>("acp://closed", (ev) => {
-      const name = typeof ev.payload?.name === "string" ? ev.payload.name : undefined;
-      if (name) this.dropped(name);
-      handler({ name, diagnostics: ev.payload?.diagnostics ?? [] });
-    });
+  async onClosed(handler: (e: { name?: string; diagnostics: string[] }) => void) {
+    await this.dispatch();
+    this.closing.push(handler);
+    return () => {
+      const at = this.closing.indexOf(handler);
+      if (at >= 0) this.closing.splice(at, 1);
+    };
   }
+
+  /// Who wants to hear that an agent stopped. A list rather than a listener of
+  /// its own: everything the agent says now arrives on one stream.
+  private closing: Array<(e: { name?: string; diagnostics: string[] }) => void> = [];
 
   /// Forget an agent that is no longer running: its name, its sessions and the
   /// options that belonged to them. A session id outliving its process is a

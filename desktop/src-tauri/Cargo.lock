@@ -3,6 +3,23 @@
 version = 4
 
 [[package]]
+name = "acp-agents"
+version = "0.2.3"
+source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.3#0fbcb466401c70f33afeddf789ecfc2f86df3ff6"
+
+[[package]]
+name = "acp-client"
+version = "0.2.3"
+source = "git+https://github.com/farol-team/acp-agents?tag=v0.2.3#0fbcb466401c70f33afeddf789ecfc2f86df3ff6"
+dependencies = [
+ "libc",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5137,6 +5154,8 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workroom-desktop"
 version = "0.1.0"
 dependencies = [
+ "acp-agents",
+ "acp-client",
  "base64 0.22.1",
  "serde",
  "serde_json",
