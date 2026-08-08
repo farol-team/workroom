@@ -832,7 +832,11 @@ $("signin-provider").addEventListener("click", async () => {
   try {
     const token = await platform.signIn(
       import.meta.env.VITE_WORKROOM_SERVER ?? "http://127.0.0.1:3000");
-    if (!token) throw new Error("this build signs in through the browser it is already in.");
+    // No shell to sign in through means this build is already in a browser, which
+    // signs in by leaving and coming back (#306). The redirect is the last thing
+    // this handler does — the page it lands on is a new one.
+    if (!token) { window.location.assign("/auth/openid_connect?return_to=web"); return; }
+
     api.useToken(token);
     signedInThroughBrowser = true;
     $<HTMLDialogElement>("signin").close();
@@ -889,17 +893,29 @@ reportTrouble((message) => { say(message); });
 /// one catch this replaced called all of them "cannot reach the server".
 async function boot() {
   const dialog = $<HTMLDialogElement>("signin");
-  const how = await api.methods().catch(() => ({ development: true, provider: false, version: undefined }));
-  $("signin-provider-block").hidden = !how.provider;
-  $("signin-dev").hidden = !how.development;
-  $("signin-none").hidden = how.provider || how.development;
 
-  dialog.showModal();
-  await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
+  // Asked before the dialog, not after it. A page that came back from the provider
+  // is already signed in — the cookie says so — and putting a sign-in box in front
+  // of somebody who just signed in is the room asking a question it knows the
+  // answer to (#306). Null is the ordinary answer and costs one request.
+  const already = await api.session().catch(() => null);
+
+  // Asked either way: the dialog is what a session makes unnecessary, but the
+  // workspace's version is what the drift notice reads at the end of boot.
+  const how = await api.methods().catch(() => ({ development: true, provider: false, version: undefined }));
+  if (!already) {
+    $("signin-provider-block").hidden = !how.provider;
+    $("signin-dev").hidden = !how.development;
+    $("signin-none").hidden = how.provider || how.development;
+
+    dialog.showModal();
+    await new Promise<void>((r) => dialog.addEventListener("close", () => r(), { once: true }));
+  }
 
   let user;
   try {
-    ({ user } = signedInThroughBrowser
+    ({ user } = already ? { user: { name: already.name } }
+      : signedInThroughBrowser
       ? await api.whoAmI()
       : await api.signIn($<HTMLInputElement>("email").value.trim()));
   } catch (err) {

@@ -5,6 +5,10 @@
 class SessionsController < ActionController::Base
   skip_forgery_protection
 
+  # Named here because two controllers read it and one clears it, and a cookie name
+  # spelled three times is a cookie that will be spelled two ways.
+  COOKIE = :workroom_token
+
   # A native application cannot receive a redirect the way a website can, so it
   # listens on the loopback interface and tells us where (RFC 8252). Remembered
   # before the provider is visited, because the provider brings back nothing of
@@ -12,6 +16,10 @@ class SessionsController < ActionController::Base
   def start
     session[:return_port] = loopback_port(params[:return_port])
     session[:return_state] = params[:state].to_s.first(64).presence
+    # Which ending this sign-in gets, recorded by the client that started it. Not
+    # sniffed from a user agent afterwards: a guess about a header is a guess, and
+    # the thing being guessed about is where somebody's token is handed.
+    session[:return_to_web] = params[:return_to] == "web"
     redirect_to "/auth/openid_connect", allow_other_host: false
   end
 
@@ -84,6 +92,7 @@ class SessionsController < ActionController::Base
 
     port = session.delete(:return_port)
     state = session.delete(:return_state)
+    return land_in_the_room(membership) if session.delete(:return_to_web)
     return render(plain: handoff(membership)) unless port
 
     # Only ever the loopback interface, and only ever a port this server itself
@@ -98,6 +107,29 @@ class SessionsController < ActionController::Base
   end
 
   private
+
+  # A browser has an address to come back to — that is what redirects are. What it
+  # must not come back carrying is the token: a url is a thing that gets logged by
+  # every proxy on the way, kept in history, and pasted into chat windows.
+  #
+  # So the token travels in a cookie script cannot read, and the page asks the
+  # server for it (`GET /api/v1/auth/session`) once it has loaded. httpOnly is the
+  # whole point: an injected script can make requests as this person either way, but
+  # it cannot take the credential somewhere else and keep using it after the tab is
+  # closed.
+  def land_in_the_room(membership)
+    cookies[COOKIE] = {
+      value: membership.api_token,
+      httponly: true,
+      # Lax, not Strict: arriving here *is* a cross-site navigation — the identity
+      # provider sent the browser — and Strict would refuse to send the cookie on
+      # exactly the request that follows a sign-in.
+      same_site: :lax,
+      secure: request.ssl?,
+      path: "/"
+    }
+    redirect_to "/", allow_other_host: false
+  end
 
   # A different sentence from `failure`, because it is a different fact: the
   # provider vouched for this person and the workspace said no. What the person

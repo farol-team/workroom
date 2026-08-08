@@ -76,6 +76,30 @@ export class Api {
     return r;
   }
 
+  /// The token a browser's httpOnly cookie carries (#306). The page cannot read
+  /// that cookie — that is what makes it worth having — so it asks, and keeps the
+  /// answer in this object and nowhere else. `credentials: "include"` because the
+  /// cookie is the entire request; there is no bearer header to send yet.
+  ///
+  /// Null rather than a throw: not being signed in is the ordinary state of a page
+  /// somebody just opened.
+  async session(): Promise<{ token: string; name: string } | null> {
+    const res = await fetch(`${this.base}/api/v1/auth/session`, { credentials: "include" });
+    if (!res.ok) return null;
+
+    const said = await res.json();
+    this.token = said.token;
+    return said;
+  }
+
+  /// The cookie is the whole credential, so this is the whole sign-out. Dropping the
+  /// token here alone would be undone by a reload.
+  async signOut(): Promise<void> {
+    await fetch(`${this.base}/api/v1/auth/session`,
+                { method: "DELETE", credentials: "include" }).catch(() => {});
+    this.token = "";
+  }
+
   /// Who the token in hand belongs to.
   whoAmI() {
     return this.call<{ user: { id: number; email: string; name: string } }>("/me");

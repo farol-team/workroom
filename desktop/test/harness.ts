@@ -66,6 +66,9 @@ export function aServer(over: Partial<ApiSurface> = {}): ApiSurface {
     methods: ok({ development: true, provider: false, version: "0.1.0" }),
     signIn: ok({ token: "tok", user: { id: 1, email: "alice@farol.run", name: "Alice" } }),
     whoAmI: ok({ user: { id: 1, email: "alice@farol.run", name: "Alice" } }),
+    // No cookie by default: the ordinary state of a page somebody just opened.
+    session: ok(null),
+    signOut: ok(undefined),
     workspaces: ok([]),
     channels: ok([ channel ]),
     channel: ok({ ...channel, messages: [ said ] }),

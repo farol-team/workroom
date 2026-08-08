@@ -1003,3 +1003,42 @@ describe("the people surfaces, on their own", () => {
     expect(deps.addMember).not.toHaveBeenCalled();
   });
 });
+
+// A browser that came back from the provider (#306). The token is in a cookie the
+// page cannot read, so the page asks for it — and if it gets one, there is nothing
+// left to sign in to.
+describe("signing in from a browser", () => {
+  test("a session the cookie already carries opens the room without a dialog", async () => {
+    const server = aServer({ session: vi.fn(async () => ({ token: "from-cookie", name: "Alice" })) });
+    const shown = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+
+    await openTheClient({ server });
+
+    expect(server.session).toHaveBeenCalled();
+    expect(server.signIn).not.toHaveBeenCalled();
+    expect(shown).not.toHaveBeenCalled();
+    expect(el("channel-name").textContent).toBe("# meetings");
+    expect(el("who").textContent).toBe("Alice");
+    shown.mockRestore();
+  });
+
+  test("the token is never written anywhere a later page could read it", async () => {
+    const server = aServer({ session: vi.fn(async () => ({ token: "from-cookie", name: "Alice" })) });
+
+    await openTheClient({ server });
+
+    // The whole reason the cookie is httpOnly is that a credential in storage
+    // outlives the tab and is readable by anything injected into the page.
+    expect(JSON.stringify(localStorage)).not.toContain("from-cookie");
+    expect(JSON.stringify(sessionStorage)).not.toContain("from-cookie");
+  });
+
+  test("no cookie still shows the dialog, which is how everybody else signs in", async () => {
+    const shown = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+
+    await openTheClient({ server: aServer() });
+
+    expect(shown).toHaveBeenCalled();
+    shown.mockRestore();
+  });
+});

@@ -19,6 +19,10 @@ Rails.application.routes.draw do
     namespace :v1 do
     post "auth", to: "auth#create"
     get  "auth/methods", to: "auth#methods_available", as: :auth_methods
+    # A page in a browser asking what its httpOnly cookie carries (#306), and
+    # giving it up again.
+    get    "auth/session", to: "auth#session", as: :auth_session
+    delete "auth/session", to: "auth#destroy_session"
     get  "me", to: "auth#me", as: :me
 
     # One MCP endpoint per channel — the channel in the url is the scope.
@@ -81,4 +85,22 @@ Rails.application.routes.draw do
     post "runs/:id/messages", to: "runs#message", as: :run_messages
   end
     end
+
+  # Last, and constrained. The router is in the page, so a path only the page knows
+  # about has to come back as the page — but `/api` and `/auth` belong to clients
+  # that need a real answer, and a 200 with an html body is the failure where a
+  # client parses a login screen as an empty channel list and shows an empty room.
+  #
+  # Constrained on the path, not on `Accept`. A browser navigation does send
+  # `text/html`, so negotiating would work — right up to the client that sends
+  # `*/*`, where the page becomes a 404 and only in production. The path is what
+  # this decision is actually about.
+  #
+  # A dotted last segment is an asset, and a missing one must stay missing: a
+  # request for a hashed bundle that is no longer there has to fail as a 404, not
+  # arrive as html the browser then tries to parse as javascript.
+  get "(*path)", to: "web#show", constraints: ->(req) {
+    !req.path.start_with?("/api", "/auth", "/up", "/cable") &&
+      !File.basename(req.path).include?(".")
+  }
 end
