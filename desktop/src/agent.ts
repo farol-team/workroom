@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { forget, keysOf, mcpServersFor, type ContextStore, permissionAsked, recall, remember, sessionKey, sessionOf, transcriptName, transcriptOf, updateOf, type AgentDef, type Asked, type ConfigOption, type TurnOutcome, type TurnProduced, type Update } from "./rules";
 import { stateOf as stateOfCommand, type AgentState } from "./agents/catalog";
+import type { AgentRuntime } from "./agent-runtime";
 export type { Update };
 
 export interface RailConfig { url: string; token: string }
@@ -19,7 +20,7 @@ export interface InstallResult {
   stderrTail: string;
 }
 
-export class Agents {
+export class Agents implements AgentRuntime {
   private sessions = new Map<string, string>();        // agent+channel -> ACP session id
   private configs = new Map<string, ConfigOption[]>(); // agent+channel -> its options
   private dirs = new Map<string, string>();            // agent+channel -> where it works
