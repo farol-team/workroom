@@ -75,3 +75,32 @@ agents, always.
 Snapshots are one day old at research time and all three projects move fast.
 Claims about openwork's enterprise tier and qm's sandbox backends come from
 their docs and source, not from running them.
+
+## Addendum, 2026-08-09: WorkRoom moved on this spike's headline axis
+
+Nothing about the other three projects has been re-checked; what changed is our
+own column. #308 added a hosted execution mode, so three claims above are
+superseded and should be read as of 2026-08-01:
+
+- the table's **"Where the agent runs | Only locally — a defended rule"** is now
+  *local by default (`users.execution_mode`), hosted when the person chooses it*;
+- **"defends the opposite pole on execution: local agents, always"** in the
+  one-paragraph version no longer holds;
+- **"qm solves (2) at the cost of (1)"** still holds, but the axis it turns on
+  has moved.
+
+The position this leaves is arguably stronger than the one the spike described,
+and worth stating precisely because it is the comparison a reader came for:
+WorkRoom is now the only one of the four that offers **both** placements, and
+the distinction from qm shifts from *where the process sits* to *whose key pays
+for it*. qm holds a server-side keychain, plaintext in use, for the org. Our
+hosted mode holds one credential per user, encrypted at rest, never readable
+back, deleted on switching away — the pooled bill and pooled rate limit that
+Article P2 exists to prevent are prevented by a unique index rather than by
+requiring a laptop. And `qm-sandbox.md`, filed here as the anti-position's
+consequence and therefore unimportable, becomes partly live: its trust-boundary
+argument (lines 127–133) applies to any server-side execution. The answer #308
+gives is that there is nothing to contain — no folder, no shell, no git history,
+a capability surface of exactly two rail tools — which holds exactly as long as
+the rail runs nothing with effects outside the room. #302/#309 (proposed, not
+run) is that condition, and it is the one to keep under test.

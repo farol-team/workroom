@@ -1,11 +1,12 @@
 # WorkRoom
 
-**A shared workspace where every person brings their own local agent, and the room remembers.**
+**A shared workspace where every person brings their own agent, and the room remembers.**
 
 Channels are domains of work — `meetings`, `marketing`, `support`. You work in a channel
 alongside your own agent, running on your own machine. A colleague joins the same channel
 with *their* agent and continues where you stopped, because what the room knows is held by
-the room, not by anyone's agent.
+the room, not by anyone's agent. Somebody who has no machine to run one on can have the turn
+run on the server, on their own key — the room is never told which it was.
 
 > **Status: a running prototype.** `bin/prototype` brings the whole thing up. Channels,
 > live messages, a local agent in the room over ACP, a capability rail the agent reaches
@@ -14,14 +15,15 @@ the room, not by anyone's agent.
 
 ```
   Alice — local agent ──┐
-  Bob   — local agent ──┤  ACP
+  Bob   — local agent ──┤  ACP + MCP
   Dana  — local agent ──┼──────► WorkRoom
-                        │        channels · messages · artifacts
-                        │        identity · permissions · capability rail
-                        │                    │
-                        │                    ▼  MCP
-                        └──────────────► context database
-                                         memory + skills
+  Erin  — hosted turn ──┘        channels · messages · artifacts
+                                 identity · permissions
+                                 capability rail · memory gateway
+                                             │
+                                             ▼  HTTP
+                                       context database
+                                        memory + skills
 ```
 
 ## How this is developed

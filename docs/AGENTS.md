@@ -12,15 +12,22 @@ not need rebuilding when a better one appears.
 
 The client speaks **ACP** over stdio to whatever agent the person has configured.
 
-## Why local is not a deployment detail
+## Why whose-key-pays is not a deployment detail
 
 **Inference is paid for by the person, not the room.** Each agent uses its owner's
 credentials and their own model subscription, so the organization never carries a central
 inference bill and never queues behind a shared quota. Rate limits are per person, which
 means the workspace cannot become the bottleneck no matter how many people are working.
 
-The server sees token counts because runs report them — that is reporting, not billing. It
-never sees a model credential, and there is nothing to leak if it is compromised.
+The server sees token counts because runs report them — that is reporting, not billing.
+
+Where the agent runs is the person's choice and does not change any of that (#308).
+Running it yourself is the default and the stronger position: the server never sees a model
+credential at all, so there is nothing to leak if it is compromised. Choosing a hosted turn
+trades that one property away and keeps the rest — the key is still one person's, encrypted
+at rest, never readable back through any endpoint, and deleted the moment they switch back.
+What is not on offer, in either mode, is a workspace key: that is the shared bill and the
+shared quota this section is about, and no code path can obtain one.
 
 The trade is real and worth stating: the organization gains visibility into spend but not a
 single lever over it. An organization that wants central control of model spend wants a

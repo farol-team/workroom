@@ -3,27 +3,33 @@
 ## Components
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Desktop client (Tauri)                                  │
-│  channels · messages · artifacts · session control       │
-└──────┬────────────────────────────────┬──────────────────┘
-       │ HTTPS + WebSocket              │ ACP over stdio
-       ▼                                ▼
-┌──────────────────────────────┐   ┌─────────────────────┐
-│  WorkRoom server (Rails)     │   │  Local agent        │
-│  identity · channels         │   │  runs on the user's │
-│  messages · artifacts        │   │  own machine        │
-│  permissions                 │   └────┬───────────┬────┘
-│  capability rail ◄───────────┼── MCP ─┘           │
-│                              │                    │
-└──────────────┬───────────────┘                    │ MCP
-               │ HTTP                               │
-               ▼                                    │
-┌──────────────────────────────┐                    │
-│  Context database            │◄───────────────────┘
-│  memory · skills · artifacts │
-│  addressed by URI            │
-└──────────────────────────────┘
+┌────────────────────────────────────┐   ┌────────────────────────┐
+│  Desktop client (Tauri)            │   │  Browser               │
+│  channels · messages · artifacts   │   │  channels · messages   │
+│  session control                   │   │  artifacts             │
+└──────┬──────────────────────┬──────┘   └───────────┬────────────┘
+       │ HTTPS + WebSocket    │ ACP over stdio       │ HTTPS + WebSocket
+       │                      ▼                      │
+       │            ┌─────────────────────┐          │
+       │            │  Local agent        │          │
+       │            │  runs on the user's │          │
+       │            │  own machine        │          │
+       │            └──────────┬──────────┘          │
+       │                       │ MCP                 │
+       ▼                       ▼                     ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  WorkRoom server (Rails)                                         │
+│  identity · channels · messages · artifacts · permissions        │
+│  capability rail · memory gateway                                │
+│  hosted runner — a turn for a person who brought no machine      │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ HTTP
+                           ▼
+              ┌──────────────────────────────┐
+              │  Context database            │
+              │  memory · skills · artifacts │
+              │  addressed by URI            │
+              └──────────────────────────────┘
 ```
 
 ## Seams
@@ -33,24 +39,41 @@ Three protocols hold the system together. Nothing crosses a seam except through 
 | Protocol | Between | Carries |
 |---|---|---|
 | **ACP** | desktop ↔ local agent | control — who does the work |
-| **MCP** | agent ↔ capability rail, agent ↔ context database | capability — what can be done |
+| **MCP** | agent ↔ capability rail, agent ↔ memory gateway | capability — what can be done |
 | **HTTP / WebSocket** | client ↔ server | record — what happened |
 
 This is the one architectural rule worth defending strictly. As long as the boundaries speak
 only these three, any layer can be replaced without touching the others.
 
-The agent reaching the context database is the one crossing that was argued about and then
-allowed, on 2026-08-01, for as long as there is one workspace. It speaks MCP, so the seam's
-vocabulary survives; what does not is replaceability, because that store's tool names are now
-part of what agents are written against. Two things follow, and both are load-bearing:
+The agent reaching the context database was the one crossing argued about and then allowed,
+on 2026-08-01, at the cost of replaceability — that store's tool names became part of what
+agents were written against. The concession was **withdrawn on 2026-08-08** (#297, #298). An
+agent's `context` MCP server is now the server's own **memory gateway**
+(`POST /api/v1/memory/mcp`), authenticated by a scope token minted for one channel and one
+person rather than by the store's account key. Same MCP, same vocabulary, one channel wide:
 
-- the store isolates **accounts**, not channels, so an agent's key reaches every channel of
-  its workspace. `docs/spikes/openviking-isolation.md` is the measurement.
-- an agent is **asked** in its prompt to stay inside its channel's subtree. That is a
-  convention. Nothing enforces it, and nothing in the server may be written as though
-  something did.
+- the gateway forwards reads whose every `viking://` falls inside the token's prefixes, and
+  refuses the rest before the store hears them. Everything not named is refused by omission,
+  so a tool the store grows tomorrow does not arrive working.
+- writes do not pass at all. An agent records through the rail, which stamps the run and the
+  author on the entry; a write arriving at the gateway would carry neither.
+
+The store still isolates **accounts**, not channels — `docs/spikes/openviking-isolation.md`
+is the measurement, and it is why the gateway holds the account key and the agent does not.
+`Memory::Boundary` additionally **asks** the agent in its prompt to stay in its subtree. That
+one is a convention, it is now a courtesy rather than the boundary, and nothing in the server
+may be written as though a sentence in a prompt stopped anything.
+
+In a hosted turn there is no ACP, because there is no separate agent process to speak it to:
+`Turn::Run` calls the provider directly and the two rail tools are the whole tool surface.
+The seam is not bypassed, it is absent — control is the job, and what the room sees still
+arrives as record over HTTP/WebSocket.
 
 ## Flow of a turn
+
+A turn runs where the person chose (`users.execution_mode`, `own` by default). Steps 3–8
+below are the `own` path, which is the one a fresh install takes; the hosted path is after it.
+The room is never told which produced a turn — a turn is a turn.
 
 1. A person posts a message in a channel.
 2. The server records it and broadcasts over Action Cable.
@@ -68,6 +91,20 @@ part of what agents are written against. Two things follow, and both are load-be
    through the rail (#54). There is no approval step and no queue: provenance is mandatory
    and a wrong entry is superseded rather than gated. See [MEMORY.md](MEMORY.md).
 
+**Hosted (`execution_mode: "hosted"`, #308).** Steps 1, 2, 5, 7 and 9 are unchanged; the
+middle is. There is no client holding the turn open, so the server enqueues `HostedTurnJob`
+— a turn is minutes and a request is not, and a browser tab that closes must not end one.
+`Turn::Run` then converses with the provider directly, bounded at `ROUNDS = 12`, using the
+person's own credential and the rail's two tools as its entire tool surface. Steps 3, 4 and 6
+collapse into that loop, and step 8 has nothing to offer: there is no working folder.
+
+Nothing here is sandboxed, and that is the design rather than an omission. The desktop agent
+has a folder, a shell and a git history because a laptop has those; a browser has none of
+them, so this is not that agent moved to a server. There is no filesystem to escape and no
+process to contain. What is left is contained already — the rail is one channel's (#297), a
+capability that changes something outside is proposed rather than run (#302, #309), and
+row-level security is the boundary between workspaces.
+
 ## Where state lives
 
 | State | Home | Shared |
@@ -77,11 +114,18 @@ part of what agents are written against. Two things follow, and both are load-be
 | Run steps, cost, timings | Rails / PostgreSQL | yes |
 | Artifacts | Active Storage → S3 | yes |
 | Distilled knowledge, skills | context database | yes |
-| Agent session context window | the person's machine | **no** |
-| Credentials for the agent's own model | the person's machine | **no** |
+| Agent session context window | the person's machine, or the hosted turn that held it | **no** |
+| Credentials for the agent's own model | the person's machine, or `user_credentials` | **no** |
 
-The last two rows are the reason execution stays local, and the reason a colleague joining a
-channel is rehydrating rather than resuming.
+Neither of the last two rows is ever shared, and that is what makes a colleague joining a
+channel a rehydration rather than a resumption — the context window that did the work is gone
+either way, whichever machine held it.
+
+A credential reaches the server only when a person switched to the hosted mode, and it is
+held under Article P2's three conditions: exactly one per user (`null: false` plus a unique
+index on `[user_id, provider]` — the article's central clause written where the database
+enforces it), encrypted at rest, and never readable back through any endpoint. Switching back
+to `own` deletes it, because a key outliving the reason for it is the kind nobody notices.
 
 ## Why not event sourcing
 
@@ -112,5 +156,13 @@ uses.
 
 **No federation.** One organization, one deployment.
 
-**No agent hosting.** The server never runs an agent. If it did, it would need credentials,
-sandboxing, and queueing — three problems that do not exist when execution stays local.
+**No agent hosting** *(until 2026-08-08, #308)*. This section used to argue that a server
+running an agent would need credentials, sandboxing and queueing — three problems that do not
+exist when execution stays local. Two of the three were answered rather than avoided:
+credentials by Article P2's conditions above, queueing by Solid Queue in its own database.
+The third turned out not to apply, because the hosted runner is not the desktop agent moved
+to a server and has nothing to sandbox. What survives is the principle the rule was standing
+in for — no central credential, and therefore no shared bill and no shared rate limit — which
+is now enforced per user instead of by geography. Requiring a laptop was never the point; it
+was how the point used to be made, and it put the product out of reach of the companies it is
+for.

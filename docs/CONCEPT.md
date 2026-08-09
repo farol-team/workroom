@@ -27,9 +27,11 @@ conversations and what came out of them. `marketing` holds campaign work, positi
 and what has been tried. Each channel owns a region of the context database, and that
 region is what the room knows.
 
-Everyone brings **their own agent**, running locally on their own machine. Nothing is
-centralized about execution: your agent uses your credentials, your files, your model
-choice. What is centralized is the memory, the skills, and the record of what happened.
+Everyone brings **their own agent**, running on their own machine by default. Nothing is
+pooled about execution: your agent uses your credentials, your files, your model choice.
+Somebody who brought no machine can have the turn run on the server instead — still on their
+own credential, never a shared one. What is centralized is the memory, the skills, and the
+record of what happened.
 
 When you enter a channel, your agent is given what the room knows. When you finish, what
 was learned can be promoted back into the room. When a colleague enters the same channel
@@ -45,8 +47,10 @@ Binding to a protocol means the workspace outlives any particular agent.
 of work is the most valuable thing the system produces. It should live somewhere you
 control, in a form you can read, audit, and take with you.
 
-**Execution belongs to the person.** Local agents mean local credentials, local files, and
-no queue behind a shared service. It also means the workspace never becomes the bottleneck.
+**Execution belongs to the person.** Not to a shared account: one credential per person means
+no pooled bill and no pooled rate limit, and the workspace never becomes the bottleneck.
+On a laptop that also means local files and no queue behind a shared service, which is why it
+is the default — but the thing being defended is whose key pays, not which machine runs.
 
 **Channels give you scoping for free.** One concept serves as the memory scope, the
 permission boundary, the retrieval scope, and the unit of conversation. Systems that keep
@@ -54,8 +58,10 @@ those separate end up reconciling four models of who can see what.
 
 ## What this is not
 
-**Not a place where agents run.** Agents run on the machines of the people who own them.
-The workspace coordinates, records, and remembers.
+**Not a pool of agents.** An agent belongs to the person whose key answers for it, and runs
+on their machine unless they asked for a hosted turn. There is no fleet, no shared account,
+and nothing waiting in a queue behind other people's work. The workspace coordinates,
+records, and remembers.
 
 **Not a replacement for the tools you have.** Repositories, documents, and the systems the
 work touches stay where they are. They are sources; this is the layer that distils them
