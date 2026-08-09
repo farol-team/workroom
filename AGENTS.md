@@ -7,12 +7,12 @@ on it.
 
 ## Project overview
 
-**WorkRoom** is a shared workspace where every person brings their own local
-agent, and the room remembers. Channels are domains of work (`meetings`,
-`marketing`, `support`). Each person works in a channel alongside their own
-agent running on their own machine; a colleague joining the same channel with
-*their* agent continues where others stopped, because what the room knows is
-held by the room, not by anyone's agent.
+**WorkRoom** is a shared workspace where every person brings their own agent,
+and the room remembers. Channels are domains of work (`meetings`, `marketing`,
+`support`). Each person works in a channel alongside their own agent — running
+on their own machine, or hosted for a turn when they brought no machine; a
+colleague joining the same channel with *their* agent continues where others
+stopped, because what the room knows is held by the room, not by anyone's agent.
 
 Status: a running prototype. `bin/prototype` brings the whole thing up.
 
@@ -36,14 +36,19 @@ through them. This is the one architectural rule worth defending strictly.
 | Protocol | Between | Carries |
 |---|---|---|
 | **ACP** | desktop ↔ local agent | control — who does the work |
-| **MCP** | agent ↔ capability rail, agent ↔ context database | capability — what can be done |
+| **MCP** | agent ↔ capability rail, agent ↔ memory gateway | capability — what can be done |
 | **HTTP / WebSocket** | client ↔ server | record — what happened |
 
 Load-bearing design rules to keep in mind when changing code:
 
-- **Agents are local, always.** The server never executes an agent, never sees
-  a model credential. Each agent runs under its owner's credentials on their
-  machine ("Article P2" of `.claude/constitution.md`).
+- **Agent inference is paid for by the person, wherever it runs.** Local is the
+  default (`users.execution_mode`, default `own`) and the desktop client spawns
+  and owns its agent process (Article D2). A person with no machine may instead
+  choose a hosted turn, and then the server holds a credential under all three
+  of Article P2's conditions: exactly one per user, encrypted at rest, never
+  readable back. There is no workspace-wide or vendor key and no code path that
+  could obtain one — that is the whole of the prohibition. Do not write a check
+  that assumes either mode; the room is never told which produced a turn.
 - **One session per (user, agent, channel) triple.** Memory scope is the
   channel's scope; rehydration happens at session start.
 - **Scope is structural.** The capability rail is one MCP endpoint per

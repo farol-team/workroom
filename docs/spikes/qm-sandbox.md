@@ -145,3 +145,21 @@ bypassable command policy as known limitations. That is the price of
 centralized execution, paid continuously. WorkRoom's local-execution rule
 declines the entire bill; the transferable parts are the small, pure ones:
 queues, manifests, path translation, credential hygiene.
+
+## Addendum, 2026-08-09: the premise this spike was written against has moved
+
+"Agents are local, always" (line 5) was amended by #308 — local is now the
+default rather than the rule, and a hosted turn runs on the server. Read the
+"does not transfer" list above with that in mind. It still holds, but for a
+narrower reason than "there is no server-side execution": the hosted runner has
+no filesystem, no shell and no git history, and a capability surface of exactly
+two rail tools. There is no ambient authority to contain and no working tree to
+snapshot, so backends, per-scope volumes, egress enforcement and the four-box
+taxonomy answer a problem this design still does not have.
+
+What changes is that the first bullet is now a *conditional* rather than a
+structural fact. It holds while the rail executes nothing with effects outside
+the room — #302/#309 make such a capability a proposal a person decides on
+rather than something a turn performs. The day that stops being true, this
+spike's trust-boundary material becomes live and should be re-read as design
+input rather than as the anti-position's receipts.
