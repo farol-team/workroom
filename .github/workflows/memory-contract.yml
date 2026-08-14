@@ -56,24 +56,36 @@ jobs:
         working-directory: .
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
-          # The installer registers a systemd unit and then says "systemd is not
-          # running" — on this runner it never starts, so the line below is the
-          # only Ollama, and the bind address is ours to choose.
+
+          # Ollama must listen on every interface, not on loopback: the store
+          # reads the models from inside a container and arrives over the docker
+          # bridge, where a 127.0.0.1 listener refuses the connection. Bound to
+          # loopback the models are not slow, they are absent — and absence is
+          # silent here, because `search` returns nothing rather than raising.
+          # That is the whole of #123's nightly hour: eight retrieval cases,
+          # each spending the full OPENVIKING_PATIENCE to discover it.
           #
-          # It must be every interface. The store reads the models from inside a
-          # container and arrives over the docker bridge, where a listener bound
-          # to 127.0.0.1 refuses the connection. Bound to loopback the models are
-          # not slow, they are absent — and absence is silent: `search` returns
-          # nothing rather than raising, so the suite spends the full
-          # OPENVIKING_PATIENCE on each retrieval case discovering it (#123).
-          #
-          # The client keeps the default 127.0.0.1; only the server moves.
+          # The installer's own service is not a thing to configure, because it
+          # is not reliably a thing at all: this runner image said "systemd is
+          # not running" on the nightly of 2026-08-14 and started the unit
+          # normally that same evening. So whatever it started is stopped, and
+          # the Ollama this job uses is the one started here — same bind, same
+          # user, same model directory as the cache key above, on both images.
+          sudo systemctl stop ollama 2>/dev/null || true
+          sudo pkill -x ollama 2>/dev/null || true
+          for i in $(seq 1 30); do ss -tln | grep -q ':11434 ' || break; sleep 1; done
+
           (OLLAMA_HOST=0.0.0.0:11434 ollama serve >/tmp/ollama.log 2>&1 &)
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434 >/dev/null && break; sleep 1; done
-          # Kept rather than discarded to /dev/null: a serve that fails to bind
-          # says so here, instead of leaving a healthy-looking job that only
-          # fails an hour later in the contract.
-          curl -sf http://127.0.0.1:11434 >/dev/null || { cat /tmp/ollama.log; exit 1; }
+          # The log is kept rather than sent to /dev/null, and the bind address
+          # is asserted rather than assumed: answering on loopback proves only
+          # that some Ollama is up, which is exactly the reading that let a
+          # refused container connection look like a healthy job for eleven
+          # nightlies.
+          ss -tln | grep -qE '(0\.0\.0\.0|\*):11434 ' || {
+            echo "Ollama is not listening on every interface:"; ss -tln | grep 11434
+            cat /tmp/ollama.log; exit 1;
+          }
           ollama pull nomic-embed-text
           ollama pull qwen3:4b
 
