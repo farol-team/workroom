@@ -56,8 +56,24 @@ jobs:
         working-directory: .
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
-          (ollama serve &) 2>/dev/null
+          # The installer registers a systemd unit and then says "systemd is not
+          # running" — on this runner it never starts, so the line below is the
+          # only Ollama, and the bind address is ours to choose.
+          #
+          # It must be every interface. The store reads the models from inside a
+          # container and arrives over the docker bridge, where a listener bound
+          # to 127.0.0.1 refuses the connection. Bound to loopback the models are
+          # not slow, they are absent — and absence is silent: `search` returns
+          # nothing rather than raising, so the suite spends the full
+          # OPENVIKING_PATIENCE on each retrieval case discovering it (#123).
+          #
+          # The client keeps the default 127.0.0.1; only the server moves.
+          (OLLAMA_HOST=0.0.0.0:11434 ollama serve >/tmp/ollama.log 2>&1 &)
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434 >/dev/null && break; sleep 1; done
+          # Kept rather than discarded to /dev/null: a serve that fails to bind
+          # says so here, instead of leaving a healthy-looking job that only
+          # fails an hour later in the contract.
+          curl -sf http://127.0.0.1:11434 >/dev/null || { cat /tmp/ollama.log; exit 1; }
           ollama pull nomic-embed-text
           ollama pull qwen3:4b
 
@@ -70,6 +86,22 @@ jobs:
             curl -s -o /dev/null http://127.0.0.1:1933 && break
             sleep 2
           done
+
+      # Asserted from inside the store's own container, over the hop the store
+      # actually uses. The reachability this pins is what #123's first eleven
+      # nightlies lacked: unreachable models cost an hour of timeouts and read
+      # as flaky retrieval, so the one thing worth learning in ten seconds is
+      # whether the store can see them at all. No curl in python:3.12-slim.
+      - name: The models, from where the store sits
+        working-directory: .
+        run: |
+          docker compose --profile memory exec -T openviking python -c '
+          import sys, urllib.request
+          try:
+              urllib.request.urlopen("http://host.docker.internal:11434/api/tags", timeout=10)
+          except Exception as error:
+              sys.exit(f"the store cannot reach Ollama on the host: {error}")
+          '
 
       # One account per run: created here, dropped at the end. Per-case
       # accounts are forty create-and-poll round trips; the cross-case leak
