@@ -22,7 +22,10 @@ permissions:
 jobs:
   live-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Eight retrieval cases that may each wait out OPENVIKING_PATIENCE, on top
+    # of the pulls and the rest of the suite. The old 120 was chosen when the
+    # window was 420s; a wider window needs room to close.
+    timeout-minutes: 180
 
     services:
       postgres:
@@ -50,7 +53,7 @@ jobs:
       - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4
         with:
           path: ~/.ollama/models
-          key: ollama-nomic-embed-text-qwen3-0-6b
+          key: ollama-nomic-embed-text-qwen2-5-0-5b
 
       - name: Ollama, and the two models the store reads with
         working-directory: .
@@ -87,7 +90,7 @@ jobs:
             cat /tmp/ollama.log; exit 1;
           }
           ollama pull nomic-embed-text
-          ollama pull qwen3:0.6b
+          ollama pull qwen2.5:0.5b
 
       - name: The store, from the pinned image
         working-directory: .
@@ -96,12 +99,20 @@ jobs:
 
           # The example file is the laptop's, and the laptop is not two shared
           # cores. Only the summarizer is swapped, because only the summarizer
-          # is slow: on an idle eight-core box qwen3:4b spends 87s on a single
-          # one-sentence completion where qwen3:0.6b spends 10s, while the
-          # embedder answers in 1.8s and is left alone. Indexing runs several
-          # completions per entry — a ~4 KB .overview.md among them — so the 4b
-          # model put a written entry beyond OPENVIKING_PATIENCE (measured:
-          # 17m06s to become findable) and every retrieval case timed out.
+          # is slow — the embedder answers in 1.8s and is left alone.
+          #
+          # Indexing one entry, timed end to end against a live store with
+          # `wait: true`, on an idle eight-core box:
+          #
+          #   qwen3:4b      unfinished at 10m   (17m06s observed under load)
+          #   qwen3:0.6b               286s
+          #   qwen2.5:0.5b              99s
+          #
+          # The gap between the two small models is not size, it is thinking:
+          # qwen3 emits a reasoning trace before the answer, and on a 400-word
+          # overview that is 33s against 7s for the same model told not to.
+          # A summarizer has nothing to reason about, so the one that does not
+          # is the one to use.
           #
           # The contract is indifferent to which model: it asks that the store
           # compute the abstract, not that any particular one wrote it. Which
@@ -109,7 +120,7 @@ jobs:
           python3 - <<'PY'
           import json
           conf = json.load(open("ov.conf"))
-          conf["vlm"]["model"] = "qwen3:0.6b"
+          conf["vlm"]["model"] = "qwen2.5:0.5b"
           json.dump(conf, open("ov.conf", "w"), indent=2)
           PY
 
@@ -188,17 +199,27 @@ jobs:
         env:
           OPENVIKING_URL: http://127.0.0.1:1933
           OPENVIKING_API_KEY: ${{ steps.account.outputs.key }}
-          # A local summarizer on a shared runner still answers in seconds
-          # rather than milliseconds, and indexing is several of those per
-          # entry, so the window stays wide.
+          # 99s to index an entry on eight idle cores; this runner has two it
+          # shares, and the suite writes ahead of its own reads. 420s was
+          # inside that margin, which is how the third dispatch still failed
+          # after the model was already fast enough on paper.
           #
-          # It was widened to this once before, by #278, on the reading that
+          # It was widened to 420 once before, by #278, on the reading that
           # every retrieval failure was slowness. It was not: the store could
           # not reach the models at all, and no patience reaches a model that
-          # is not there. Slowness was real too, and is addressed where it
-          # lives — in the model the store summarizes with, not here.
-          OPENVIKING_PATIENCE: "420"
+          # is not there. Slowness was the second cause, not the first.
+          OPENVIKING_PATIENCE: "900"
         run: bin/rails test test/services/memory/
+
+      # The store's own account of the run, kept only when something went
+      # wrong. Three dispatches were spent inferring what the store was doing
+      # from the shape of the test failures, because this job could see the
+      # suite and never the thing it was testing. Retrieval failing is a claim
+      # about indexing, and indexing speaks here.
+      - name: What the store did
+        if: failure()
+        working-directory: .
+        run: docker compose --profile memory logs --no-color --tail 400 openviking
 
       - name: Drop the run's account
         if: always()
