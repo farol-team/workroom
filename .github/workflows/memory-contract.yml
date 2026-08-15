@@ -50,7 +50,7 @@ jobs:
       - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4
         with:
           path: ~/.ollama/models
-          key: ollama-nomic-embed-text-qwen3-4b
+          key: ollama-nomic-embed-text-qwen3-0-6b
 
       - name: Ollama, and the two models the store reads with
         working-directory: .
@@ -87,12 +87,32 @@ jobs:
             cat /tmp/ollama.log; exit 1;
           }
           ollama pull nomic-embed-text
-          ollama pull qwen3:4b
+          ollama pull qwen3:0.6b
 
       - name: The store, from the pinned image
         working-directory: .
         run: |
           cp ov.conf.ollama.example ov.conf
+
+          # The example file is the laptop's, and the laptop is not two shared
+          # cores. Only the summarizer is swapped, because only the summarizer
+          # is slow: on an idle eight-core box qwen3:4b spends 87s on a single
+          # one-sentence completion where qwen3:0.6b spends 10s, while the
+          # embedder answers in 1.8s and is left alone. Indexing runs several
+          # completions per entry — a ~4 KB .overview.md among them — so the 4b
+          # model put a written entry beyond OPENVIKING_PATIENCE (measured:
+          # 17m06s to become findable) and every retrieval case timed out.
+          #
+          # The contract is indifferent to which model: it asks that the store
+          # compute the abstract, not that any particular one wrote it. Which
+          # model is the environment's business, exactly as the patience is.
+          python3 - <<'PY'
+          import json
+          conf = json.load(open("ov.conf"))
+          conf["vlm"]["model"] = "qwen3:0.6b"
+          json.dump(conf, open("ov.conf", "w"), indent=2)
+          PY
+
           docker compose --profile memory up -d --build openviking
           for i in $(seq 1 60); do
             curl -s -o /dev/null http://127.0.0.1:1933 && break
@@ -168,9 +188,15 @@ jobs:
         env:
           OPENVIKING_URL: http://127.0.0.1:1933
           OPENVIKING_API_KEY: ${{ steps.account.outputs.key }}
-          # qwen3:4b on a two-core runner summarizes in minutes, not seconds.
-          # The second dispatch proved every retrieval failure was this and
-          # nothing else: 118 runs, and every miss a poll that gave up first.
+          # A local summarizer on a shared runner still answers in seconds
+          # rather than milliseconds, and indexing is several of those per
+          # entry, so the window stays wide.
+          #
+          # It was widened to this once before, by #278, on the reading that
+          # every retrieval failure was slowness. It was not: the store could
+          # not reach the models at all, and no patience reaches a model that
+          # is not there. Slowness was real too, and is addressed where it
+          # lives — in the model the store summarizes with, not here.
           OPENVIKING_PATIENCE: "420"
         run: bin/rails test test/services/memory/
 
