@@ -11,6 +11,12 @@ name: memory-contract
 # Nightly and on demand, never in the required checks: the model pulls and the
 # contract's own retrieval polls put it in a different budget class from the
 # two-minute `server-ci`.
+#
+# It runs in two halves — see the matrix. `contract` is the ordinary shape of
+# the suite and finishes in minutes; `retrieval` is the half that waits on a
+# local model and is slow by nature. Read them as two signals: `contract` going
+# red is a call site reaching past Memory::Store, which is the class #1, #47 and
+# #99 belonged to; `retrieval` going red is usually the runner, not the code.
 on:
   schedule:
     - cron: "20 3 * * *"
@@ -22,10 +28,29 @@ permissions:
 jobs:
   live-contract:
     runs-on: ubuntu-latest
-    # Eight retrieval cases that may each wait out OPENVIKING_PATIENCE, on top
-    # of the pulls and the rest of the suite. The old 120 was chosen when the
-    # window was 420s; a wider window needs room to close.
     timeout-minutes: 180
+
+    # Two halves, because indexing is the cost and only one half pays it.
+    #
+    # A write returns in 0.1s and is listed at once; becoming *findable* is a
+    # further ~99s of local inference (measured, `wait: true`, eight idle
+    # cores). The suite writes ~130 entries, so a single job asks a two-core
+    # runner for something over three core-hours of it — and 126 of those
+    # entries are indexed for nothing, because only eight cases ever search.
+    # Five dispatches failed on the far side of that arithmetic.
+    #
+    # So the retrieval cases run alone, indexing a dozen entries instead of a
+    # hundred and thirty, and everything else runs without waiting on a model
+    # at all. The filters are one pattern and its negation, verified against
+    # local_contract_test.rb to partition it exactly: 7 + 38 = 45.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - half: contract
+            filter: '/^(?!.*(search|question_finds|abstract_is_computed|lineage_sidecar)).*$/'
+          - half: retrieval
+            filter: '/search|question_finds|abstract_is_computed|lineage_sidecar/'
 
     services:
       postgres:
@@ -173,7 +198,7 @@ jobs:
           for i in $(seq 1 10); do
             RESPONSE=$(curl -s -X POST http://127.0.0.1:1933/api/v1/admin/accounts \
               -H "X-API-Key: change-me" -H "Content-Type: application/json" \
-              -d "{\"account_id\":\"ci-${GITHUB_RUN_ID}\",\"admin_user_id\":\"ci\"}") && \
+              -d "{\"account_id\":\"ci-${GITHUB_RUN_ID}-${{ matrix.half }}\",\"admin_user_id\":\"ci\"}") && \
               [ -n "$RESPONSE" ] && break
             sleep 3
           done
@@ -226,7 +251,7 @@ jobs:
           # that is still happening. Kept wide because a shared runner is
           # genuinely slow, not because waiting has ever been the fix.
           OPENVIKING_PATIENCE: "900"
-        run: bin/rails test test/services/memory/
+        run: bin/rails test test/services/memory/ -n '${{ matrix.filter }}'
 
       # The store's own account of the run, kept only when something went
       # wrong. Three dispatches were spent inferring what the store was doing
@@ -242,6 +267,6 @@ jobs:
         if: always()
         working-directory: .
         run: |
-          curl -s -X DELETE "http://127.0.0.1:1933/api/v1/admin/accounts/ci-${GITHUB_RUN_ID}" \
+          curl -s -X DELETE "http://127.0.0.1:1933/api/v1/admin/accounts/ci-${GITHUB_RUN_ID}-${{ matrix.half }}" \
             -H "X-API-Key: change-me" || true
           docker compose --profile memory down -v || true
